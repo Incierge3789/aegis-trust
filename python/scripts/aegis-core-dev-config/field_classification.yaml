@@ -1,0 +1,57 @@
+# Aegis Field Sensitivity Classification
+# Layer 1 of the 3-layer access control model.
+#
+# Each field is assigned a sensitivity level. Unclassified fields are denied
+# by default (Aegis philosophy: unknown = deny).
+#
+# Sensitivity levels (least → most sensitive):
+#   public       — Publicly visible (name, status)
+#   operational  — Business operations data (order_id, ticket)
+#   pii          — Personally Identifiable Information (email, phone)
+#   financial    — Financial data (card, bank_account)
+#   confidential — Internal only (salary, internal_note)
+#   critical     — Highest sensitivity (SSN, passwords, crypto keys)
+#
+# Customize this file for your data schema.
+# Reload via: PUT /api/v1/classification or POST /api/v1/classification/reload
+
+classification:
+  public:
+    - name
+    - status
+    - category
+    - company_name
+    - product_name
+    - created_at
+    - updated_at
+  operational:
+    - order_id
+    - ticket_number
+    - issue
+    - priority
+    - assigned_to
+  pii:
+    - email
+    - contact_phone
+    - contact_name
+    - address
+    - date_of_birth
+  financial:
+    - card_number
+    - bank_account
+    - invoice_amount
+    - payment_status
+    - billing_address
+  confidential:
+    - salary
+    - internal_note
+    - performance_review
+    - contract_terms
+  critical:
+    - ssn
+    - password_hash
+    - api_key
+    - encryption_key
+    - tax_id
+
+default_unclassified: deny

@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aegis-trust"
+version = "0.9.0-rc2"
+description = "AI agent data access control — control what agents can see"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "Incierge Inc.", email = "contact@aegisagentcontrol.com" },
+]
+keywords = [
+    "ai",
+    "agent",
+    "security",
+    "privacy",
+    "trust",
+    "scope",
+    "purpose",
+    "mcp",
+    "data-access",
+    "field-level",
+    "decorator",
+    "minimum-disclosure",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Framework :: Pytest",
+    "Typing :: Typed",
+]
+dependencies = [
+    "httpx>=0.23,<1.0",
+    "attrs>=22.2,<27.0",
+]
+
+[project.scripts]
+aegis = "aegis_trust.cli:cli_entry"
+
+# Project URLs intentionally omitted.
+# Aegis is a proprietary platform; source is not publicly available.
+# For commercial inquiries: contact@aegisagentcontrol.com
+# For patent licensing: contact@aegisagentcontrol.com
+
+[project.optional-dependencies]
+yaml = [
+    "pyyaml>=6.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.4",
+    "pyyaml>=6.0",
+    "pip-audit>=2.7",
+]
+
+[project.entry-points."pytest11"]
+aegis = "aegis_trust.pytest_plugin"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests that require external services or long-running CI scripts",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aegis_trust"]
+force-include = { "llms.txt" = "aegis_trust/llms.txt" }
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/llms.txt",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/AGENTS.md",
+    "/SECURITY.md",
+    "/pyproject.toml",
+    "/VERSION",
+]

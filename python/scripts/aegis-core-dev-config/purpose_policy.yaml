@@ -1,0 +1,31 @@
+# Aegis Purpose Policy
+# Layer 2 of the 3-layer access control model.
+#
+# Each purpose defines the maximum sensitivity level it may access.
+# Fields with higher sensitivity than max_level are automatically blocked.
+#
+# Combined with field_classification.yaml (Layer 1):
+#   allowed_fields = { f | classification(f) <= max_level(purpose) }
+#
+# Customize this file for your access patterns.
+# Reload via: PUT /api/v1/purpose-policy or POST /api/v1/classification/reload
+
+policies:
+  customer_support:
+    max_level: pii
+    description: "Customer support — access up to PII level"
+  customer_contact:
+    max_level: pii
+    description: "Customer contact lookup (phone, email)"
+  read_minimized:
+    max_level: pii
+    description: "Minimized data read via jsonpath"
+  analytics:
+    max_level: operational
+    description: "Analytics and reporting — no PII"
+  billing:
+    max_level: financial
+    description: "Billing operations — access financial data"
+  admin:
+    max_level: critical
+    description: "System administrator — full access"

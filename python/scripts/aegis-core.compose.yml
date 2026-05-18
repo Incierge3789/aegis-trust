@@ -1,0 +1,75 @@
+# Development-only compose spec to run aegis-core for Tier β integration.
+# Lives here because aegis-core upstream does not yet ship one; retire
+# this file once it does.
+#
+# T-159 (S024): build logic has been removed from this file — the image
+# is produced (or reused) by scripts/aegis-core-dev.sh, which tags it as
+# `aegis-core-dev:latest` after a content-addressed SHA cache check.
+# Keeping build state in one place avoids split-brain behaviour between
+# the CLI wrapper and compose.
+#
+# Usage:
+#   scripts/aegis-core-dev.sh up     # builds on cache miss, else reuses
+#   scripts/aegis-core-dev.sh down
+
+services:
+  aegis-core:
+    image: aegis-core-dev:latest
+    container_name: aegis-core-dev
+    ports:
+      - "8443:8443"
+    environment:
+      RUST_LOG: ${AEGIS_CORE_LOG_LEVEL:-info}
+      # The Dockerfile creates /opt/aegis via `aegis-gateway init` with
+      # audit/ capsules/ certs/ config/ run/ workspace/ subdirs. These
+      # envs point at that layout.
+      # AO-004: audit path must be writable, otherwise aegis-gateway
+      # refuses to start.
+      AEGIS_GATEWAY_AUDIT_PATH: /opt/aegis/audit/audit.jsonl
+      AEGIS_CAPSULE_ROOT: /opt/aegis/capsules
+      AEGIS_WORKSPACE_ROOT: /opt/aegis/workspace
+      # AEGIS_CONFIG_PATH is a DIRECTORY; the gateway loads
+      # {purpose_map,policy,rbac}.yaml from it. The production image's
+      # `aegis-gateway init` does not yet emit those files, so the
+      # aegis-shield β fixture supplies them via volume mount.
+      AEGIS_CONFIG_PATH: /opt/aegis/dev-config
+      # TLS: the image's init step generated self-signed certs at
+      # /opt/aegis/certs/. Turn TLS on explicitly for β integration.
+      AEGIS_TLS_ENABLED: "true"
+      AEGIS_TLS_REQUIRED: "true"
+      AEGIS_TLS_CERT: /opt/aegis/certs/server.crt
+      AEGIS_TLS_KEY: /opt/aegis/certs/server.key
+      # Dashboard legacy unix socket — aegis-shield never connects to it,
+      # but aegis-gateway panics on missing AEGIS_SOCKET_PATH during
+      # startup. Point it at a scratch file inside the writable run dir.
+      AEGIS_SOCKET_PATH: /opt/aegis/run/aegis.sock
+      # Dev: accept traffic from the docker bridge network and from the
+      # host loopback that published the port. Production overrides this
+      # with a tenant-specific allowlist.
+      # Docker Desktop on macOS uses 192.168.x.x for the compose network
+      # bridge; other runtimes use 172.16/12. Include both along with
+      # loopback so the β tests pass regardless of host docker flavour.
+      AEGIS_IP_ALLOWLIST: "127.0.0.1/32,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8,::1/128"
+      # Dev self-signed certs only — disable client cert enforcement so
+      # β tests can use plain https without issuing dev client certs.
+      AEGIS_MTLS_REQUIRED: "false"
+      # Dev: publish /api-docs/openapi.json and /metrics without auth so
+      # β tests can run `make generate-sdk` against a running gateway
+      # without first issuing a token. Production defaults to auth on.
+      AEGIS_SWAGGER_AUTH: "false"
+      AEGIS_METRICS_AUTH: "false"
+      # Dev: the production default (60/min, burst 10) trips under the
+      # local ci-matrix which runs the full suite 4× back-to-back. Widen
+      # so repeated test runs do not hit 429s from the health probe.
+      AEGIS_RATE_LIMIT_PER_MIN: "6000"
+      AEGIS_RATE_BURST: "600"
+    volumes:
+      # Bind-mounts the dev fixture read-only so β tests always see the
+      # same minimal config shape (purpose_map / policy / rbac).
+      - ./aegis-core-dev-config:/opt/aegis/dev-config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-skf", "https://localhost:8443/api/v1/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+    restart: unless-stopped

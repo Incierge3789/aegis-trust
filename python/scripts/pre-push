@@ -1,0 +1,69 @@
+#!/bin/bash
+# aegis-shield pre-push quality gate
+# Runs local CI-equivalent checks before pushing to protect the remote.
+# Bypass (CI escape hatch only): AEGIS_SKIP_QUALITY_GATE=1 git push
+#
+# PATH 非依存設計 (T-169, S024):
+#   ruff / pytest / pip-audit は `./.venv/bin/` 直呼び。
+#   開発者の shell が .venv を activate していなくても通る。
+#   `.venv` 不在時は明示 error (silent skip 禁止、AO-004)。
+#
+# Note: ruff は `python -m ruff` をサポートしないため、
+# `.venv/bin/ruff` を直接呼び出す。
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+VENV="$REPO_ROOT/.venv"
+
+if [ "${AEGIS_SKIP_QUALITY_GATE:-0}" = "1" ]; then
+    echo "[quality-gate] SKIPPED (AEGIS_SKIP_QUALITY_GATE=1)"
+    exit 0
+fi
+
+if [ ! -d "$VENV" ]; then
+    cat >&2 <<EOF
+[quality-gate] ERROR: $VENV not found.
+
+pre-push quality gate needs a project-local virtualenv at .venv/.
+Create it with:
+
+    python3.12 -m venv .venv
+    .venv/bin/pip install -e ".[dev]"
+
+Or bypass the gate (CI escape hatch only):
+
+    AEGIS_SKIP_QUALITY_GATE=1 git push
+EOF
+    exit 1
+fi
+
+RUFF="$VENV/bin/ruff"
+PYTEST="$VENV/bin/pytest"
+PIP_AUDIT="$VENV/bin/pip-audit"
+
+for tool in "$RUFF" "$PYTEST" "$PIP_AUDIT"; do
+    if [ ! -x "$tool" ]; then
+        echo "[quality-gate] ERROR: $tool not installed. Run .venv/bin/pip install -e \".[dev]\"" >&2
+        exit 1
+    fi
+done
+
+echo "=== aegis-shield quality gate ==="
+
+echo "[1/4] ruff check..."
+"$RUFF" check src/ tests/
+
+echo "[2/4] ruff format --check..."
+"$RUFF" format --check src/ tests/
+
+echo "[3/4] pytest (AEGIS_MODE=lite)..."
+AEGIS_MODE=lite "$PYTEST" tests/ -q --tb=line
+
+echo "[4/4] pip-audit..."
+if ! "$PIP_AUDIT" 2>&1; then
+    echo "[quality-gate] pip-audit failed — vulnerability detected" >&2
+    exit 1
+fi
+
+echo "=== quality gate PASSED ==="

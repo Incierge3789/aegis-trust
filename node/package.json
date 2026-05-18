@@ -1,0 +1,69 @@
+{
+  "name": "aegis-trust",
+  "version": "0.9.0-rc2",
+  "description": "AI agent data access control \u2014 control what agents can see. TypeScript port of aegis-trust PyPI (literal name parity).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "aegis": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "docs",
+    "README.md",
+    "AGENTS.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "security",
+    "privacy",
+    "trust",
+    "scope",
+    "purpose",
+    "mcp",
+    "data-access",
+    "field-level",
+    "decorator",
+    "minimum-disclosure"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {},
+  "optionalDependencies": {
+    "yaml": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "yaml": "^2.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/private-backend-repo",
+    "directory": "sdk/node-trust"
+  },
+  "author": "Incierge Inc. <contact@aegisagentcontrol.com>"
+}
