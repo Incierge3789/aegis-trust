@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+dist/
+build/
+.venv/
+venv/
+.ci-venv/
+.ci-venv-audit/
+.release-venv/
+
+# Node
+node_modules/
+*.tgz
+coverage/
+.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Aegis runtime
+aegis-sandbox-audit.jsonl
+*.jsonl.tmp
+
+# Secrets (defense in depth)
+.env
+.env.local
+.pypirc
+.npmrc

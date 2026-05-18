@@ -1,0 +1,48 @@
+# aegis-trust
+
+> The trust layer for AI agents — control what data agents can see, based on declared purpose.
+
+aegis-trust is a Python SDK that filters what AI agents see when calling your data-fetching functions. One decorator declares the purpose; the SDK enforces field-level access control. Local-first, no infrastructure required, no telemetry.
+
+## Quick Start
+
+```
+pip install aegis-trust
+```
+
+```python
+from aegis_trust import shield
+
+@shield(purpose="customer_support", scope=["name", "issue"])
+def get_customer(id: int) -> dict:
+    return db.get(id)
+
+# Agent sees only {"name": ..., "issue": ...}
+```
+
+## Key Concepts
+
+- purpose: Why the agent needs this data (e.g. "customer_support", "billing")
+- scope: Whitelist of fields the agent is allowed to see
+- deny_fields: Blacklist alternative — hide listed fields, keep the rest
+- Dot-notation: `scope=["name", "profile.age"]` for nested paths
+- aegis.yaml: Centralize policies in a single config file (optional, requires `aegis-trust[yaml]`)
+- pytest plugin: `shield_history` fixture for testing filter behavior in your test suite
+
+## Use Cases
+
+- AI customer support: the agent sees ticket text, never PII
+- LLM tool calling (MCP / FastMCP): wrap `@mcp.tool()` functions with `@shield`
+- Billing / finance agents: `scope=["plan", "status"]` or `deny_fields=["card", "ssn"]`
+- Compliance: declared purpose produces an evidence trail of what each agent was permitted to see
+
+## Optional Extras
+
+- `pip install aegis-trust[yaml]` — enable `aegis.yaml` policy file support
+- For production deployments with enterprise controls and platform-managed policy orchestration, email contact@aegisagentcontrol.com
+
+## Links
+
+- PyPI: https://pypi.org/project/aegis-trust/
+- Security: contact@aegisagentcontrol.com
+- Sales: contact@aegisagentcontrol.com

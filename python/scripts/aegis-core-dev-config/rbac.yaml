@@ -1,0 +1,4 @@
+# Dev fixture: single Admin role for β integration tests.
+# Production deployments define their own role catalog.
+roles:
+  test_admin: Admin

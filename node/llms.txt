@@ -1,0 +1,51 @@
+# @aegis_trust/sdk
+
+> The trust layer for AI agents — control what data agents can see, based on declared purpose. TypeScript / Node port of aegis-trust (PyPI).
+
+@aegis_trust/sdk is a TypeScript / Node.js SDK that filters what AI agents see when calling your data-fetching functions. One wrapper declares the purpose; the SDK enforces field-level access control. Local-first, no infrastructure required, no telemetry.
+
+## Quick Start
+
+```
+npm install @aegis_trust/sdk
+```
+
+```typescript
+import { shield } from "@aegis_trust/sdk";
+
+const getCustomer = shield({
+  purpose: "customer_support",
+  scope: ["name", "issue"],
+})((id: number) => db.get(id));
+
+// Agent sees only { name: ..., issue: ... }
+```
+
+## Key Concepts
+
+- purpose: Why the agent needs this data (e.g. "customer_support", "billing")
+- scope: Whitelist of fields the agent is allowed to see
+- denyFields: Blacklist alternative — hide listed fields, keep the rest
+- Dot-notation: scope: ["name", "profile.age"] for nested paths
+- aegis.yaml: Centralize policies in a single config file (optional, requires `npm install yaml`)
+- Vitest helpers: useShieldHistory, assertShieldBlocked, assertShieldPassed for testing
+- Mode.LITE / FULL / AUTO: in-process filter / full audit chain (via aegis-core) / auto-detect
+
+## Use Cases
+
+- AI customer support: the agent sees ticket text, never PII
+- LLM tool calling (MCP / FastMCP / Vercel AI SDK): wrap tool functions with `shield(...)`
+- Billing / finance agents: `scope: ["plan", "status"]` or `denyFields: ["card", "ssn"]`
+- Compliance: declared purpose produces an audit trail of what each agent was permitted to see
+
+## Optional Extras
+
+- `npm install yaml` — enable aegis.yaml policy file support
+- For production deployments with enterprise controls and platform-managed policy orchestration, email contact@aegisagentcontrol.com
+
+## Links
+
+- npm: https://www.npmjs.com/package/@aegis_trust/sdk
+- PyPI (Python equivalent): https://pypi.org/project/aegis-trust/
+- Security: contact@aegisagentcontrol.com
+- Sales: contact@aegisagentcontrol.com

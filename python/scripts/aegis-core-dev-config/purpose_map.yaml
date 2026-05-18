@@ -1,0 +1,5 @@
+# Dev fixture: empty purpose map, loaded by aegis-gateway on startup.
+# Required by handler::load_gateway_config (see aegis-core
+# aegis_gateway/tests/rest_integration_test.rs:ensure_config).
+# Real deployments populate this from their purpose catalog.
+purposes: {}

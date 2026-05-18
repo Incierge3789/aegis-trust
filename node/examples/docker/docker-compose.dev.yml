@@ -1,0 +1,32 @@
+# aegis-trust dev quickstart — local-only, dummy data, no TLS, no telemetry.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+#   curl http://localhost:8080/demo/agent-request | jq
+#   curl http://localhost:8080/demo/audit
+#   docker compose -f docker-compose.dev.yml down -v
+
+services:
+  aegis-demo:
+    build: .
+    image: aegis-trust-demo-node:0.8.1
+    container_name: aegis-trust-demo-node
+    ports:
+      - "127.0.0.1:8080:8080"   # localhost-only, no external exposure
+    environment:
+      PORT: "8080"
+      AEGIS_AUDIT_PATH: /data/audit.jsonl
+    volumes:
+      - aegis-audit:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  aegis-audit:
+    driver: local
