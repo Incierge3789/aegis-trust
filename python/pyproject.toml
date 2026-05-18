@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aegis-trust"
-version = "0.9.0-rc2"
+version = "0.9.0-rc3"
 description = "AI agent data access control — control what agents can see"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -50,10 +50,15 @@ dependencies = [
 [project.scripts]
 aegis = "aegis_trust.cli:cli_entry"
 
-# Project URLs intentionally omitted.
-# Aegis is a proprietary platform; source is not publicly available.
-# For commercial inquiries: contact@aegisagentcontrol.com
-# For patent licensing: contact@aegisagentcontrol.com
+[project.urls]
+Homepage = "https://github.com/Incierge3789/aegis-trust"
+Repository = "https://github.com/Incierge3789/aegis-trust"
+Documentation = "https://github.com/Incierge3789/aegis-trust#readme"
+Issues = "https://github.com/Incierge3789/aegis-trust/issues"
+Changelog = "https://github.com/Incierge3789/aegis-trust/blob/main/python/CHANGELOG.md"
+
+# Commercial inquiries: contact@aegisagentcontrol.com
+# Patent licensing: contact@aegisagentcontrol.com
 
 [project.optional-dependencies]
 yaml = [
