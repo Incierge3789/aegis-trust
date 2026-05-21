@@ -96,6 +96,14 @@ jobs:
         working-directory: python
         run: uv run ruff format --check src/ tests/
 
+      - name: Install opentimestamps-client (integration-test runtime dep)
+        # `python/tests/test_ots_verify_external.py` invokes
+        # `scripts/ots-verify-external.sh`, which requires the `ots` binary
+        # from opentimestamps-client. Not in `pyproject.toml` because it is
+        # a CI-runtime tool, not an SDK runtime dep. Local dev macOS users
+        # typically get it via Homebrew (`brew install opentimestamps-client`).
+        run: pip install opentimestamps-client
+
       - name: pytest
         working-directory: python
         run: uv run pytest tests/ -v --tb=short
