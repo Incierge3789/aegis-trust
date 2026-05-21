@@ -74,6 +74,13 @@ export {
   resetModuleClient,
   isDevHost,
   resolveVerifySsl,
+  // userIntendsFull is the rc4-level intent heuristic (parity with PyPI
+  // `_user_intends_full`). Re-exported in the barrel so the rc4 CHANGELOG
+  // Migration recipe ("callers that import userIntendsFull directly from
+  // aegis-trust") resolves against the public package surface. Without
+  // this re-export, the Migration story is non-functional for npm
+  // consumers (codex iter-1 cross-review P1 closure).
+  userIntendsFull,
 } from "./client.js";
 
 // Config (YAML loader, parity with aegis.config).

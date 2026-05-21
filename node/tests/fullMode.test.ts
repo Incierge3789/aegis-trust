@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   Mode,
+  detectMode,
   resetModuleClient,
   shield,
 } from "../src/index.js";
@@ -177,6 +178,9 @@ describe("Mode.AUTO — detect mode", () => {
       mode: Mode.AUTO,
     })(async (_: unknown) => ({ name: "A", ssn: "X" }));
     const result = await getUser(1);
+    // Wait for fire-and-forget ingest attempt to land in `calls` (it will
+    // throw because fetch is mocked to throw, but the attempt is observable).
+    await new Promise((r) => setTimeout(r, 30));
     // Scope filter still applies: `ssn` (out of scope) is dropped.
     expect(result).not.toHaveProperty("ssn");
     // Exactly one fail-closed FULL escalation warning fired.
@@ -184,9 +188,19 @@ describe("Mode.AUTO — detect mode", () => {
       String(args[0]).includes("unreachable"),
     );
     expect(failClosedWarns.length).toBeGreaterThanOrEqual(1);
-    // Full mode was set (not silently degraded to LITE) — verified by the
-    // /health probe attempt + at least one /shield/ingest attempt against
-    // the unreachable backend.
+    // FULL-vs-LITE witness #1: detectMode() resolves to "full" (codex +
+    // cursor iter-1 consensus P1 — the test must distinguish FULL from
+    // LITE because scope filter + /health probe + warn could all match
+    // a silent LITE degrade. The /shield/ingest attempt is the operative
+    // behavioural witness because LITE never calls ingest).
+    const mode = await detectMode();
+    expect(mode).toBe("full");
+    // FULL-vs-LITE witness #2: at least one /shield/ingest attempt was
+    // made against the unreachable backend (LITE would never attempt
+    // ingest; only FULL does). This makes the test fail when a
+    // regression silently flips AUTO+intent+unreachable back to LITE.
+    expect(calls.some((c) => c.url.includes("/shield/ingest"))).toBe(true);
+    // Full mode probe-first also fired the /health request.
     expect(calls.some((c) => c.url.includes("/health"))).toBe(true);
   });
 });
