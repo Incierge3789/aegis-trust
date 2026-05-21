@@ -27,7 +27,7 @@ const u = await safeFetch("C-001"); // agent only ever sees { name, issue }
 
 - **Python**: `aegis-trust@0.9.0rc5` on PyPI (pre-GA preview, `STABILITY_LEVEL = "preview"`). v1.0.0 GA pending 5-oracle readability review + verifier coverage uplift.
 - **TypeScript**: `aegis-trust@0.9.0-rc5` on npm (same status). npm `latest` tag currently still points to `0.9.0-rc3`; install with `@rc` or pin `@0.9.0-rc5` to get the current preview.
-- **License**: MIT (see [`python/LICENSE`](python/LICENSE) + [`node/LICENSE`](node/LICENSE)).
+- **License**: MIT (see [`LICENSE`](LICENSE); `python/LICENSE` is identical, byte-for-byte).
 - **API versioning**: `Aegis-Api-Version: 2026-05-18` (dated header).
 - **Not production-ready, not GA, not enterprise-ready.** This is an Alpha preview. SLA: none. Production use is at your own risk.
 
@@ -41,7 +41,7 @@ Honest list of what does NOT work in `0.9.0-rc5`. We list these here so a real e
 - **Audit storage format differs by SDK.** Python writes SQLite (`~/.aegis/history.db`); Node writes JSONL (`~/.aegis/history.jsonl`). Both are hash-linked, but inspecting them currently requires separate tooling per language.
 - **No top-level CI yet.** The monorepo root does not have `.github/workflows/`; a PR opened against this repo does not run automated tests on merge today. Top-level CI provisioning is in progress.
 - **PyPI `latest` is `0.8.1` (the pre-rename package state).** A bare `pip install aegis-trust` returns rc-era-old code, not rc5. Use the explicit pin in the install command above.
-- **Some referenced docs are stubs or not yet written** (e.g. `docs/errors/README.md` is referenced from error envelopes but does not yet exist). Use the `code` field on `AegisError` as the authoritative identifier in the meantime.
+- **Error-code reference page is hosted, not in-repo.** Error envelopes carry `docs_url: https://aegis-trust.dev/errors/<code>` (per [`python/src/aegis_trust/errors.py`](python/src/aegis_trust/errors.py) + [`node/src/errors.ts`](node/src/errors.ts)). The hosted page is the authoritative registry; the in-repo file [`node/docs/errors/README.md`](node/docs/errors/README.md) is a partial mirror. Use the `code` field on `AegisError` as the stable identifier; the Web URL may be empty for some codes during preview.
 
 If any of the above is a blocker for your use case, wait for v1.0 GA rather than adopting rc5.
 
@@ -54,7 +54,7 @@ The table below lists what has a working example file in this repo and what is e
 | Model Context Protocol (MCP) | Node | [`node/examples/mcpTool.ts`](node/examples/mcpTool.ts), [`node/examples/mcpEndToEnd.ts`](node/examples/mcpEndToEnd.ts) | [`node/tests/mcp/run_end_to_end.mjs`](node/tests/mcp/run_end_to_end.mjs) |
 | LangChain.js | Node | [`node/examples/langchainExample.ts`](node/examples/langchainExample.ts) | optional dependency; example falls back when `@langchain/openai` is not installed |
 | CrewAI (Node port) | Node | [`node/examples/crewaiExample.ts`](node/examples/crewaiExample.ts) | optional dependency; example falls back when `crewai` is not installed |
-| FastAPI / FastMCP | Python | recipes in [`python/README.md`](python/README.md) | covered by `python/tests/` |
+| FastAPI / FastMCP | Python | recipes in [`python/README.md`](python/README.md) | underlying `shield()` covered by `python/tests/`; no dedicated FastAPI / FastMCP integration test yet |
 | Generic async / deny-fields / multi-purpose / dot-notation / sandbox / crypto-wallet | Node | [`node/examples/`](node/examples/) | per-example |
 
 Integrations that are **not yet runnable as dedicated adapters in this repo** (use the drop-in wrapper instead):
