@@ -275,6 +275,35 @@ aegis history       # show recent calls
 aegis stats         # aggregate by purpose / blocked field
 ```
 
+### Mode (LITE / FULL / AUTO)
+
+| Mode | Behaviour | Requires |
+|---|---|---|
+| `LITE` | In-process filter only. Deterministic, no I/O. | nothing |
+| `FULL` | Filter + audit chain ingest + central policy sync via aegis-core. | aegis-core running + `AEGIS_TOKEN` |
+| `AUTO` | Probe-first detection. See AUTO behaviour matrix below. | nothing |
+
+### AUTO behaviour matrix (rc4+)
+
+`AEGIS_MODE=auto` (the default) probes the backend FIRST (re-probe TTL = 60 s) and consults the Full-intent heuristic only when the probe fails. Behaviour:
+
+- `AEGIS_MODE=lite` → Lite.
+- `AEGIS_MODE=full` → Full (calls fail-closed at the gateway until the backend recovers).
+- `AEGIS_MODE=auto` + no Full intent (no `AEGIS_TOKEN` AND no non-dev URL) → Lite.
+- `AEGIS_MODE=auto` + Full intent + reachable backend → Full (opportunistic upgrade).
+- `AEGIS_MODE=auto` + Full intent + **unreachable backend** → **fail-closed Full** + one `logger.warning`. Silent LITE degrade is suppressed because it would skip the user-visible warning and provide weaker semantics than the user asked for.
+
+### Full mode env vars
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AEGIS_URL` | `https://localhost:8443/api/v1` | aegis-core REST endpoint (rc4+ **canonical**; parity with npm). |
+| `AEGIS_BASE_URL` | — | npm-parity deprecation alias for `AEGIS_URL`. Read only when `AEGIS_URL` is unset; emits one `logger.warning` per process the first time it is read (re-armed by `reset()`). **Removed in v1.0.0.** |
+| `AEGIS_TOKEN` | (empty) | Bearer token for auth |
+| `AEGIS_MODE` | `auto` | Override mode detection (`full` / `lite`) — see matrix above. |
+| `AEGIS_HISTORY` | (unset) | `1` to enable local audit log (`~/.aegis/history.db`). |
+| `AEGIS_HISTORY_PATH` | `~/.aegis/history.db` | Local audit file. |
+
 ---
 
 ## Migration from `aegis-shield`
