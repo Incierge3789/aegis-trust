@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased] — CLI bin-shim silent-exit fix (no version bump yet)
+
+**Bug fix, no API surface change. Will land in the next release cut (no publish in this PR).**
+
+### Fixed
+
+- **CLI bin-shim silent-exit** (`src/cli.ts`): every `aegis` subcommand invoked through the npm bin shim (`node_modules/.bin/aegis`, including the `npx aegis ...` path that goes through it) silently exited with 0 bytes on both stdout and stderr and exit code 0. Root cause: the ESM "is main module" check compared `basename(process.argv[1])` (`"aegis"` under the bin shim) against the end of `import.meta.url` (`"cli.js"`); the two never matched, so `main()` was never called. Fixed by canonicalising both sides with `realpathSync(fileURLToPath(import.meta.url))` vs `realpathSync(process.argv[1])`. Customers who ran `npm install aegis-trust && npx aegis sandbox` on rc3 / rc4 / rc5 observed zero output and no error message. The next release cut ships the fix. Direct invocation (`node path/to/dist/cli.js sandbox`) was unaffected.
+- Regression test added: `tests/cli_bin_invocation.test.ts` spawns the compiled `dist/cli.js` through a symlink in a temp directory (the same shape npm creates at install time) and asserts non-empty stdout + correct exit codes for `--help`, `sandbox`, `history`, `stats`, no-arg, and unknown-command invocations.
+
+### Refs
+
+- T-S179-cli-bin-shim (`productization-ops/sprint_006` Tier 0)
+- Codex Operational Scenario Review finding #2 (2026-05-21)
+- Memory `feedback_test_honesty.md`: fail-silent violates 米軍規格
+
 ## [0.9.0-rc5] — 2026-05-21 — cross-SDK version-lock (PyPI rc5 parity, no functional change)
 
 `productization-ops/sprint_006` Tier 0 follow-up. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). **Functional content identical to v0.9.0-rc4.**
