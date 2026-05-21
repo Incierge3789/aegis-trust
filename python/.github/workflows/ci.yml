@@ -12,14 +12,29 @@ name: CI
 #
 # If a future contributor copies this file to `<repo-root>/.github/
 # workflows/ci.yml` (or runs `git mv python/.github .github`):
-#   - The `on: push` block below would IMMEDIATELY start triggering CI
-#     on every push to main / sprint/** / hotfix/** / task/** branches.
-#   - Self-hosted runner with label `aegis-shield` (line ~25 below) would
-#     receive jobs that may not match available runners in this repo.
+#   - **Push triggers** (`on: push` block below, ~L36): would IMMEDIATELY
+#     start triggering CI on every push to main / sprint/** /
+#     hotfix/** / task/** branches. No manual gate.
+#   - **Self-hosted runner label** (`runs-on: [..., aegis-shield]`,
+#     ~L45): jobs queue against a runner pool that does not exist in
+#     this repo's GitHub Runners config (label was authored for the
+#     aegis-shield repo). Without re-labeling, jobs queue indefinitely
+#     or fall through to an unintended runner if a generic label match
+#     exists; either way the trust-boundary intent (jobs only run on
+#     `aegis-shield`-labeled hosts) is silently broken.
+#   - **Secrets exposure**: any GitHub Secrets defined in this monorepo
+#     under Settings → Secrets and variables would become accessible to
+#     workflow runs. The imported ci.yml has no `${{ secrets.* }}`
+#     references TODAY, but `id-token: write` permissions (cosign keyless
+#     OIDC pattern) or future-edit additions could leak ambient secrets
+#     to the self-hosted runner — and the fork-PR defense in the trust-
+#     boundary-check step is push-trigger-dependent, not auto-enforced
+#     for workflow_dispatch or other trigger types.
 #   - The full canonical top-level CI provisioning is tracked separately
 #     as T-006c-1c "top-level CI provisioning" sub-task — that sub-task
-#     will re-author triggers + runner labels for the actual monorepo
-#     context, and is NOT served by promoting this nested file as-is.
+#     will re-author triggers + runner labels + secrets attestation for
+#     the actual monorepo context, and is NOT served by promoting this
+#     nested file as-is.
 #
 # Authorization required for top-level promotion: explicit Giri sign-off
 # + cross-review on the runner-label + triggers + secrets attestation.
