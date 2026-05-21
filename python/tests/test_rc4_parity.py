@@ -18,9 +18,7 @@ import os
 
 import pytest
 
-from aegis_trust import shield
 from aegis_trust.shield import (
-    _detect_mode,
     _is_dev_host,
     _resolve_base_url,
     _user_intends_full,
@@ -67,9 +65,7 @@ def test_resolve_base_url_aegis_base_url_alone_warns_once(
         for _ in range(3):
             url = _resolve_base_url()
             assert url == "https://alias.example.com:8443/api/v1"
-    alias_warns = [
-        r for r in caplog.records if "AEGIS_BASE_URL" in r.getMessage()
-    ]
+    alias_warns = [r for r in caplog.records if "AEGIS_BASE_URL" in r.getMessage()]
     # Exactly one warning across multiple resolutions (re-armed only by reset()).
     assert len(alias_warns) == 1
 
@@ -87,9 +83,7 @@ def test_resolve_base_url_aegis_url_precedence_no_warn(
     with caplog.at_level(logging.WARNING, logger="aegis_trust.shield"):
         url = _resolve_base_url()
     assert url == "https://canonical.example.com:8443/api/v1"
-    alias_warns = [
-        r for r in caplog.records if "AEGIS_BASE_URL" in r.getMessage()
-    ]
+    alias_warns = [r for r in caplog.records if "AEGIS_BASE_URL" in r.getMessage()]
     assert alias_warns == []
 
 
@@ -107,9 +101,7 @@ def test_reset_rearms_deprecation_warning(
         reset()
         _resolve_base_url()
         _resolve_base_url()
-    alias_warns = [
-        r for r in caplog.records if "AEGIS_BASE_URL" in r.getMessage()
-    ]
+    alias_warns = [r for r in caplog.records if "AEGIS_BASE_URL" in r.getMessage()]
     # One warn pre-reset + one warn post-reset = 2 total.
     assert len(alias_warns) == 2
 

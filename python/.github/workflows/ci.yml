@@ -1,0 +1,136 @@
+name: CI
+
+# ════════════════════════════════════════════════════════════════════
+# DO NOT PROMOTE THIS FILE TO TOP-LEVEL `.github/workflows/`.
+# ════════════════════════════════════════════════════════════════════
+#
+# This workflow lives at `python/.github/workflows/ci.yml` to satisfy
+# `tests/adversarial/test_redteam_S018_ci_attack.py` (which reads
+# `.github/workflows/ci.yml` relative to pytest cwd = `python/`).
+# GitHub Actions ONLY reads `.github/workflows/` at the REPO TOP LEVEL,
+# so this nested file is data-only — it does NOT trigger CI.
+#
+# If a future contributor copies this file to `<repo-root>/.github/
+# workflows/ci.yml` (or runs `git mv python/.github .github`):
+#   - **Push triggers** (`on: push` block below, ~L36): would IMMEDIATELY
+#     start triggering CI on every push to main / sprint/** /
+#     hotfix/** / task/** branches. No manual gate.
+#   - **Self-hosted runner label** (`runs-on: [..., aegis-shield]`,
+#     ~L45): jobs queue against a runner pool that does not exist in
+#     this repo's GitHub Runners config (label was authored for the
+#     aegis-shield repo). Without re-labeling, jobs queue indefinitely
+#     or fall through to an unintended runner if a generic label match
+#     exists; either way the trust-boundary intent (jobs only run on
+#     `aegis-shield`-labeled hosts) is silently broken.
+#   - **Secret exposure**: any GitHub-stored credential defined in this
+#     monorepo under Settings → Secrets-and-variables would become
+#     accessible to workflow runs. The imported ci.yml has no GitHub
+#     Actions context references to such credentials TODAY (verified by
+#     the test_ci_no_secrets_in_env adversarial test), but
+#     `id-token: write` permissions (cosign keyless OIDC pattern) or
+#     future-edit additions could leak ambient credentials to the
+#     self-hosted runner — and the fork-PR defense in the trust-
+#     boundary-check step is push-trigger-dependent, not auto-enforced
+#     for workflow_dispatch or other trigger types.
+#   - The full canonical top-level CI provisioning is tracked separately
+#     as T-006c-1c "top-level CI provisioning" sub-task — that sub-task
+#     will re-author triggers + runner labels + secrets attestation for
+#     the actual monorepo context, and is NOT served by promoting this
+#     nested file as-is.
+#
+# Authorization required for top-level promotion: explicit Giri sign-off
+# + cross-review on the runner-label + triggers + secrets attestation.
+# ════════════════════════════════════════════════════════════════════
+
+# Aegis security: only trigger on push (not pull_request).
+# This eliminates the fork-PR-attacks-self-hosted-runner attack vector.
+# PRs from forks are NOT auto-tested — maintainer must push to a branch
+# in this repo to trigger CI.
+on:
+  push:
+    branches: [main, "sprint/**", "hotfix/**", "task/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  test-lint:
+    name: Test & Lint
+    # Self-hosted runner on incierge's Mac (macOS, Apple Silicon).
+    # This avoids GitHub Actions billing entirely.
+    # Setup: see docs/RELEASE.md "Self-hosted runner setup"
+    runs-on: [self-hosted, macOS, ARM64, aegis-shield]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Aegis trust boundary check
+        # Refuse to run on PRs from forks (defense in depth — push trigger
+        # already excludes this, but belt and suspenders for AO-001).
+        run: |
+          if [ "${{ github.event.repository.fork }}" = "true" ]; then
+            echo "ERROR: Refusing to run on fork (Aegis AO-001)"
+            exit 1
+          fi
+          echo "Trust boundary OK: running on canonical repo"
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Python ${{ matrix.python-version }} via uv
+        # Use uv to manage Python versions on the self-hosted runner.
+        # uv must be installed on the runner (one-time setup).
+        run: |
+          uv python install ${{ matrix.python-version }}
+          uv venv --python ${{ matrix.python-version }} .ci-venv
+          echo "$PWD/.ci-venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: uv pip install --python .ci-venv/bin/python -e ".[dev]"
+
+      - name: Lint (ruff check)
+        run: ruff check src/ tests/
+
+      - name: Format check (ruff format)
+        run: ruff format --check src/ tests/
+
+      - name: Test (pytest)
+        env:
+          AEGIS_MODE: lite
+        run: pytest tests/ -v
+
+      - name: Cleanup venv
+        if: always()
+        run: rm -rf .ci-venv
+
+  security:
+    name: Security Audit
+    runs-on: [self-hosted, macOS, ARM64, aegis-shield]
+    steps:
+      - name: Aegis trust boundary check
+        run: |
+          if [ "${{ github.event.repository.fork }}" = "true" ]; then
+            echo "ERROR: Refusing to run on fork (Aegis AO-001)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Python via uv
+        run: |
+          uv python install 3.12
+          uv venv --python 3.12 .ci-venv-audit
+          echo "$PWD/.ci-venv-audit/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: uv pip install --python .ci-venv-audit/bin/python -e ".[dev]" pip-audit
+
+      - name: pip-audit
+        run: pip-audit
+
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh launchd/*.sh
+
+      - name: Cleanup venv
+        if: always()
+        run: rm -rf .ci-venv-audit
