@@ -83,7 +83,10 @@ jobs:
 
       - name: uv sync (dev extras)
         working-directory: python
-        run: uv sync --dev
+        # PEP 621 [project.optional-dependencies].dev → `uv sync --extra dev`.
+        # `uv sync --dev` (PEP 735 [dependency-groups]) is wrong here because
+        # the project uses PEP 621 extras, not PEP 735 groups.
+        run: uv sync --extra dev
 
       - name: ruff check
         working-directory: python
@@ -121,7 +124,14 @@ jobs:
 
       - name: npm ci
         working-directory: node
-        run: npm ci
+        run: |
+          npm ci
+          # Workaround for npm bug #4828: package-lock.json was generated on
+          # a non-Linux-x64 platform (macOS arm64) and omits the platform-
+          # specific Rollup binary required on this runner. `npm ci` does not
+          # backfill missing optional deps. Install it explicitly so vitest /
+          # tsc / vite-driven tooling can find Rollup at run time.
+          npm install --no-save --no-package-lock @rollup/rollup-linux-x64-gnu
 
       - name: Build (regenerates dist/, required by PR #4 bin-shim regression test)
         working-directory: node
@@ -146,10 +156,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      # gitleaks-action v2.x requires GITHUB_TOKEN as an env var to scan PRs.
+      # Block A's adversarial test (`test_redteam_S018_ci_attack.py:200-225`)
+      # bans every `secrets.X` reference including `secrets.GITHUB_TOKEN`. The
+      # token requirement and the test invariant are mutually exclusive, so we
+      # install the gitleaks binary directly with SHA256 verification (supply-
+      # chain integrity preserved without the token dependency).
+      - name: Install gitleaks (SHA256-verified binary)
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
       - name: gitleaks scan
-        uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3  # v2.3.7
-        with:
-          config-path: .gitleaks.toml
+        run: gitleaks detect --redact --no-banner --config .gitleaks.toml
 
   drift-check:
     runs-on: ubuntu-latest
