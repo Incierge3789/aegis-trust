@@ -113,10 +113,39 @@ def _resolve_verify_ssl(base_url: str) -> bool:
     return True
 
 
+_base_url_alias_warned: bool = False
+
+
+def _resolve_base_url() -> str:
+    """Resolve aegis-core REST base URL.
+
+    AEGIS_URL is canonical. AEGIS_BASE_URL is accepted as an npm-parity
+    alias (npm aegis-trust historically read AEGIS_BASE_URL; both SDKs
+    accept both env vars from v0.9.0-rc3 onward, with AEGIS_URL as the
+    canonical name. AEGIS_BASE_URL removed in v1.0.0 per docs/VERSIONING.md
+    deprecation policy.
+    """
+    global _base_url_alias_warned
+    url = os.environ.get("AEGIS_URL", "").strip()
+    if url:
+        return url
+    base = os.environ.get("AEGIS_BASE_URL", "").strip()
+    if base:
+        if not _base_url_alias_warned:
+            _base_url_alias_warned = True
+            logger.warning(
+                "aegis-trust: AEGIS_BASE_URL is accepted as an npm-parity "
+                "alias but AEGIS_URL is canonical. Migrate to AEGIS_URL; "
+                "AEGIS_BASE_URL will be removed in v1.0.0."
+            )
+        return base
+    return "https://localhost:8443/api/v1"
+
+
 def _get_client() -> AegisClient:
     global _client
     if _client is None:
-        base_url = os.environ.get("AEGIS_URL", "https://localhost:8443/api/v1")
+        base_url = _resolve_base_url()
         _client = AegisClient(
             base_url=base_url,
             token=os.environ.get("AEGIS_TOKEN", ""),
@@ -135,15 +164,19 @@ _detected_mode_ts: float = 0.0
 def _user_intends_full() -> bool:
     """Heuristic for "user expects Full mode" under AEGIS_MODE=auto.
 
-    Returns True when AEGIS_TOKEN is set, or AEGIS_URL points at a non-dev
-    host. When True, _detect_mode refuses to silently degrade to Lite on a
-    transient backend outage — Gateway-uniqueness (AO-001) outranks
-    availability. Local hosts (localhost / 127.0.0.1 / ::1 / *.local) are
-    treated as dev regardless of port so dev fixtures keep working.
+    Returns True when AEGIS_TOKEN is set, or AEGIS_URL / AEGIS_BASE_URL
+    points at a non-dev host. When True, _detect_mode refuses to silently
+    degrade to Lite on a transient backend outage — Gateway-uniqueness
+    (AO-001) outranks availability. Local hosts (localhost / 127.0.0.1 /
+    ::1 / *.local) are treated as dev regardless of port so dev fixtures
+    keep working.
     """
     if os.environ.get("AEGIS_TOKEN", "").strip():
         return True
-    url = os.environ.get("AEGIS_URL", "").strip()
+    url = (
+        os.environ.get("AEGIS_URL", "").strip()
+        or os.environ.get("AEGIS_BASE_URL", "").strip()
+    )
     return bool(url) and not _is_dev_host(url)
 
 
@@ -1284,11 +1317,17 @@ def sync_policies(policies: dict[str, PolicySyncEntry]) -> None:
 
 
 def reset() -> None:
-    """Reset cached client and mode detection. Useful for testing."""
-    global _client, _detected_mode, _detected_mode_ts
+    """Reset cached client, mode detection, and deprecation-warning state.
+
+    Useful for testing. Mirrors npm ``resetModuleClient()`` (which also
+    re-arms the AEGIS_BASE_URL deprecation warning) so test fixtures
+    behave identically across both SDKs.
+    """
+    global _client, _detected_mode, _detected_mode_ts, _base_url_alias_warned
     _client = None
     _detected_mode = None
     _detected_mode_ts = 0.0
+    _base_url_alias_warned = False
 
 
 def refresh_token() -> None:

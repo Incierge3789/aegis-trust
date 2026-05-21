@@ -64,7 +64,9 @@ def get_trace_context() -> TraceContext | None:
 
 
 @contextmanager
-def trace_context(trace_id: str, parent_id: str | None = None) -> Iterator[TraceContext]:
+def trace_context(
+    trace_id: str, parent_id: str | None = None
+) -> Iterator[TraceContext]:
     """Context manager — set ambient trace_id for the duration of the ``with`` block.
 
     Usage::
