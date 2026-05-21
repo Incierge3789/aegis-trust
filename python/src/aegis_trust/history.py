@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS shield_history (
 
 # v0.9.0-rc1: ALTER TABLE for existing v0.8.x databases (idempotent).
 _MIGRATE_ADD_TRACE_ID = "ALTER TABLE shield_history ADD COLUMN trace_id TEXT"
-_MIGRATE_ADD_IDEMPOTENCY_KEY = "ALTER TABLE shield_history ADD COLUMN idempotency_key TEXT"
+_MIGRATE_ADD_IDEMPOTENCY_KEY = (
+    "ALTER TABLE shield_history ADD COLUMN idempotency_key TEXT"
+)
 
 _INSERT = """
 INSERT INTO shield_history (function, purpose, scope, deny_fields, blocked_fields, timestamp, mode, trace_id, idempotency_key)
@@ -110,7 +112,14 @@ def _payload_hash(
 ) -> str:
     """Canonical SHA256 over idempotency-significant fields (D-952 P0-2 parity with TS)."""
     canonical = json.dumps(
-        [function, purpose, sorted(scope), sorted(deny_fields), sorted(blocked_fields), mode],
+        [
+            function,
+            purpose,
+            sorted(scope),
+            sorted(deny_fields),
+            sorted(blocked_fields),
+            mode,
+        ],
         sort_keys=False,
         separators=(",", ":"),
     )
@@ -228,7 +237,9 @@ class HistoryStore:
                         "rotate the key for the new payload, or fix the caller so retries "
                         "pass the same args."
                     ),
-                    docs_url=aegis_docs_url("aegis.audit.idempotencyKey.payloadDivergence"),
+                    docs_url=aegis_docs_url(
+                        "aegis.audit.idempotencyKey.payloadDivergence"
+                    ),
                 )
             return {"wrote": False, "idempotency_key": idempotency_key}
         # New key — append.

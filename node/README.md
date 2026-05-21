@@ -15,7 +15,7 @@ Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffi
 
 - **30-second understanding**: `shield({ purpose, scope })(fn)` returns `fn` with the same signature; the return value is filtered to `scope`, blocked fields are audited, and a `trace_id` from `withTraceContext()` is propagated end-to-end.
 - **TypeScript port** of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same semantics, same fail-closed guarantees, same audit chain.
-- **Pre-GA**: v0.9.0-rc1 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk.
+- **Pre-GA**: v0.9.0-rc5 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk.
 
 ```bash
 npm install aegis-trust@rc
@@ -31,8 +31,8 @@ npx aegis sandbox
 …or with Docker:
 
 ```bash
-git clone https://github.com/Incierge3789/aegis_core
-cd aegis_core/sdk/node-trust/examples/docker
+git clone https://github.com/Incierge3789/aegis-trust
+cd aegis-trust/node/examples/docker
 docker compose -f docker-compose.dev.yml up --build
 # In another shell:
 curl -s http://localhost:8080/demo/agent-request | jq
@@ -204,17 +204,28 @@ shield({ purpose: "lookup", scope: ["name"] })(
 |---|---|---|
 | `LITE` | In-process filter only. Deterministic, no I/O. | nothing |
 | `FULL` | Filter + audit chain ingest + central policy sync via aegis-core. | aegis-core running + `AEGIS_TOKEN` |
-| `AUTO` | Detect: `FULL` if `AEGIS_TOKEN` set & backend reachable, else `LITE`. | nothing |
+| `AUTO` | Probe-first detection. See [AUTO behaviour matrix](#auto-behaviour-matrix-rc4) below. | nothing |
+
+### AUTO behaviour matrix (rc4+)
+
+`Mode.AUTO` probes the backend FIRST (parity with PyPI `aegis-trust`, re-probe TTL = 60 s) and consults the Full-intent heuristic only when the probe fails. Behaviour:
+
+- `AEGIS_MODE=lite` → Lite.
+- `AEGIS_MODE=full` → Full (calls fail-closed at the gateway until the backend recovers).
+- `AEGIS_MODE=auto` + no Full intent (no `AEGIS_TOKEN` AND no non-dev URL) → Lite.
+- `AEGIS_MODE=auto` + Full intent + reachable backend → Full (opportunistic upgrade).
+- `AEGIS_MODE=auto` + Full intent + **unreachable backend** → **fail-closed Full** + one `console.warn`. Silent LITE degrade is suppressed because it would skip the user-visible warning and provide weaker semantics than the user asked for.
 
 ### Full mode env vars
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AEGIS_BASE_URL` | `https://localhost:8443/api/v1` | aegis-core REST endpoint |
+| `AEGIS_URL` | `https://localhost:8443/api/v1` | aegis-core REST endpoint (rc4+ **canonical**; parity with PyPI). |
+| `AEGIS_BASE_URL` | — | Deprecation alias for `AEGIS_URL`. Read only when `AEGIS_URL` is unset; emits one `console.warn` per process the first time it is read (re-armed by `resetModuleClient()`). **Removed in v1.0.0.** |
 | `AEGIS_TOKEN` | (empty) | Bearer token for auth |
 | `AEGIS_VERIFY_SSL` | `true` | TLS verify (prod-locked: ignored unless host is dev) |
 | `AEGIS_DEV_INSECURE` | (unset) | Allow TLS verify off, dev hosts only |
-| `AEGIS_MODE` | `auto` | Override mode detection (`full` / `lite`) |
+| `AEGIS_MODE` | `auto` | Override mode detection (`full` / `lite`) — see matrix above. |
 | `AEGIS_HISTORY` | (unset) | `1` to enable local audit log |
 | `AEGIS_HISTORY_PATH` | `~/.aegis/history.jsonl` | Local audit file |
 | `AEGIS_CONFIG` | (unset) | Override YAML config path |

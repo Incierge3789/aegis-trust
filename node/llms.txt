@@ -1,17 +1,17 @@
-# @aegis_trust/sdk
+# aegis-trust
 
 > The trust layer for AI agents — control what data agents can see, based on declared purpose. TypeScript / Node port of aegis-trust (PyPI).
 
-@aegis_trust/sdk is a TypeScript / Node.js SDK that filters what AI agents see when calling your data-fetching functions. One wrapper declares the purpose; the SDK enforces field-level access control. Local-first, no infrastructure required, no telemetry.
+aegis-trust is a TypeScript / Node.js SDK that filters what AI agents see when calling your data-fetching functions. One wrapper declares the purpose; the SDK enforces field-level access control. Local-first, no infrastructure required, no telemetry.
 
 ## Quick Start
 
 ```
-npm install @aegis_trust/sdk
+npm install aegis-trust
 ```
 
 ```typescript
-import { shield } from "@aegis_trust/sdk";
+import { shield } from "aegis-trust";
 
 const getCustomer = shield({
   purpose: "customer_support",
@@ -45,7 +45,7 @@ const getCustomer = shield({
 
 ## Links
 
-- npm: https://www.npmjs.com/package/@aegis_trust/sdk
+- npm: https://www.npmjs.com/package/aegis-trust
 - PyPI (Python equivalent): https://pypi.org/project/aegis-trust/
 - Security: contact@aegisagentcontrol.com
 - Sales: contact@aegisagentcontrol.com

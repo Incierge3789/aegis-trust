@@ -1,0 +1,27 @@
+# Gitleaks allowlist for canonical aegis-trust monorepo.
+#
+# Authored: 2026-05-21 (task/T-S179-rc4-rc5-reconciliation, T-006c-1 Tier 0)
+# Rationale: documented false-positive allowlist for Red Team test fixtures
+# that intentionally embed synthetic credentials to verify shield() does not
+# leak them. The fixture string is matched against shield()-decorated output
+# and asserted ABSENT, so the literal must remain in source.
+#
+# Maintenance: only add allowlist entries for verified false positives
+# (real secrets must be revoked + scrubbed from history, never allowlisted).
+
+[allowlist]
+description = "Verified false positives (Red Team test fixtures + similar)"
+
+# Test fixture used by tests/adversarial/test_redteam_S018_exception_leak.py
+# to verify shield() does not leak embedded API keys in exception messages.
+# Placeholder string `abc123xyz789` is textbook fixture content (3 syllable
+# repeat); identical fixture exists in aegis-shield/tests/adversarial/
+# (S018 origin, 2026-04-12). The test asserts the literal is FILTERED OUT,
+# not surfaced.
+regexes = [
+    '''sk-abc123xyz789''',
+]
+
+paths = [
+    '''(.*/)?tests/adversarial/test_redteam_S018_exception_leak\.py$''',
+]

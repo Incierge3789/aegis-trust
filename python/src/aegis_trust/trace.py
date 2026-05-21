@@ -1,4 +1,4 @@
-"""Trace context propagation for @aegis_trust/sdk (Python port, v0.9.0-rc1+).
+"""Trace context propagation for aegis-trust (Python port, v0.9.0-rc1+).
 
 ``with_trace_context(trace_id, fn)`` and the ``trace_context`` context
 manager set a contextvars-backed trace for the duration. Any
@@ -10,7 +10,7 @@ local history JSONL are linked end-to-end by a single trace id
 contextvars (Python's stdlib) is the asyncio-safe equivalent of Node's
 AsyncLocalStorage. Each async task and thread sees its own trace context.
 
-Python port of TypeScript :mod:`@aegis_trust/sdk` ``src/trace.ts``
+Python port of TypeScript :mod:`aegis-trust` ``src/trace.ts``
 (introduced in v0.9.0-rc1 productization-ops/sprint_001).
 """
 
@@ -64,7 +64,9 @@ def get_trace_context() -> TraceContext | None:
 
 
 @contextmanager
-def trace_context(trace_id: str, parent_id: str | None = None) -> Iterator[TraceContext]:
+def trace_context(
+    trace_id: str, parent_id: str | None = None
+) -> Iterator[TraceContext]:
     """Context manager — set ambient trace_id for the duration of the ``with`` block.
 
     Usage::

@@ -25,8 +25,8 @@ const u = await safeFetch("C-001"); // agent only ever sees { name, issue }
 
 ## Status
 
-- **Python**: `aegis-trust@0.9.0rc2` on PyPI (pre-GA preview). v1.0.0 GA pending 5-oracle readability review + verifier coverage uplift.
-- **TypeScript**: `aegis-trust@0.9.0-rc2` on npm (same status).
+- **Python**: `aegis-trust@0.9.0rc5` on PyPI (pre-GA preview). v1.0.0 GA pending 5-oracle readability review + verifier coverage uplift.
+- **TypeScript**: `aegis-trust@0.9.0-rc5` on npm (same status).
 - **License**: MIT (see [`python/LICENSE`](python/LICENSE) + [`node/LICENSE`](node/LICENSE)).
 - **API versioning**: `Aegis-Api-Version: 2026-05-18` (dated header; see [productization-ops/data/api_versioning_policy.yaml](https://github.com/Incierge3789/aegis-trust)).
 
@@ -36,7 +36,7 @@ const u = await safeFetch("C-001"); // agent only ever sees { name, issue }
 aegis-trust/
 ├── python/        # Python SDK (pip install aegis-trust)
 │   ├── src/
-│   │   ├── aegis_trust/         # canonical module (v0.9.0-rc2+)
+│   │   ├── aegis_trust/         # canonical module (v0.9.0-rc5+)
 │   │   └── aegis/               # back-compat shim (DeprecationWarning, removal v2.0.0)
 │   ├── tests/
 │   ├── pyproject.toml
