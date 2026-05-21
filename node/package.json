@@ -1,6 +1,6 @@
 {
   "name": "aegis-trust",
-  "version": "0.9.0-rc3",
+  "version": "0.9.0-rc5",
   "description": "AI agent data access control \u2014 control what agents can see. TypeScript port of aegis-trust PyPI (literal name parity).",
   "license": "MIT",
   "type": "module",
