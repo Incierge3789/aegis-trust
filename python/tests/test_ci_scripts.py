@@ -2,9 +2,21 @@
 
 These tests verify that scripts/ci-matrix.sh and scripts/ci-attest.sh
 correctly propagate failures (no false "ALL PASSED").
+
+T-006c-1b iter-1 cross-review P1 closure (2026-05-21): the integration
+tests below invoke ci-matrix.sh / ci-attest.sh as subprocesses; the
+scripts require `uv` (Python version manager) on PATH + the matrix
+Python interpreters (e.g., 3.12) installable via `uv python install`.
+On hosts without `uv`, the scripts fail at the install step and the
+tests collected as failures rather than skips, masking the actual
+contract gap (T-006c-1c: portable test-env provisioning). Until
+T-006c-1c lands the integration tests skip cleanly when `uv` is
+absent so the test report reflects honest skip semantics rather than
+"failure" semantics for an unavailable runtime.
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -14,8 +26,24 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CI_MATRIX = REPO_ROOT / "scripts" / "ci-matrix.sh"
 CI_ATTEST = REPO_ROOT / "scripts" / "ci-attest.sh"
 
+# T-006c-1b iter-1 cross-review P1 (codex + cursor consensus):
+# `test_single_version_pass` fails on hosts without `uv` because
+# ci-matrix.sh reaches `uv pip install` and errors at "uv not installed".
+# Skip the integration tests honestly when `uv` is absent, instead of
+# reporting them as failures. Routes the underlying contract gap
+# (script-portability across CI envs) to T-006c-1c.
+_HAS_UV = shutil.which("uv") is not None
+_UV_SKIP_REASON = (
+    "Skipping: ci-matrix.sh / ci-attest.sh require `uv` on PATH "
+    "(install via `pip install uv` or the standalone installer). "
+    "T-006c-1c will close this skip by either (a) provisioning uv "
+    "in the canonical test env or (b) rewriting the scripts to use "
+    "a pre-existing Python installation without uv."
+)
+
 
 @pytest.mark.integration
+@pytest.mark.skipif(not _HAS_UV, reason=_UV_SKIP_REASON)
 class TestCiMatrixFailurePropagation:
     """ci-matrix.sh must exit non-zero when any step fails."""
 
@@ -66,6 +94,7 @@ class TestCiMatrixFailurePropagation:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(not _HAS_UV, reason=_UV_SKIP_REASON)
 class TestCiAttestFailurePropagation:
     """ci-attest.sh must preserve attestation integrity."""
 

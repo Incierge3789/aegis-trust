@@ -1,5 +1,30 @@
 name: CI
 
+# ════════════════════════════════════════════════════════════════════
+# DO NOT PROMOTE THIS FILE TO TOP-LEVEL `.github/workflows/`.
+# ════════════════════════════════════════════════════════════════════
+#
+# This workflow lives at `python/.github/workflows/ci.yml` to satisfy
+# `tests/adversarial/test_redteam_S018_ci_attack.py` (which reads
+# `.github/workflows/ci.yml` relative to pytest cwd = `python/`).
+# GitHub Actions ONLY reads `.github/workflows/` at the REPO TOP LEVEL,
+# so this nested file is data-only — it does NOT trigger CI.
+#
+# If a future contributor copies this file to `<repo-root>/.github/
+# workflows/ci.yml` (or runs `git mv python/.github .github`):
+#   - The `on: push` block below would IMMEDIATELY start triggering CI
+#     on every push to main / sprint/** / hotfix/** / task/** branches.
+#   - Self-hosted runner with label `aegis-shield` (line ~25 below) would
+#     receive jobs that may not match available runners in this repo.
+#   - The full canonical top-level CI provisioning is tracked separately
+#     as T-006c-1c "top-level CI provisioning" sub-task — that sub-task
+#     will re-author triggers + runner labels for the actual monorepo
+#     context, and is NOT served by promoting this nested file as-is.
+#
+# Authorization required for top-level promotion: explicit Giri sign-off
+# + cross-review on the runner-label + triggers + secrets attestation.
+# ════════════════════════════════════════════════════════════════════
+
 # Aegis security: only trigger on push (not pull_request).
 # This eliminates the fork-PR-attacks-self-hosted-runner attack vector.
 # PRs from forks are NOT auto-tested — maintainer must push to a branch
