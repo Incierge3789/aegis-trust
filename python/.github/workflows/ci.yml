@@ -22,12 +22,14 @@ name: CI
 #     or fall through to an unintended runner if a generic label match
 #     exists; either way the trust-boundary intent (jobs only run on
 #     `aegis-shield`-labeled hosts) is silently broken.
-#   - **Secrets exposure**: any GitHub Secrets defined in this monorepo
-#     under Settings → Secrets and variables would become accessible to
-#     workflow runs. The imported ci.yml has no `${{ secrets.* }}`
-#     references TODAY, but `id-token: write` permissions (cosign keyless
-#     OIDC pattern) or future-edit additions could leak ambient secrets
-#     to the self-hosted runner — and the fork-PR defense in the trust-
+#   - **Secret exposure**: any GitHub-stored credential defined in this
+#     monorepo under Settings → Secrets-and-variables would become
+#     accessible to workflow runs. The imported ci.yml has no GitHub
+#     Actions context references to such credentials TODAY (verified by
+#     the test_ci_no_secrets_in_env adversarial test), but
+#     `id-token: write` permissions (cosign keyless OIDC pattern) or
+#     future-edit additions could leak ambient credentials to the
+#     self-hosted runner — and the fork-PR defense in the trust-
 #     boundary-check step is push-trigger-dependent, not auto-enforced
 #     for workflow_dispatch or other trigger types.
 #   - The full canonical top-level CI provisioning is tracked separately
