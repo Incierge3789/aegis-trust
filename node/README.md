@@ -15,7 +15,7 @@ Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffi
 
 - **30-second understanding**: `shield({ purpose, scope })(fn)` returns `fn` with the same signature; the return value is filtered to `scope`, blocked fields are audited, and a `trace_id` from `withTraceContext()` is propagated end-to-end.
 - **TypeScript port** of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same semantics, same fail-closed guarantees, same audit chain.
-- **Pre-GA**: v0.9.0-rc1 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk.
+- **Pre-GA**: v0.9.0-rc5 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk.
 
 ```bash
 npm install aegis-trust@rc
