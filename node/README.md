@@ -31,8 +31,8 @@ npx aegis sandbox
 …or with Docker:
 
 ```bash
-git clone https://github.com/Incierge3789/aegis_core
-cd aegis_core/sdk/node-trust/examples/docker
+git clone https://github.com/Incierge3789/aegis-trust
+cd aegis-trust/node/examples/docker
 docker compose -f docker-compose.dev.yml up --build
 # In another shell:
 curl -s http://localhost:8080/demo/agent-request | jq
