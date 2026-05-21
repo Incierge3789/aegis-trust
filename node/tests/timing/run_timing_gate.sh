@@ -43,7 +43,7 @@ echo "[timing-gate] PRODUCTIZATION_TIMING_INSTALL_CMD=$PRODUCTIZATION_TIMING_INS
 echo "[timing-gate] PRODUCTIZATION_TIMING_FIRST_CALL_SCRIPT=$PRODUCTIZATION_TIMING_FIRST_CALL_SCRIPT"
 
 python3 "$VERIFIER" \
-  --package "@aegis_trust/sdk" \
+  --package "aegis-trust" \
   --install-cmd "$PRODUCTIZATION_TIMING_INSTALL_CMD" \
   --first-call-script "$PRODUCTIZATION_TIMING_FIRST_CALL_SCRIPT" \
   --workdir "$WORKDIR" \

@@ -1,0 +1,94 @@
+name: CI
+
+# Aegis security: only trigger on push (not pull_request).
+# This eliminates the fork-PR-attacks-self-hosted-runner attack vector.
+# PRs from forks are NOT auto-tested — maintainer must push to a branch
+# in this repo to trigger CI.
+on:
+  push:
+    branches: [main, "sprint/**", "hotfix/**", "task/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  test-lint:
+    name: Test & Lint
+    # Self-hosted runner on incierge's Mac (macOS, Apple Silicon).
+    # This avoids GitHub Actions billing entirely.
+    # Setup: see docs/RELEASE.md "Self-hosted runner setup"
+    runs-on: [self-hosted, macOS, ARM64, aegis-shield]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Aegis trust boundary check
+        # Refuse to run on PRs from forks (defense in depth — push trigger
+        # already excludes this, but belt and suspenders for AO-001).
+        run: |
+          if [ "${{ github.event.repository.fork }}" = "true" ]; then
+            echo "ERROR: Refusing to run on fork (Aegis AO-001)"
+            exit 1
+          fi
+          echo "Trust boundary OK: running on canonical repo"
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Python ${{ matrix.python-version }} via uv
+        # Use uv to manage Python versions on the self-hosted runner.
+        # uv must be installed on the runner (one-time setup).
+        run: |
+          uv python install ${{ matrix.python-version }}
+          uv venv --python ${{ matrix.python-version }} .ci-venv
+          echo "$PWD/.ci-venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: uv pip install --python .ci-venv/bin/python -e ".[dev]"
+
+      - name: Lint (ruff check)
+        run: ruff check src/ tests/
+
+      - name: Format check (ruff format)
+        run: ruff format --check src/ tests/
+
+      - name: Test (pytest)
+        env:
+          AEGIS_MODE: lite
+        run: pytest tests/ -v
+
+      - name: Cleanup venv
+        if: always()
+        run: rm -rf .ci-venv
+
+  security:
+    name: Security Audit
+    runs-on: [self-hosted, macOS, ARM64, aegis-shield]
+    steps:
+      - name: Aegis trust boundary check
+        run: |
+          if [ "${{ github.event.repository.fork }}" = "true" ]; then
+            echo "ERROR: Refusing to run on fork (Aegis AO-001)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Python via uv
+        run: |
+          uv python install 3.12
+          uv venv --python 3.12 .ci-venv-audit
+          echo "$PWD/.ci-venv-audit/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: uv pip install --python .ci-venv-audit/bin/python -e ".[dev]" pip-audit
+
+      - name: pip-audit
+        run: pip-audit
+
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh launchd/*.sh
+
+      - name: Cleanup venv
+        if: always()
+        run: rm -rf .ci-venv-audit
