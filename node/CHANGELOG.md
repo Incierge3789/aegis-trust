@@ -2,6 +2,62 @@
 
 ## [Unreleased]
 
+### Changed — `shield()` FULL mode now performs a real `/check-access` trust gate
+
+- **`shield()` FULL mode previously did client-side filtering + best-effort
+  audit ingest only — it never called `/check-access`.** The `authorize()`
+  gate existed on `AegisClient` but `shield()` did not invoke it, so a FULL
+  `shield()` call was effectively `LITE` + telemetry. This release wires the
+  gate (`T-SDK-FULL-GATE-01`):
+  - In `FULL` mode, the async `shield()` wrapper now `await`s a pre-call
+    `/check-access` authorization **before the wrapped function runs**. The
+    protected function executes **only** after authorization is granted —
+    the gate prevents its side effects / DB reads, it does not merely
+    discard their result.
+  - Deny / `403` / `503` (audit-fail-closed) / gateway-unreachable / network
+    error all cause the wrapped function to **never be invoked**, and the
+    call returns `null`. Because the function never ran there is no return
+    shape to mirror, so the fail-closed value is a bare `null` (no caller
+    data, ever).
+  - Audit ingest now runs **only after** authorization succeeds — it is
+    post-authorization telemetry (fire-and-forget, fail-open), never the
+    trust gate.
+  - A function not declared `async`, wrapped with explicit `Mode.FULL`, now
+    throws `AegisValidationError`
+    (`code: aegis.shield.mode.sync_full_unsupported`) instead of being
+    silently mislabelled "full" while running un-gated `LITE` semantics. The
+    `async` declaration is the wrapper's pre-execution await point; without
+    it the gate cannot run before the function. `AUTO` on a non-`async`
+    function resolves to `LITE`.
+  - Internal filter/freeze errors **after a granted authorization** are
+    caught and return the type-shaped safe empty value (`emptyFor(data)` —
+    the function ran, so the data shape can be mirrored). The "fail-closed
+    decorator" claim is now true for the Node SDK (previously a filter
+    exception propagated).
+  - Local audit/history emission (`AEGIS_HISTORY=1`) is fully fail-safe:
+    `recordIfEnabled()` now initialises the history store **inside** its
+    try/catch, so an unwritable history path cannot turn a FULL-deny
+    `null` return — or a fail-closed filter error — into a thrown
+    exception. Audit is telemetry; it never breaks the data path.
+- **Local diagnostic**: a non-granted FULL authorization is recorded to the
+  local history log with `decision` (`deny` / `fail_closed`) + `reason`
+  (`denied` / `unreachable` / `core_503` / `http_error` / `internal_error`),
+  and emits a single `console.warn` line carrying only those enum labels +
+  `purpose` / `function` — no caller data. New additive
+  `AegisClient.authorizeDetailed()` returns the reason; the boolean
+  `authorize()` public contract is unchanged.
+- This **corrects two inaccuracies** in the prior "trust-boundary claim
+  scoping" entry below: the `FULL`-mode row's "per-call `/check-access`
+  admission" and the headline "decorator fail-closed → empty on internal
+  error" were not true of the code at that time. They are true now.
+
+### Changed — documentation: FULL-mode docs updated to match the gate
+
+- `README.md` `FULL`-mode policy row, **Trust-boundary scope** section, and a
+  new sync-vs-`Mode.FULL` note now describe the real pre-call gate behaviour.
+- Known follow-up recorded: the `authorize()` access cache has a 30 s TTL, so
+  a same-token server-side policy change is invisible for ≤ 30 s (P1).
+
 ### Changed — documentation: trust-boundary claim scoping
 
 - `README.md` now states the `aegis-core` `FULL`-mode trust-boundary

@@ -211,7 +211,11 @@ function denyFilterResult(
 
 // ── Helpers ───────────────────────────────────────────────
 
-function emptyFor(data: unknown): unknown {
+// T-SDK-FULL-GATE-01: exported so shield() FULL mode can return a type-shaped
+// safe empty value when the pre-call /check-access authorization is not
+// granted (deny / gateway-unreachable / 503), and on the internal-error
+// fail-closed path. Mirrors the Python SDK's `_empty_for`.
+export function emptyFor(data: unknown): unknown {
   if (typeof data === "string") return "";
   if (Array.isArray(data)) return [];
   if (isPlainObject(data)) return {};
