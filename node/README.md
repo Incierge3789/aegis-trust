@@ -2,7 +2,7 @@
 
 > **Data Trust Layer for AI Agents.** One wrapper above the tool; the model never sees what it doesn't need.
 
-`aegis-trust` is the developer-first primitive for purpose-bound data access by AI agents. One `shield()` wrapper declares **what** an agent may read (`scope`) and **why** it may read it (`purpose`); the SDK enforces field-level minimum disclosure, machine-parseable errors, end-to-end trace propagation, and a tamper-evident audit chain — fail-closed by default.
+`aegis-trust` is the developer-first primitive for purpose-bound data access by AI agents. One `shield()` wrapper declares **what** an agent may read (`scope`) and **why** it may read it (`purpose`). In `LITE` mode the SDK applies client-side field filtering, machine-parseable errors, end-to-end trace propagation, and a local audit log; in `FULL` mode it additionally calls an `aegis-core` gateway. The decorator is fail-closed — any internal error yields an empty value, never leaked data. What the `aegis-core` gateway trust boundary does and does **not** guarantee is stated precisely in [Trust-boundary scope](#trust-boundary-scope); read it before relying on `FULL` mode for a security property.
 
 ```typescript
 import { shield } from "aegis-trust";
@@ -13,8 +13,8 @@ const u = await safeFetch("C-001"); // agent only ever sees { name, issue }
 
 Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffic (LangChain.js, CrewAI, Vercel AI SDK, MCP, Mastra). When procurement asks *"will your AI read our customer data?"*, the answer is in the line above.
 
-- **30-second understanding**: `shield({ purpose, scope })(fn)` returns `fn` with the same signature; the return value is filtered to `scope`, blocked fields are audited, and a `trace_id` from `withTraceContext()` is propagated end-to-end.
-- **TypeScript port** of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same semantics, same fail-closed guarantees, same audit chain.
+- **30-second understanding**: `shield({ purpose, scope })(fn)` returns `fn` with the same signature; the return value is filtered to `scope` client-side, blocked fields are recorded in the local audit log, and a `trace_id` from `withTraceContext()` is propagated end-to-end.
+- **TypeScript port** of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same semantics, same fail-closed decorator behaviour, same local audit log.
 - **Pre-GA**: v0.9.0-rc1 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk.
 
 ```bash
@@ -137,7 +137,31 @@ export const customerTool = tool({
 
 Modern AI agents request raw records and decide what to use. That's a security boundary problem: the agent sees more than it needs, and what it sees is impossible to audit.
 
-`aegis-trust` inverts the contract — the caller declares **purpose** and **scope** up-front, and the SDK enforces minimum disclosure at return time. Fail-closed by default.
+`aegis-trust` inverts the contract — the caller declares **purpose** and **scope** up-front, and the SDK filters the return value to that scope at return time (client-side in `LITE` mode; with `aegis-core` gateway admission in `FULL` mode). The decorator is fail-closed: any internal error yields an empty value, not leaked data.
+
+## Trust-boundary scope
+
+`FULL` mode integrates with an `aegis-core` gateway. Following the aegis-core Core Security Remediation track (S173–S176), the gateway's `/check-access` trust boundary and boot path provide the following — and **only** the following — guarantees. These claims are deliberately scoped; do not read more into them.
+
+**Guaranteed (scoped claims):**
+
+1. **`/check-access` JWT identity binding** — the identity used for every access decision is the JWT subject. A `requester_id` in the request body is advisory; if it does not match the JWT subject the request is denied (`403`, constant-time compared).
+2. **`/check-access` ingress deny-by-default** — an unknown purpose, an unknown scope, or a malformed `capsule_id` (path-traversal characters) is rejected at the `/check-access` ingress.
+3. **`/check-access` audit-fail-closed** — a `/check-access` decision that cannot be written to the audit log returns `503`, never a silent allow.
+4. **`AEGIS_PROFILE=production` fail-secure boot validation** — started with `AEGIS_PROFILE=production`, the gateway refuses to boot (`exit 2`) on missing critical config, an unsafe security opt-out, or an unparseable port.
+
+**Not guaranteed — do NOT claim:**
+
+- **No gateway-wide audit-fail-closed.** Only `/check-access` is audit-fail-closed; other gateway endpoints may still complete a decision without an audit record.
+- **No field-level `purpose × scope` minimum-disclosure at the gateway.** `scope` is registry-validated at `/check-access` (an unknown scope is denied) but is not yet wired into field-level policy. `LITE`-mode `shield()` filtering is client-side and bypassable — it is a developer-ergonomics feature, not a server-enforced trust boundary.
+- **Not production-ready out of the box.** Boot-time config validation is opt-in via `AEGIS_PROFILE=production`; the default profile is `development`.
+
+**Known follow-ups (open):**
+
+- Gateway-wide `audit.append` fail-closed sweep (beyond `/check-access`).
+- `AEGIS_CAPSULE_ROOT`-missing → `500` path emits no audit record.
+- `scope` → RBAC / Reflex / field-level minimum-disclosure wiring.
+- Debug-log identity-field redaction.
 
 ## API surface (parity with PyPI `aegis-trust` 0.8.1)
 
@@ -203,7 +227,7 @@ shield({ purpose: "lookup", scope: ["name"] })(
 | Mode | What it does | Requires |
 |---|---|---|
 | `LITE` | In-process filter only. Deterministic, no I/O. | nothing |
-| `FULL` | Filter + audit chain ingest + central policy sync via aegis-core. | aegis-core running + `AEGIS_TOKEN` |
+| `FULL` | Client-side filter + per-call `aegis-core` `/check-access` admission (JWT-bound identity, ingress deny-by-default, audit-fail-closed) + audit ingest. See [Trust-boundary scope](#trust-boundary-scope) for the precise guarantees. | aegis-core running + `AEGIS_TOKEN` |
 | `AUTO` | Detect: `FULL` if `AEGIS_TOKEN` set & backend reachable, else `LITE`. | nothing |
 
 ### Full mode env vars

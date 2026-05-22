@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed — documentation: trust-boundary claim scoping
+
+- `README.md` now states the `aegis-core` `FULL`-mode trust-boundary
+  guarantees as explicitly scoped claims, in a new **Trust-boundary scope**
+  section. Following the aegis-core Core Security Remediation track
+  (S173–S176), exactly four guarantees are claimed: `/check-access` JWT
+  identity binding, `/check-access` ingress deny-by-default,
+  `/check-access` audit-fail-closed, and `AEGIS_PROFILE=production`
+  fail-secure boot validation.
+- Three broad claims are now explicitly **not** made: no gateway-wide
+  audit-fail-closed, no field-level `purpose × scope` minimum-disclosure
+  at the gateway, and not production-ready out of the box.
+- Four known follow-ups are recorded in the same section: gateway-wide
+  `audit.append` sweep, `AEGIS_CAPSULE_ROOT`-missing → 500 no-audit gap,
+  `scope` → RBAC/Reflex/field-level wiring, and debug-log redaction.
+- The headline, the "30-second understanding" bullet, the "Why" section,
+  and the `FULL`-mode policy row were reworded to drop unscoped
+  guarantee language. The SDK's `LITE`-mode client-side filtering and
+  fail-closed decorator behaviour are unchanged and still accurately
+  described — only wording that over-claimed a server-enforced trust
+  boundary was corrected.
+- No code change, no API change. `python/README.md` was reviewed and is
+  unchanged: it makes no `FULL`-mode gateway over-claim.
+
 ## [0.9.0-rc1] — 2026-05-17 — pre-GA preview
 
 `internal-ops/sprint_001` rollup. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). Public API surface is additive over v0.8.1; no breaking changes. SLA: none. Production use: at your own risk. See [`docs/VERSIONING.md`](docs/VERSIONING.md).
