@@ -10,21 +10,30 @@
   `shield()` call was effectively `LITE` + telemetry. This release wires the
   gate (`T-SDK-FULL-GATE-01`):
   - In `FULL` mode, the async `shield()` wrapper now `await`s a pre-call
-    `/check-access` authorization **before** the filter runs and before any
-    data is returned.
+    `/check-access` authorization **before the wrapped function runs**. The
+    protected function executes **only** after authorization is granted —
+    the gate prevents its side effects / DB reads, it does not merely
+    discard their result.
   - Deny / `403` / `503` (audit-fail-closed) / gateway-unreachable / network
-    error all return a type-shaped **safe empty value** (`emptyFor`), never
-    the unfiltered result.
+    error all cause the wrapped function to **never be invoked**, and the
+    call returns `null`. Because the function never ran there is no return
+    shape to mirror, so the fail-closed value is a bare `null` (no caller
+    data, ever).
   - Audit ingest now runs **only after** authorization succeeds — it is
     post-authorization telemetry (fire-and-forget, fail-open), never the
     trust gate.
-  - A synchronous function wrapped with explicit `Mode.FULL` now throws
-    `AegisValidationError` (`code: aegis.shield.mode.sync_full_unsupported`)
-    instead of being silently mislabelled "full" while running un-gated
-    `LITE` semantics. Sync + `AUTO` resolves to `LITE`.
-  - Internal filter/freeze errors are caught and return the safe empty
-    value — the "fail-closed decorator" claim is now true for the Node SDK
-    (previously a filter exception propagated).
+  - A function not declared `async`, wrapped with explicit `Mode.FULL`, now
+    throws `AegisValidationError`
+    (`code: aegis.shield.mode.sync_full_unsupported`) instead of being
+    silently mislabelled "full" while running un-gated `LITE` semantics. The
+    `async` declaration is the wrapper's pre-execution await point; without
+    it the gate cannot run before the function. `AUTO` on a non-`async`
+    function resolves to `LITE`.
+  - Internal filter/freeze errors **after a granted authorization** are
+    caught and return the type-shaped safe empty value (`emptyFor(data)` —
+    the function ran, so the data shape can be mirrored). The "fail-closed
+    decorator" claim is now true for the Node SDK (previously a filter
+    exception propagated).
 - **Local diagnostic**: a non-granted FULL authorization is recorded to the
   local history log with `decision` (`deny` / `fail_closed`) + `reason`
   (`denied` / `unreachable` / `core_503` / `http_error` / `internal_error`),

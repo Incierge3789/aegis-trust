@@ -1,9 +1,11 @@
 // fullGate.test.ts — T-SDK-FULL-GATE-01 acceptance tests.
 //
 // Verifies that shield() FULL mode performs a real pre-call /check-access
-// authorization before returning protected data, and fails closed on every
-// non-grant path. These are the eight tests required by the corrective-PR
-// directive.
+// authorization before the protected function runs, and fails closed on
+// every non-grant path. Tests 1-8 are the corrective-PR directive set;
+// tests 9-11 verify the gate runs BEFORE fn execution (Codex cross-review
+// P1) — a denied / unreachable authorization must prevent the protected
+// function's side effects, not merely discard its result.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -86,9 +88,10 @@ it("FULL deny (200 allowed:false) returns the safe empty value", async () => {
   );
   const out = await getUser(1);
 
-  expect(out).toEqual({}); // emptyFor(object) — no fields, never the raw data
-  expect(out).not.toHaveProperty("name");
-  expect(out).not.toHaveProperty("ssn");
+  // The gate denies BEFORE the protected function runs — there is no
+  // return shape to mirror, so the safe value is a bare null. Never the
+  // raw data.
+  expect(out).toBeNull();
 });
 
 // 3 ──────────────────────────────────────────────────────────
@@ -102,7 +105,7 @@ it("FULL gateway-unreachable fails closed (returns empty)", async () => {
   );
   const out = await getUser(1);
 
-  expect(out).toEqual({}); // network error → fail-closed
+  expect(out).toBeNull(); // network error → fail-closed, fn never ran
 });
 
 // 4 ──────────────────────────────────────────────────────────
@@ -116,7 +119,7 @@ it("FULL core 503 (audit-fail-closed) returns empty", async () => {
   );
   const out = await getUser(1);
 
-  expect(out).toEqual({}); // CSR-02 503 → fail-closed
+  expect(out).toBeNull(); // CSR-02 503 → fail-closed, fn never ran
 });
 
 // 5 ──────────────────────────────────────────────────────────
@@ -211,4 +214,66 @@ it("internal filter error returns the safe empty value, not an exception", async
   }
   expect(threw).toBe(false); // no exception bubbles to the caller
   expect(out).toEqual({}); // safe empty, never the raw evil object
+});
+
+// 9 ──────────────────────────────────────────────────────────
+it("FULL deny does NOT invoke the protected function (no side effects)", async () => {
+  // The trust gate must run BEFORE the protected function. A denied
+  // authorization must prevent the function — and its side effects /
+  // DB reads — from executing at all, not merely discard the result.
+  const m = mkFetch({ checkAccess: { status: 200, body: { allowed: false } } });
+  globalThis.fetch = m.fetch;
+  fullEnv();
+
+  let calls = 0;
+  const getUser = shield({ purpose: "support", scope: ["name"], mode: Mode.FULL })(
+    async (_: unknown) => {
+      calls += 1; // side effect — must NOT happen when authorization is denied
+      return { name: "A", ssn: "X" };
+    },
+  );
+  const out = await getUser(1);
+
+  expect(calls).toBe(0); // gate denied → protected function never ran
+  expect(out).toBeNull();
+});
+
+// 10 ─────────────────────────────────────────────────────────
+it("FULL unreachable does NOT invoke the protected function", async () => {
+  // Same invariant on the fail-closed path: a network error must keep the
+  // protected function from running, not run it and drop the output.
+  const m = mkFetch({ checkAccess: "throw" });
+  globalThis.fetch = m.fetch;
+  fullEnv();
+
+  let calls = 0;
+  const getUser = shield({ purpose: "support", scope: ["name"], mode: Mode.FULL })(
+    async (_: unknown) => {
+      calls += 1;
+      return { name: "A", ssn: "X" };
+    },
+  );
+  const out = await getUser(1);
+
+  expect(calls).toBe(0); // gateway unreachable → protected function never ran
+  expect(out).toBeNull();
+});
+
+// 11 ─────────────────────────────────────────────────────────
+it("FULL grant invokes the protected function exactly once", async () => {
+  const m = mkFetch({ checkAccess: { status: 200, body: { allowed: true } } });
+  globalThis.fetch = m.fetch;
+  fullEnv();
+
+  let calls = 0;
+  const getUser = shield({ purpose: "support", scope: ["name"], mode: Mode.FULL })(
+    async (_: unknown) => {
+      calls += 1;
+      return { name: "A", ssn: "X" };
+    },
+  );
+  const out = await getUser(1);
+
+  expect(calls).toBe(1); // authorized → function ran once, after the gate
+  expect(out).toEqual({ name: "A" });
 });

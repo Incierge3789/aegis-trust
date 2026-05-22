@@ -50,8 +50,11 @@ export function _setTestHook(hook: ShieldCallHook | null): void {
 //
 // Modes:
 //   - LITE: in-process filter only
-//   - FULL: filter + ingest to aegis-core via AegisClient (async-only)
-//   - AUTO: detect — full if AEGIS_TOKEN set and backend reachable, else lite
+//   - FULL: pre-call /check-access trust gate, THEN filter + ingest. The
+//           gate runs before the wrapped function — a denied / unreachable /
+//           503 authorization never invokes it. FULL requires an `async`
+//           function (it has no pre-execution await point otherwise).
+//   - AUTO: detect — FULL if AEGIS_TOKEN set and backend reachable, else LITE
 
 export function shield(options: ShieldOptions) {
   const purpose = options.purpose;
@@ -73,49 +76,24 @@ export function shield(options: ShieldOptions) {
 
   return function wrap<F extends (...args: unknown[]) => unknown>(fn: F): F {
     const fnName = fn.name || "anonymous";
-    const wrapped = function (this: unknown, ...args: unknown[]) {
-      const out = fn.apply(this, args);
-      if (isPromise(out)) {
-        return (out as Promise<unknown>).then(async (resolved) => {
-          const mode = await resolveMode(requestedMode);
-          if (mode === Mode.FULL) {
-            return applyAndAuditFull(
-              resolved,
-              scope,
-              denyFields,
-              scopeTree,
-              denyTree,
-              purpose,
-              fnName,
-            );
-          }
-          return applyAndAuditLite(
-            resolved,
-            scope,
-            denyFields,
-            scopeTree,
-            denyTree,
-            purpose,
-            fnName,
-          );
-        });
+
+    // FULL / AUTO on an async function: the /check-access trust gate (and,
+    // for AUTO, mode detection) runs BEFORE the protected function executes.
+    // A denied / unreachable / 503 authorization returns without ever
+    // invoking `fn` — the gate prevents side effects, it does not merely
+    // discard their result.
+    async function runGatedAsync(thisArg: unknown, args: unknown[]): Promise<unknown> {
+      const mode = await resolveMode(requestedMode);
+      if (mode === Mode.LITE) {
+        // AUTO degraded to LITE (no token / backend unreachable). LITE has
+        // no trust gate, so running the function here is correct.
+        const out = await fn.apply(thisArg, args);
+        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
       }
-      // Sync path: Mode.FULL performs an awaited /check-access authorization,
-      // which a synchronous function cannot do. T-SDK-FULL-GATE-01: rather
-      // than silently mislabel a sync call as "full" (it would run LITE
-      // semantics with no trust gate), refuse it with a clear error. Sync +
-      // AUTO degrades to LITE (cannot await detection) — documented in README.
-      if (requestedMode === Mode.FULL) {
-        throw new AegisValidationError({
-          code: "aegis.shield.mode.sync_full_unsupported",
-          remediation:
-            "Mode.FULL performs an awaited /check-access authorization. Wrap an async function for FULL, or use Mode.LITE for synchronous functions.",
-          docs_url: aegisDocsUrl("aegis.shield.mode.sync_full_unsupported"),
-          message: "shield: Mode.FULL requires an async wrapped function",
-        });
-      }
-      return applyAndAuditLite(
-        out,
+      return gateAndRunFull(
+        fn as (...a: unknown[]) => unknown,
+        thisArg,
+        args,
         scope,
         denyFields,
         scopeTree,
@@ -123,6 +101,54 @@ export function shield(options: ShieldOptions) {
         purpose,
         fnName,
       );
+    }
+
+    const wrapped = function (this: unknown, ...args: unknown[]) {
+      // ── LITE ──────────────────────────────────────────────
+      // No trust gate, no mode detection. Call the function directly and
+      // preserve its sync-or-async return shape.
+      if (requestedMode === Mode.LITE) {
+        const out = fn.apply(this, args);
+        if (isPromise(out)) {
+          return (out as Promise<unknown>).then((resolved) =>
+            applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
+          );
+        }
+        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
+      }
+
+      // ── explicit FULL on a non-async function ─────────────
+      // FULL gates execution behind an awaited /check-access authorization.
+      // A function not declared `async` gives the wrapper no pre-execution
+      // await point, so it cannot be gated before its side effects run.
+      // Refuse it loudly rather than silently run un-gated LITE semantics
+      // under a "full" label. T-SDK-FULL-GATE-01.
+      if (requestedMode === Mode.FULL && !isAsyncFn(fn)) {
+        throw new AegisValidationError({
+          code: "aegis.shield.mode.sync_full_unsupported",
+          remediation:
+            "Mode.FULL gates execution behind an awaited /check-access authorization. Declare the wrapped function `async` for FULL, or use Mode.LITE for synchronous functions.",
+          docs_url: aegisDocsUrl("aegis.shield.mode.sync_full_unsupported"),
+          message: "shield: Mode.FULL requires an async wrapped function",
+        });
+      }
+
+      // ── AUTO on a non-async function ──────────────────────
+      // AUTO can only reach FULL when there is a pre-execution await point.
+      // A non-async function degrades to LITE — preserve the sync return.
+      if (requestedMode === Mode.AUTO && !isAsyncFn(fn)) {
+        const out = fn.apply(this, args);
+        if (isPromise(out)) {
+          return (out as Promise<unknown>).then((resolved) =>
+            applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
+          );
+        }
+        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
+      }
+
+      // ── FULL / AUTO on an async function ──────────────────
+      // Gate first, run the protected function only on a granted authz.
+      return runGatedAsync(this, args);
     };
     Object.defineProperty(wrapped, "name", { value: fnName });
     return wrapped as F;
@@ -227,11 +253,15 @@ function applyAndAuditLite(
 }
 
 // FULL path — performs a pre-call /check-access authorization BEFORE the
-// filter runs, and returns protected data only if authorization is granted.
-// The authorization call is the trust gate. Audit ingest is post-
-// authorization telemetry (fire-and-forget, fail-open) — never the gate.
-async function applyAndAuditFull(
-  data: unknown,
+// protected function runs. The protected function is invoked ONLY after
+// authorization is granted; a denied / unreachable / 503 outcome returns
+// without ever calling it (no side effects). The authorization call is the
+// trust gate. Audit ingest is post-authorization telemetry (fire-and-forget,
+// fail-open) — never the gate.
+async function gateAndRunFull(
+  fn: (...a: unknown[]) => unknown,
+  thisArg: unknown,
+  args: unknown[],
   scope: ReadonlyArray<string>,
   denyFields: ReadonlyArray<string>,
   scopeTree: ReturnType<typeof parsePaths>,
@@ -243,14 +273,15 @@ async function applyAndAuditFull(
   const traceId = getTraceContext()?.traceId;
 
   // The trust gate. authorizeDetailed() is fail-closed — deny / 403 / 503 /
-  // gateway-unreachable / network error all yield allowed:false. FULL mode
-  // must NOT return protected data unless this call grants.
+  // gateway-unreachable / network error all yield allowed:false. The
+  // protected function has NOT run at this point — a non-grant returns
+  // before it ever does.
   let authz: { allowed: boolean; reason: string };
   try {
     authz = await client.authorizeDetailed(purpose, scope);
   } catch {
     // Defensive: authorizeDetailed is itself fail-closed and should not
-    // throw — but an unexpected throw must never leak data.
+    // throw — but an unexpected throw must never grant access.
     authz = { allowed: false, reason: "http_error" };
   }
 
@@ -276,12 +307,20 @@ async function applyAndAuditFull(
       + `decision=${decision} reason=${authz.reason} `
       + `purpose=${purpose} function=${fnName}`,
     );
-    return emptyFor(data);
+    // The protected function was NEVER invoked — there is no return shape
+    // to mirror, so the fail-closed value is a bare null.
+    return emptyFor(undefined);
   }
 
-  // Authorized. Freeze + filter; an internal error anywhere here is
-  // fail-closed → safe empty (emptyFor inspects only the input's broad
-  // shape, safe even with a throwing getter on `data`).
+  // Authorized — only now is the protected function executed. Its own
+  // errors (a fault in the caller's code, not a trust-gate concern)
+  // propagate to the caller unchanged.
+  const data = await fn.apply(thisArg, args);
+
+  // Freeze + filter; an internal error anywhere here is fail-closed → a
+  // type-shaped safe empty (the function ran, so `data` exists and its
+  // broad shape can be mirrored; emptyFor inspects only that shape, safe
+  // even with a throwing getter on `data`).
   try {
     const original = freezeSinglePass(data);
     const filtered = runFilter(original, scope, denyFields, scopeTree, denyTree);
@@ -388,6 +427,17 @@ function isPromise(x: unknown): boolean {
     !!x
     && (typeof x === "object" || typeof x === "function")
     && typeof (x as { then?: unknown }).then === "function"
+  );
+}
+
+// True only for functions declared `async`. FULL/AUTO need a pre-execution
+// await point to run the /check-access gate before the function executes;
+// `async` is the one declaration form that guarantees one. A plain function
+// that merely returns a Promise is not gateable before its body runs.
+function isAsyncFn(fn: unknown): boolean {
+  return (
+    typeof fn === "function"
+    && (fn as { constructor?: { name?: string } }).constructor?.name === "AsyncFunction"
   );
 }
 
