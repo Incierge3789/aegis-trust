@@ -248,7 +248,7 @@ When `shield()` runs in FULL mode it calls the aegis-core gateway's `/check-acce
 
 **Known follow-ups — tracked, not yet shipped:**
 
-- A missing `AEGIS_CAPSULE_ROOT` can still produce a runtime HTTP 500 with no audit record (and that 500 path is evaluated before the ingress checks above, so it pre-empts them).
+- A missing `AEGIS_CAPSULE_ROOT` can still produce a runtime HTTP 500 with no audit record; that 500 path is evaluated after the identity check (#1) but before the unknown-purpose / scope / capsule checks (#2), so it pre-empts guarantee #2.
 - Gateway-wide audit-append fail-closed sweep (beyond `/check-access`).
 - Debug-log redaction (`RUST_LOG=debug` output hygiene).
 - Wiring validated `scope` through to RBAC / Reflex / field-level enforcement.
