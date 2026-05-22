@@ -32,6 +32,12 @@ export interface HistoryRecord {
   readonly mode: string;
   readonly idempotencyKey?: string;
   readonly trace_id?: string;
+  // T-SDK-FULL-GATE-01: FULL-mode /check-access outcome. `decision` is
+  // "allow" | "deny" | "fail_closed"; `reason` is the AuthzReason enum
+  // ("allowed" | "denied" | "core_503" | "http_error" | "unreachable" |
+  // "internal_error"). Present only for FULL-mode records.
+  readonly decision?: string;
+  readonly reason?: string;
 }
 
 export interface HistoryStats {
@@ -99,6 +105,8 @@ export class HistoryStore {
     timestamp: string;
     mode: string;
     trace_id?: string;
+    decision?: string;
+    reason?: string;
   }): void {
     const rec: HistoryRecord = {
       id: this._nextId++,
@@ -110,6 +118,8 @@ export class HistoryStore {
       timestamp: args.timestamp,
       mode: args.mode,
       ...(args.trace_id !== undefined ? { trace_id: args.trace_id } : {}),
+      ...(args.decision !== undefined ? { decision: args.decision } : {}),
+      ...(args.reason !== undefined ? { reason: args.reason } : {}),
     };
     appendFileSync(this._dbPath, JSON.stringify(rec) + "\n", "utf8");
   }
@@ -272,10 +282,17 @@ export function recordIfEnabled(args: {
   timestamp: string;
   mode: string;
   trace_id?: string;
+  decision?: string;
+  reason?: string;
 }): void {
-  const store = getStore();
-  if (!store) return;
   try {
+    // getStore() is inside the try: first-call initialisation opens the
+    // history file (mkdir + line-count scan), which can throw on an
+    // unwritable / unreadable path. Local history is best-effort telemetry
+    // — neither initialisation nor write failure may break the data path
+    // (it would otherwise turn a FULL-deny "return null" into a throw).
+    const store = getStore();
+    if (!store) return;
     store.record(args);
   } catch {
     // Logging failure must not break the data path.
