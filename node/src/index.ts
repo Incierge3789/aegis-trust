@@ -74,6 +74,13 @@ export {
   resetModuleClient,
   isDevHost,
   resolveVerifySsl,
+  // userIntendsFull is the rc4-level intent heuristic (parity with PyPI
+  // `_user_intends_full`). Re-exported in the barrel so the rc4 CHANGELOG
+  // Migration recipe ("callers that import userIntendsFull directly from
+  // aegis-trust") resolves against the public package surface. Without
+  // this re-export, the Migration story is non-functional for npm
+  // consumers (codex iter-1 cross-review P1 closure).
+  userIntendsFull,
 } from "./client.js";
 
 // Config (YAML loader, parity with aegis.config).
@@ -104,7 +111,7 @@ export {
   type ShieldHistoryHandle,
 } from "./vitestPlugin.js";
 
-export const VERSION = "0.9.0-rc3";
+export const VERSION = "0.9.0-rc5";
 
 // Schema version for the audit event format emitted by HistoryStore and
 // the ingest endpoint payload. Bumped when audit record shape changes.
@@ -118,7 +125,7 @@ export const AUDIT_SCHEMA_VERSION = 1;
 //   "deprecated" → marked for removal in next major.
 export const STABILITY_LEVEL: "preview" | "stable" | "deprecated" = "preview";
 
-// Aegis-Api-Version dated header (Stripe model 7 項 / productization-ops/sprint_003 Phase C).
+// Aegis-Api-Version dated header (Stripe-model 7-axis API versioning / productization-ops/sprint_003 Phase C).
 // Date-based public contract version. Clients send `Aegis-Api-Version: <YYYY-MM-DD>`;
 // unset → SDK uses this default. Registry + sunset policy:
 // ~/ops-meta/ops/productization-ops/data/api_versioning_policy.yaml

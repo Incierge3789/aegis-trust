@@ -4,11 +4,11 @@
 // with `node`. Node refuses ESM `import` syntax on the unknown extension, so
 // we use a CJS wrapper with a dynamic import() (the SDK is ESM-only).
 //
-// Goal: prove that a developer can go from `npm install @aegis_trust/sdk`
+// Goal: prove that a developer can go from `npm install aegis-trust`
 // to their first `shield()` decision in under 60s on a clean machine.
 
 (async () => {
-  const sdk = await import("@aegis_trust/sdk");
+  const sdk = await import("aegis-trust");
   const { shield } = sdk;
 
   function db_fetch(id) {

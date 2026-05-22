@@ -16,10 +16,19 @@ set -euo pipefail
 
 PYTHON_VERSIONS="${PYTHON_VERSIONS:-3.10 3.11 3.12 3.13}"
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-  echo "ERROR: not inside a git repository" >&2
-  exit 1
-}
+# T-006c-1b 2026-05-21: in the canonical aegis-trust monorepo, "Python
+# package root" is python/ (not the git toplevel which is the monorepo
+# root containing python/ + node/). Use script-relative path so the
+# script works regardless of cwd, with fallback to git-toplevel for
+# aegis-shield-flat-layout compat.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [[ ! -f "${REPO_ROOT}/pyproject.toml" ]]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "ERROR: pyproject.toml not found at ${SCRIPT_DIR}/.. and not in a git repo" >&2
+    exit 1
+  }
+fi
 cd "$REPO_ROOT"
 
 command -v uv >/dev/null 2>&1 || {
