@@ -1,8 +1,12 @@
 # Changelog
 
-## [Unreleased] — CLI bin-shim silent-exit fix (no version bump yet)
+## [Unreleased]
 
-**Bug fix, no API surface change. Will land in the next release cut (no publish in this PR).**
+**No version bump, no publish in these PRs. Will land in the next release cut.**
+
+### Changed
+
+- `README.md`: added a `### FULL mode — gateway trust-boundary guarantees` subsection. It states, in **scoped** wording verified against aegis-core code, the four guarantees the gateway `/check-access` ingress provides after the Core Security Remediation track (CSR 4/4, landed in aegis-core 2026-05-21): identity binding to the auth-middleware identity, ingress denial of unknown purpose / scope / malformed capsule, audit-or-deny (HTTP 503) fail-closed, and `AEGIS_PROFILE=production` boot-time config validation. The subsection also states explicitly what is **not** guaranteed (no gateway-wide audit fail-closed, no purpose × scope field-level minimum-disclosure, not production-ready out of the box, no all-gateway-operations audit-complete claim) and records four tracked follow-ups.
 
 ### Fixed
 
