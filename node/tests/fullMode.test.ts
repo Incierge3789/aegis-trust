@@ -30,6 +30,11 @@ function fetchMock(): {
     if (url.endsWith("/health")) {
       return new Response("ok", { status: 200 });
     }
+    // T-SDK-FULL-GATE-01: FULL mode now performs a pre-call /check-access
+    // authorization. The happy-path mock grants it.
+    if (url.includes("/check-access")) {
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    }
     if (url.includes("/shield/ingest")) {
       return new Response(
         JSON.stringify({
@@ -70,9 +75,19 @@ describe("Mode.FULL — filter + async ingest", () => {
     expect(sent.entries[0].purpose).toBe("support");
   });
 
-  it("never bubbles ingest failures into caller", async () => {
-    globalThis.fetch = (async () => {
-      throw new Error("net down");
+  it("never bubbles ingest failures into caller (ingest fails AFTER authorize succeeds)", async () => {
+    // T-SDK-FULL-GATE-01: ingest is post-authorization telemetry, fail-OPEN.
+    // /check-access must still succeed (it is the trust gate); only the
+    // downstream /shield/ingest fails. The caller still gets filtered data.
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/check-access")) {
+        return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+      }
+      if (url.includes("/shield/ingest")) {
+        throw new Error("ingest net down");
+      }
+      return new Response("not found", { status: 404 });
     }) as typeof fetch;
     process.env.AEGIS_TOKEN = "test-token";
     process.env.AEGIS_BASE_URL = "https://localhost:8443/api/v1";
@@ -83,7 +98,7 @@ describe("Mode.FULL — filter + async ingest", () => {
       mode: Mode.FULL,
     })(async (_: unknown) => ({ name: "A", ssn: "X" }));
 
-    // Should still resolve with filtered data.
+    // Authorize succeeded → filtered data returned; ingest failure swallowed.
     await expect(getUser(1)).resolves.toEqual({ name: "A" });
   });
 });
