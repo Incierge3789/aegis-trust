@@ -141,7 +141,7 @@ Modern AI agents request raw records and decide what to use. That's a security b
 
 ## Trust-boundary scope
 
-`FULL` mode integrates with an `aegis-core` gateway. Following the aegis-core Core Security Remediation track (S173–S176), the gateway's `/check-access` trust boundary and boot path provide the following — and **only** the following — guarantees. These claims are deliberately scoped; do not read more into them.
+`FULL` mode integrates with an `aegis-core` gateway. In `FULL` mode, `shield()` performs a **pre-call `/check-access` authorization before returning data**: on deny / `403` / `503` / gateway-unreachable / network error the wrapped call returns a safe empty value, never the unfiltered result. `LITE` mode does not contact the gateway. Following the aegis-core Core Security Remediation track (S173–S176), the gateway's `/check-access` trust boundary and boot path provide the following — and **only** the following — guarantees. These claims are deliberately scoped; do not read more into them.
 
 **Guaranteed (scoped claims):**
 
@@ -162,6 +162,9 @@ Modern AI agents request raw records and decide what to use. That's a security b
 - `AEGIS_CAPSULE_ROOT`-missing → `500` path emits no audit record.
 - `scope` → RBAC / Reflex / field-level minimum-disclosure wiring.
 - Debug-log identity-field redaction.
+- SDK access-cache TTL: `authorize()` caches an allow decision for 30 s, so a
+  same-token server-side policy change is invisible for ≤ 30 s (token rotation
+  invalidates immediately). Tracked as a P1 follow-up.
 
 ## API surface (parity with PyPI `aegis-trust` 0.8.1)
 
@@ -227,8 +230,10 @@ shield({ purpose: "lookup", scope: ["name"] })(
 | Mode | What it does | Requires |
 |---|---|---|
 | `LITE` | In-process filter only. Deterministic, no I/O. | nothing |
-| `FULL` | Client-side filter + per-call `aegis-core` `/check-access` admission (JWT-bound identity, ingress deny-by-default, audit-fail-closed) + audit ingest. See [Trust-boundary scope](#trust-boundary-scope) for the precise guarantees. | aegis-core running + `AEGIS_TOKEN` |
-| `AUTO` | Detect: `FULL` if `AEGIS_TOKEN` set & backend reachable, else `LITE`. | nothing |
+| `FULL` | **Pre-call `/check-access` authorization** (the trust gate), then client-side filter. Deny / `403` / `503` / gateway-unreachable → safe empty value. Audit ingest runs only *after* authorization succeeds (best-effort telemetry, never the gate). Async wrapped function only. See [Trust-boundary scope](#trust-boundary-scope). | aegis-core running + `AEGIS_TOKEN` + async fn |
+| `AUTO` | Detect: `FULL` if `AEGIS_TOKEN` set **and** backend reachable, else `LITE`. Sync wrapped fn: always `LITE` (detection cannot be awaited). | nothing |
+
+**Sync functions and `Mode.FULL`**: `Mode.FULL` performs an awaited `/check-access` call, so it requires an **async** wrapped function. A synchronous function wrapped with explicit `Mode.FULL` throws `AegisValidationError` (`code: aegis.shield.mode.sync_full_unsupported`) on invocation — it is never silently downgraded to a label-only "full". Sync + `AUTO` resolves to `LITE`.
 
 ### Full mode env vars
 

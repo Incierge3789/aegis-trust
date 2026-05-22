@@ -132,6 +132,21 @@ export function resolveVerifySsl(
   return true;
 }
 
+// T-SDK-FULL-GATE-01: reason a /check-access authorization did not grant.
+// Lets shield() FULL record a local diagnostic without widening the boolean
+// `authorize()` public contract.
+export type AuthzReason =
+  | "allowed" // granted
+  | "denied" // HTTP 200 + allowed:false — gateway policy denied
+  | "core_503" // aegis-core audit-fail-closed (CSR-02)
+  | "http_error" // 403 identity_mismatch / other non-200 / unparseable body
+  | "unreachable"; // network error / timeout — gateway not reached
+
+export interface AuthzResult {
+  readonly allowed: boolean;
+  readonly reason: AuthzReason;
+}
+
 export class AegisClient {
   private _baseUrl: string;
   private _token: string;
@@ -265,12 +280,17 @@ export class AegisClient {
     return (await resp.json()) as { allowed: boolean };
   }
 
-  // AO-003 gate: fail-closed authorize.
-  async authorize(
+  // AO-003 gate: fail-closed authorize. The detailed variant returns the
+  // failure reason so callers (shield() FULL) can record a local diagnostic.
+  // T-SDK-FULL-GATE-01: additive — the boolean `authorize()` contract below
+  // is unchanged; existing direct callers are unaffected.
+  async authorizeDetailed(
     purpose: string,
     scope: ReadonlyArray<string>,
-  ): Promise<boolean> {
-    if (this.cachedAllow(purpose, scope)) return true;
+  ): Promise<AuthzResult> {
+    if (this.cachedAllow(purpose, scope)) {
+      return { allowed: true, reason: "allowed" };
+    }
     const epochAtRequest = this._tokenEpoch;
     const t0 = performance.now();
     let resp: Response;
@@ -280,7 +300,7 @@ export class AegisClient {
       });
     } catch {
       emitMetric("check-access", t0, 0);
-      return false;
+      return { allowed: false, reason: "unreachable" };
     }
     emitMetric("check-access", t0, resp.status);
     if (resp.status === 200) {
@@ -288,15 +308,31 @@ export class AegisClient {
       try {
         body = await resp.json();
       } catch {
-        return false;
+        return { allowed: false, reason: "http_error" };
       }
       if (AegisClient.checkAccessAllowed(body)) {
         this.rememberAllow(purpose, scope, epochAtRequest);
-        return true;
+        return { allowed: true, reason: "allowed" };
       }
-      return false;
+      return { allowed: false, reason: "denied" };
     }
-    return false;
+    // CSR-02: aegis-core returns 503 when a /check-access decision cannot be
+    // written to the audit log (audit-fail-closed).
+    if (resp.status === 503) {
+      return { allowed: false, reason: "core_503" };
+    }
+    // 403 identity_mismatch / RBAC deny / unknown_scope / invalid_capsule_id,
+    // and any other non-200.
+    return { allowed: false, reason: "http_error" };
+  }
+
+  // Boolean AO-003 gate — unchanged public contract. Delegates to
+  // authorizeDetailed(); existing direct callers see identical behaviour.
+  async authorize(
+    purpose: string,
+    scope: ReadonlyArray<string>,
+  ): Promise<boolean> {
+    return (await this.authorizeDetailed(purpose, scope)).allowed;
   }
 
   // ── audit-log ─────────────────────────────────────────
