@@ -34,6 +34,11 @@
     the function ran, so the data shape can be mirrored). The "fail-closed
     decorator" claim is now true for the Node SDK (previously a filter
     exception propagated).
+  - Local audit/history emission (`AEGIS_HISTORY=1`) is fully fail-safe:
+    `recordIfEnabled()` now initialises the history store **inside** its
+    try/catch, so an unwritable history path cannot turn a FULL-deny
+    `null` return — or a fail-closed filter error — into a thrown
+    exception. Audit is telemetry; it never breaks the data path.
 - **Local diagnostic**: a non-granted FULL authorization is recorded to the
   local history log with `decision` (`deny` / `fail_closed`) + `reason`
   (`denied` / `unreachable` / `core_503` / `http_error` / `internal_error`),

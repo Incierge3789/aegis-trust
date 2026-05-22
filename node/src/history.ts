@@ -285,9 +285,14 @@ export function recordIfEnabled(args: {
   decision?: string;
   reason?: string;
 }): void {
-  const store = getStore();
-  if (!store) return;
   try {
+    // getStore() is inside the try: first-call initialisation opens the
+    // history file (mkdir + line-count scan), which can throw on an
+    // unwritable / unreadable path. Local history is best-effort telemetry
+    // — neither initialisation nor write failure may break the data path
+    // (it would otherwise turn a FULL-deny "return null" into a throw).
+    const store = getStore();
+    if (!store) return;
     store.record(args);
   } catch {
     // Logging failure must not break the data path.
