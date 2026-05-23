@@ -342,6 +342,22 @@ async function gateAndRunFull(
     // Post-authorization telemetry. Fire-and-forget; ingest failure is
     // fail-OPEN — it is NOT the trust gate (the gate is authorizeDetailed()
     // above, which already succeeded).
+    //
+    // === KNOWN DIVERGENCE FROM PYTHON SDK (tracked for v1.0 GA) ===
+    // The Python SDK returns empty (fail-CLOSED) on a gateway ingest exception
+    // in the same code path, by design — it treats audit completeness as part
+    // of the AO-003 contract. Node's fail-open here is the intentional
+    // alternative design (audit = best-effort telemetry, gate = trust boundary,
+    // strict separation). The two SDKs are intentionally NOT identical on this
+    // edge today; the reconciliation decision is a v1.0 GA design item:
+    //   - Option A: align Node to Python (audit fail-closed, breaking-behavior)
+    //   - Option B: align Python to Node (audit fail-open, weakens AO-003)
+    //   - Option C: env-var-controlled (AEGIS_AUDIT_FAIL_CLOSED=1 opt-in)
+    // Operators that require AO-003 audit completeness today MUST prefer the
+    // Python SDK (literal disclosure: root README.md §Alpha limitations + node
+    // README.md §first-fold exception note).
+    // Routing: operational-trust-review backlog `python_node_parity` family +
+    // sprint_010 T-010-3 record + design review sprint (sprint_011+ planning).
     if (blockedFields.length > 0) {
       const entry: IngestEntry = {
         function: fnName,
