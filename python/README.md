@@ -326,6 +326,7 @@ When `shield()` runs in FULL mode it calls the aegis-core gateway's `/check-acce
 - Gateway-wide audit-append fail-closed sweep (beyond `/check-access`).
 - Debug-log redaction (`RUST_LOG=debug` output hygiene).
 - Wiring validated `scope` through to RBAC / Reflex / field-level enforcement.
+- SDK access-cache TTL: `authorize()` caches an *allow* decision for 30 s (`_ACCESS_CACHE_TTL_S`). Deny decisions are **never** cached (fail-closed). A same-token server-side policy change is invisible to this SDK process for ≤ 30 s after the last allow; a token rotation (`set_token(...)`) invalidates the entire allow-cache immediately by epoch bump. Parity with the TypeScript SDK `ACCESS_CACHE_TTL_MS = 30_000` (same value, same fail-closed deny semantics). A bounded TTL window for allow decisions is the explicit trade-off; operators that require zero allow-staleness should call `set_token()` on policy change.
 
 ---
 
