@@ -1,9 +1,9 @@
-# @aegis_trust/sdk Docker quickstart — minimal demo image.
+# aegis-trust Docker quickstart — minimal demo image.
 #
 # Goal: docker compose up → curl :8080/demo/agent-request → see field
 # filtering and audit log without installing anything on the host.
 #
-# Now that @aegis_trust/sdk is published on npm, the Dockerfile is a
+# Now that aegis-trust is published on npm, the Dockerfile is a
 # single-stage minimal install. No source-pack gymnastics needed.
 
 FROM node:20-alpine AS build

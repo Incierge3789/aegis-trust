@@ -25,10 +25,18 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # ─── Resolve repo root ─────────────────────────────────────────────
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-  echo "ERROR: not inside a git repository" >&2
-  exit 1
-}
+# T-006c-1b 2026-05-21: in the canonical aegis-trust monorepo, "Python
+# package root" is python/ (not the git toplevel = monorepo root
+# containing python/ + node/). Use script-relative path with fallback to
+# git toplevel for aegis-shield-flat-layout compat.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [[ ! -f "${REPO_ROOT}/pyproject.toml" ]]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "ERROR: pyproject.toml not found at ${SCRIPT_DIR}/.. and not in a git repo" >&2
+    exit 1
+  }
+fi
 cd "$REPO_ROOT"
 
 # ─── Parse arguments ───────────────────────────────────────────────

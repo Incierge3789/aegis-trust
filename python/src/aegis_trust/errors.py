@@ -5,7 +5,7 @@ route on the code, surface the remediation to a human or a coding model,
 and follow the docs_url for canonical guidance. Mirror of the Sentry
 archetype error envelope — no free-text guessing required for retry.
 
-Python port of TypeScript :mod:`@aegis_trust/sdk` ``src/errors.ts``
+Python port of TypeScript :mod:`aegis-trust` ``src/errors.ts``
 (introduced in v0.9.0-rc1 internal-ops/sprint_001).
 """
 

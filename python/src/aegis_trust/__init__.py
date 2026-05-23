@@ -52,9 +52,9 @@ __all__ = [
     "AUDIT_SCHEMA_VERSION",
     "STABILITY_LEVEL",
 ]
-__version__ = "0.9.0-rc3"
+__version__ = "0.9.0-rc5"
 
-# Schema version for audit event format (parity with npm @aegis_trust/sdk
+# Schema version for audit event format (parity with npm aegis-trust
 # AUDIT_SCHEMA_VERSION). Bumped when audit record shape changes.
 AUDIT_SCHEMA_VERSION = 1
 
@@ -64,7 +64,7 @@ AUDIT_SCHEMA_VERSION = 1
 #   "deprecated" → marked for removal in next major.
 STABILITY_LEVEL = "preview"
 
-# Aegis-Api-Version dated header (Stripe model 7 項 / internal-ops/sprint_003 Phase C).
+# Aegis-Api-Version dated header (Stripe-model 7-axis API versioning / internal-ops/sprint_003 Phase C).
 # Date-based public contract version. Clients send `Aegis-Api-Version: <YYYY-MM-DD>`;
 # unset → SDK uses this default. Registry: ~/internal-ops/ops/internal-ops/data/api_versioning_policy.yaml
 # Sunset policy: 18-month notice + 6-month deprecation warning.

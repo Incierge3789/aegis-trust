@@ -564,10 +564,40 @@ export class AegisClient {
 
 let _moduleClient: AegisClient | null = null;
 let _detectedMode: "lite" | "full" | null = null;
+let _detectedModeTs = 0;
+let _baseUrlAliasWarned = false;
+
+// Mode detection cache TTL — parity with PyPI shield.py `_DETECT_MODE_TTL_S = 60.0`.
+// AEGIS_MODE=auto re-probes the backend every `_DETECT_MODE_TTL_MS` ms so
+// process state stays in sync with reality without per-call probes. Without
+// this, a stuck `lite` detection survives gateway recovery, and a stuck
+// fail-closed `full` keeps warning even after the backend is healthy.
+const _DETECT_MODE_TTL_MS = 60_000;
+
+// Canonical env var resolution. AEGIS_URL is canonical (parity with PyPI
+// aegis-trust shield.py:119). AEGIS_BASE_URL is a deprecated alias kept
+// for v0.8.x → v0.9.x backward compatibility — emits one warning per
+// process, removed in v1.0.0 per docs/VERSIONING.md deprecation policy.
+function resolveBaseUrl(): string {
+  const aegisUrl = process.env.AEGIS_URL?.trim();
+  if (aegisUrl) return aegisUrl;
+  const aegisBaseUrl = process.env.AEGIS_BASE_URL?.trim();
+  if (aegisBaseUrl) {
+    if (!_baseUrlAliasWarned) {
+      _baseUrlAliasWarned = true;
+      console.warn(
+        "aegis-trust: AEGIS_BASE_URL is deprecated — use AEGIS_URL "
+          + "(parity with PyPI aegis-trust). AEGIS_BASE_URL will be removed in v1.0.0.",
+      );
+    }
+    return aegisBaseUrl;
+  }
+  return DEFAULT_BASE_URL;
+}
 
 export function getModuleClient(): AegisClient {
   if (_moduleClient === null) {
-    const baseUrl = process.env.AEGIS_BASE_URL || DEFAULT_BASE_URL;
+    const baseUrl = resolveBaseUrl();
     const token = process.env.AEGIS_TOKEN || "";
     const verifyEnv = process.env.AEGIS_VERIFY_SSL;
     const verifySsl = verifyEnv === "false" || verifyEnv === "0" ? false : true;
@@ -576,24 +606,84 @@ export function getModuleClient(): AegisClient {
   return _moduleClient;
 }
 
+// "User expects Full mode" heuristic, parity with PyPI shield.py
+// _user_intends_full (line 165-181). Returns true when:
+//   - AEGIS_TOKEN is set, OR
+//   - AEGIS_URL / AEGIS_BASE_URL points at a non-dev host.
+// (NOTE: explicit `AEGIS_MODE=full` is NOT a Full-intent signal here —
+// it is handled in its own branch by `detectMode()` before the AUTO
+// probe, mirroring PyPI's `_detect_mode` line 160-161.)
+// When true, detectMode refuses to silently degrade to Lite on a
+// transient backend outage — AO-001 Gateway-uniqueness outranks
+// availability.
 export function userIntendsFull(): boolean {
-  const m = process.env.AEGIS_MODE?.toLowerCase();
-  return m === "full" || !!process.env.AEGIS_TOKEN;
+  if (process.env.AEGIS_TOKEN?.trim()) return true;
+  const url = (process.env.AEGIS_URL || process.env.AEGIS_BASE_URL || "").trim();
+  return !!url && !isDevHost(url);
 }
 
 export async function detectMode(): Promise<"lite" | "full"> {
-  if (_detectedMode !== null) return _detectedMode;
+  // TTL cache — parity with PyPI shield.py `_DETECT_MODE_TTL_S = 60.0`.
+  // Without this, a transient backend outage causes a permanently-stuck
+  // "lite" (or fail-closed Full warn) for the process lifetime.
+  const nowMs = Date.now();
+  if (_detectedMode !== null && nowMs - _detectedModeTs < _DETECT_MODE_TTL_MS) {
+    return _detectedMode;
+  }
+
+  const envMode = process.env.AEGIS_MODE?.toLowerCase();
+  if (envMode === "lite") {
+    _detectedMode = "lite";
+    _detectedModeTs = nowMs;
+    return _detectedMode;
+  }
+  if (envMode === "full") {
+    // Explicit Full: never silently degrade. Calls fail-closed at the
+    // gateway until the backend recovers. Parity with PyPI shield.py
+    // _detect_mode line 160-161.
+    _detectedMode = "full";
+    _detectedModeTs = nowMs;
+    return _detectedMode;
+  }
+  // AUTO branch — intent-first per the README AUTO behaviour matrix:
+  //   - no Full intent (no AEGIS_TOKEN, no non-dev URL) → LITE (no probe)
+  //   - Full intent + reachable backend                 → FULL
+  //   - Full intent + unreachable backend               → fail-closed FULL + warn
+  // The intent check runs BEFORE the /health probe so a dev environment
+  // without credentials does not opportunistically call the gateway —
+  // this matches the documented matrix exactly. Earlier rc4-rc5 builds
+  // probed first and upgraded to Full whenever the gateway was reachable
+  // regardless of intent; that behaviour contradicted the matrix line
+  // "auto + no Full intent → Lite" and is corrected here. Mirrors PyPI
+  // shield.py _detect_mode intent-first variant.
   if (!userIntendsFull()) {
     _detectedMode = "lite";
+    _detectedModeTs = nowMs;
     return _detectedMode;
   }
   const client = getModuleClient();
   const available = await client.isAvailable();
-  _detectedMode = available ? "full" : "lite";
+  if (available) {
+    _detectedMode = "full";
+    _detectedModeTs = nowMs;
+    return _detectedMode;
+  }
+  // AUTO + explicit Full intent + unreachable: fail-closed Full.
+  // Silent Lite degrade would leak data the user asked the gateway to
+  // filter.
+  _detectedMode = "full";
+  _detectedModeTs = nowMs;
+  console.warn(
+    "aegis-trust: AEGIS_MODE=auto with explicit URL/TOKEN but backend "
+      + "unreachable — staying in Full mode (fail-closed). All shield() "
+      + "calls will deny until the gateway recovers.",
+  );
   return _detectedMode;
 }
 
 export function resetModuleClient(): void {
   _moduleClient = null;
   _detectedMode = null;
+  _detectedModeTs = 0;
+  _baseUrlAliasWarned = false;
 }

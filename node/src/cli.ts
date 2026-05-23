@@ -5,9 +5,10 @@
 //   aegis history [--limit N] [--purpose P]
 //   aegis stats
 
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { HistoryStore } from "./history.js";
 import { shield } from "./shield.js";
@@ -227,12 +228,27 @@ export function main(argv: string[]): number {
   return 2;
 }
 
-// When executed as a script (not imported). ESM check: import.meta.url.
+// When executed as a script (not imported as a library). ESM "is main module"
+// detection must handle three invocation paths:
+//   1. Direct: `node path/to/cli.js sandbox`
+//   2. npm bin shim: symlink at node_modules/.bin/aegis → ../aegis-trust/dist/cli.js
+//   3. npx aegis: also goes through the bin shim
+//
+// process.argv[1] is the literal path used to launch node (a symlink for #2/#3);
+// import.meta.url is the resolved module URL (the real cli.js path). The previous
+// basename-suffix check failed for #2/#3 because basename("aegis") never matched
+// a URL ending in "cli.js", so main() never ran — every subcommand exited silently
+// with stdout=0 bytes and exit code 0. realpathSync on both sides canonicalises
+// the symlink so the comparison holds across all three invocation paths.
 const isMain = (() => {
   if (typeof import.meta === "undefined") return false;
   const url = import.meta.url;
-  if (!url) return false;
-  return !!process.argv[1] && url.endsWith(process.argv[1].split("/").pop() ?? "");
+  if (!url || !process.argv[1]) return false;
+  try {
+    return realpathSync(fileURLToPath(url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
 })();
 
 if (isMain) {

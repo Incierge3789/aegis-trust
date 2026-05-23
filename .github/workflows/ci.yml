@@ -1,0 +1,308 @@
+# aegis-trust top-level CI workflow
+#
+# Sprint: internal-ops/sprint_006 Tier 0, T-006c-1c block A.
+# PR: #5 (T-S179-006c-1c-block-a-ci).
+# Closes Codex Operational Scenario Review finding #8 (PR CI not operationally useful).
+#
+# === SAFETY INVARIANTS (do not relax without authorization + cross-review) ===
+#
+#   1. NO `pull_request_target` trigger. Use `pull_request` only.
+#      Rationale: pull_request_target runs with base-repo token (secret access)
+#      and is the canonical fork-PR token-theft attack vector.
+#
+#   2. NO `id-token: write` permission anywhere. Block A has no signing path.
+#      Rationale: id-token grants OIDC for cloud auth / cosign keyless. Any
+#      future enablement requires release-class authorization (Block B).
+#
+#   3. NO secret references. `secrets.PYPI_TOKEN`, `secrets.NPM_TOKEN`,
+#      `secrets.COSIGN_*` MUST NOT appear. Block A is read-only CI.
+#
+#   4. NO unpinned third-party actions. All `uses:` references use full
+#      40-char commit SHA (not `@v4` tags). Tag mutation = supply-chain
+#      attack surface (see CVE-pattern, third-party actions, 2024).
+#
+#   5. Runner: `ubuntu-latest` (GitHub-hosted ephemeral). When operator
+#      registers a `dedicated-runner` self-hosted runner, a future
+#      1-line PR may switch `runs-on:` everywhere. Self-hosted re-enables
+#      fork-PR-runs-code-as-runner-user risk; operator MUST also enable
+#      Settings → Actions → "Require approval for all outside collaborators"
+#      before that switch lands.
+#
+#   6. `ci-gate` is the SINGLE required status check on `main` + `sprint/**`.
+#      Branch protection (operator post-merge action) MUST NOT add individual
+#      matrix-suffixed names (`python-test (3.12)`, etc.) — the aggregator
+#      job propagates failure via `needs:`.
+#
+# === Adversarial test enforcement ===
+#
+# `python/tests/adversarial/test_redteam_S018_ci_attack.py` mechanically
+# enforces invariants 1-4 + ci-gate existence (invariant 6) on every run.
+# Changing this workflow WITHOUT updating that test will fail CI.
+
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - main
+      - sprint/**
+  push:
+    branches:
+      - main
+      - sprint/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  python-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv (pinned)
+        run: pip install 'uv==0.5.30'
+
+      - name: uv sync (dev extras)
+        working-directory: python
+        # PEP 621 [project.optional-dependencies].dev → `uv sync --extra dev`.
+        # `uv sync --dev` (PEP 735 [dependency-groups]) is wrong here because
+        # the project uses PEP 621 extras, not PEP 735 groups.
+        run: uv sync --extra dev
+
+      - name: ruff check
+        working-directory: python
+        run: uv run ruff check src/ tests/
+
+      - name: ruff format --check
+        working-directory: python
+        run: uv run ruff format --check src/ tests/
+
+      - name: Install opentimestamps-client (integration-test runtime dep)
+        # `python/tests/test_ots_verify_external.py` invokes
+        # `scripts/ots-verify-external.sh`, which requires the `ots` binary
+        # from opentimestamps-client. Not in `pyproject.toml` because it is
+        # a CI-runtime tool, not an SDK runtime dep. Local dev macOS users
+        # typically get it via Homebrew (`brew install opentimestamps-client`).
+        run: pip install opentimestamps-client
+
+      - name: pytest
+        working-directory: python
+        run: uv run pytest tests/ -v --tb=short
+
+  node-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Covers declared engines.node = ">=18" in node/package.json.
+        # LTS lines only (skips 19, 21).
+        node-version: ['18', '20', '22']
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: node/package-lock.json
+
+      - name: npm ci
+        working-directory: node
+        run: |
+          npm ci
+          # Workaround for npm bug #4828: package-lock.json was generated on
+          # a non-Linux-x64 platform (macOS arm64) and omits the platform-
+          # specific Rollup binary required on this runner. `npm ci` does not
+          # backfill missing optional deps. Install it explicitly so vitest /
+          # tsc / vite-driven tooling can find Rollup at run time.
+          npm install --no-save --no-package-lock @rollup/rollup-linux-x64-gnu
+
+      - name: Build (regenerates dist/, required by PR #4 bin-shim regression test)
+        working-directory: node
+        run: npm run build
+
+      - name: Lint (tsc --noEmit)
+        working-directory: node
+        run: npm run lint
+
+      - name: vitest (full suite)
+        working-directory: node
+        run: npm test
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      # gitleaks-action v2.x requires GITHUB_TOKEN as an env var to scan PRs.
+      # Block A's adversarial test (`test_redteam_S018_ci_attack.py:200-225`)
+      # bans every `secrets.X` reference including `secrets.GITHUB_TOKEN`. The
+      # token requirement and the test invariant are mutually exclusive, so we
+      # install the gitleaks binary directly with SHA256 verification (supply-
+      # chain integrity preserved without the token dependency).
+      - name: Install gitleaks (SHA256-verified binary)
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: gitleaks scan
+        run: gitleaks detect --redact --no-banner --config .gitleaks.toml
+
+  drift-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Setup Python 3.11 (tomllib stdlib)
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Install packaging (PEP 440 normalization)
+        run: pip install 'packaging==24.2'
+
+      - name: License byte-identity (LICENSE vs python/LICENSE)
+        run: |
+          diff -q LICENSE python/LICENSE \
+            || { echo "DRIFT: LICENSE != python/LICENSE; PR #3 README byte-for-byte claim broken"; exit 1; }
+          echo "OK: LICENSE and python/LICENSE are byte-identical"
+
+      - name: Python version triple coherence (VERSION / pyproject.toml / __init__.py)
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          from packaging.version import Version
+          import tomllib, re
+
+          v_VERSION = Path("python/VERSION").read_text().strip()
+          v_pyproject = tomllib.loads(Path("python/pyproject.toml").read_text())["project"]["version"]
+          init_src = Path("python/src/aegis_trust/__init__.py").read_text()
+          m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init_src)
+          assert m is not None, "FATAL: __version__ literal not found in python/src/aegis_trust/__init__.py"
+          v_init = m.group(1)
+
+          v1, v2, v3 = Version(v_VERSION), Version(v_pyproject), Version(v_init)
+          if not (v1 == v2 == v3):
+              print(f"DRIFT (python): VERSION={v_VERSION!r}  pyproject={v_pyproject!r}  __init__={v_init!r}")
+              print(f"  normalized: VERSION={v1}  pyproject={v2}  __init__={v3}")
+              raise SystemExit(1)
+          print(f"OK (python): triple matches at {v1}")
+          PY
+
+      - name: Node version triple coherence (VERSION / package.json / index.ts)
+        run: |
+          v_VERSION=$(cat node/VERSION | tr -d '[:space:]')
+          v_package=$(node -p "require('./node/package.json').version")
+          # Anchored grep so AUDIT_SCHEMA_VERSION (line 120) cannot match.
+          # Expects: `export const VERSION = "x.y.z";` at line start.
+          v_index=$(grep -E '^export const VERSION = ' node/src/index.ts | sed 's/.*"\(.*\)".*/\1/')
+          if [ -z "$v_index" ]; then
+              echo "FATAL: 'export const VERSION = ' not found at line start of node/src/index.ts"
+              exit 1
+          fi
+          if [ "$v_VERSION" != "$v_package" ] || [ "$v_package" != "$v_index" ]; then
+              echo "DRIFT (node): VERSION=$v_VERSION  package.json=$v_package  index.ts=$v_index"
+              exit 1
+          fi
+          echo "OK (node): triple matches at $v_VERSION"
+
+      - name: README install-command coherence (PEP 440 normalized vs pyproject.toml)
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          from packaging.version import Version
+          import tomllib, re
+
+          readme = Path("README.md").read_text()
+          m = re.search(r"pip install\s+'aegis-trust==([^']+)'\s+--pre", readme)
+          assert m, "FATAL: README pip install pin not found in expected format ('aegis-trust==X.Y.ZrcN' --pre)"
+          readme_v = m.group(1)
+          pyproject_v = tomllib.loads(Path("python/pyproject.toml").read_text())["project"]["version"]
+          if Version(readme_v) != Version(pyproject_v):
+              print(f"DRIFT: README pip pin={readme_v!r}  pyproject={pyproject_v!r}")
+              print(f"  normalized: README={Version(readme_v)}  pyproject={Version(pyproject_v)}")
+              raise SystemExit(1)
+          print(f"OK (README): pip pin matches pyproject at {Version(readme_v)}")
+          PY
+
+  ci-gate:
+    # Aggregator job for branch protection. Single required status check
+    # name that propagates upstream matrix / job failures via `needs:`.
+    # Sidesteps GitHub's matrix-suffixed check-name problem
+    # (`python-test (3.12)`, etc.).
+    runs-on: ubuntu-latest
+    needs:
+      - python-test
+      - node-test
+      - gitleaks
+      - drift-check
+    if: always()
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    steps:
+      - name: Aggregate upstream job results
+        run: |
+          python_result="${{ needs.python-test.result }}"
+          node_result="${{ needs.node-test.result }}"
+          gitleaks_result="${{ needs.gitleaks.result }}"
+          drift_result="${{ needs.drift-check.result }}"
+
+          echo "Upstream results:"
+          echo "  python-test:  $python_result"
+          echo "  node-test:    $node_result"
+          echo "  gitleaks:     $gitleaks_result"
+          echo "  drift-check:  $drift_result"
+
+          if [ "$python_result"   != "success" ] \
+            || [ "$node_result"    != "success" ] \
+            || [ "$gitleaks_result" != "success" ] \
+            || [ "$drift_result"   != "success" ]; then
+              echo ""
+              echo "ci-gate FAIL: at least one upstream job did not succeed."
+              exit 1
+          fi
+          echo ""
+          echo "ci-gate PASS: all upstream jobs succeeded."

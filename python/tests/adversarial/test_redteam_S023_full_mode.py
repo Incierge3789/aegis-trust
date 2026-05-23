@@ -175,7 +175,8 @@ def test_full_mode_default_deny_when_unreachable():
     def f() -> dict:
         return {"name": "alice", "ssn": "123"}
 
-    assert f() == {}
+    # T-SDK-FULL-GATE-01: gateway-unreachable → fail-closed → fn not invoked → None.
+    assert f() is None
 
 
 # ── T-139 VERIFY_SSL guard from @shield path ────────────────────────
@@ -200,7 +201,11 @@ def test_purpose_invalid_denied(purpose):
         # pretend the backend rejects every weird purpose
         if request.url.path.endswith("/check-access"):
             body = json.loads(request.read())
-            if not body.get("purpose") or "/" in body.get("purpose", ""):
+            # Reject empty / whitespace-only / path-escape purposes. The
+            # `.strip()` is what catches the " " parametrize case — without
+            # it, " " is truthy and the test would grant, then incorrectly
+            # rely on the ingest-fail fallback to look like a denial.
+            if not body.get("purpose", "").strip() or "/" in body.get("purpose", ""):
                 return httpx.Response(403, json={"error": "denied"})
             return httpx.Response(200, json={"allowed": True})
         return httpx.Response(200, json={"status": "ok"})
@@ -211,7 +216,8 @@ def test_purpose_invalid_denied(purpose):
     def f() -> dict:
         return {"name": "alice"}
 
-    assert f() == {}
+    # T-SDK-FULL-GATE-01: /check-access deny → fn not invoked → None.
+    assert f() is None
 
 
 # ── T-142 _diff_keys body contract ──────────────────────────────────

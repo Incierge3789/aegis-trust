@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+**No version bump, no publish in these PRs. Will land in the next release cut.**
+
+### Changed — `detectMode` now intent-first (matches README AUTO behaviour matrix)
+
+- `node/src/client.ts` `detectMode()` checks `userIntendsFull()` BEFORE
+  probing the backend. Earlier rc4-rc5 builds probed `/health` first and
+  opportunistically upgraded AUTO to Full whenever the gateway was
+  reachable, even without intent — that contradicted the README matrix
+  line "auto + no Full intent → Lite" and made dev environments without
+  credentials call `/check-access` against the gateway. The intent-first
+  variant restores the documented matrix exactly.
+- New behaviour:
+  - `AUTO + no Full intent` (no `AEGIS_TOKEN` AND no non-dev URL) → LITE
+    (no probe, no `/check-access`).
+  - `AUTO + Full intent + reachable backend` → FULL (opportunistic upgrade
+    with intent).
+  - `AUTO + Full intent + unreachable backend` → fail-closed FULL + one
+    `console.warn`. Unchanged.
+- `tests/fullMode.test.ts`: the rc4 "AUTO opportunistically upgrades to
+  FULL when backend reachable, even without AEGIS_TOKEN" test asserted
+  the now-removed probe-first behaviour. Replaced with the matrix-aligned
+  assertion: "AUTO + no token + reachable backend → LITE (no opportunistic
+  upgrade without intent)".
+- **Routed scenarios** (internal review verification batch 1):
+  `python_node_parity` divergence #2 (AUTO degrade semantics) — resolved.
+  `auto_mode_behavior` (P1) — resolved.
+
 ### Changed — `shield()` FULL mode now performs a real `/check-access` trust gate
 
 - **`shield()` FULL mode previously did client-side filtering + best-effort
@@ -81,7 +108,87 @@
   boundary was corrected.
 - No code change, no API change. `python/README.md` was reviewed and is
   unchanged: it makes no `FULL`-mode gateway over-claim.
+### Changed — README: `FULL mode — gateway trust-boundary guarantees` subsection (CSR 4/4 claim-scoping)
 
+- `README.md`: added a `### FULL mode — gateway trust-boundary guarantees` subsection. It states, in **scoped** wording verified against aegis-core code, the four guarantees the gateway `/check-access` ingress provides after the Core Security Remediation track (CSR 4/4, landed in aegis-core 2026-05-21): identity binding to the auth-middleware identity, ingress denial of unknown purpose / scope / malformed capsule, audit-or-deny (HTTP 503) fail-closed, and `AEGIS_PROFILE=production` boot-time config validation. The subsection also states explicitly what is **not** guaranteed (no gateway-wide audit fail-closed, no purpose × scope field-level minimum-disclosure, not production-ready out of the box, no all-gateway-operations audit-complete claim) and records four tracked follow-ups.
+
+### Fixed
+
+- **CLI bin-shim silent-exit** (`src/cli.ts`): every `aegis` subcommand invoked through the npm bin shim (`node_modules/.bin/aegis`, including the `npx aegis ...` path that goes through it) silently exited with 0 bytes on both stdout and stderr and exit code 0. Root cause: the ESM "is main module" check compared `basename(process.argv[1])` (`"aegis"` under the bin shim) against the end of `import.meta.url` (`"cli.js"`); the two never matched, so `main()` was never called. Fixed by canonicalising both sides with `realpathSync(fileURLToPath(import.meta.url))` vs `realpathSync(process.argv[1])`. Customers who ran `npm install aegis-trust && npx aegis sandbox` on rc3 / rc4 / rc5 observed zero output and no error message. The next release cut ships the fix. Direct invocation (`node path/to/dist/cli.js sandbox`) was unaffected.
+- Regression test added: `tests/cli_bin_invocation.test.ts` spawns the compiled `dist/cli.js` through a symlink in a temp directory (the same shape npm creates at install time) and asserts non-empty stdout + correct exit codes for `--help`, `sandbox`, `history`, `stats`, no-arg, and unknown-command invocations.
+
+### Refs
+
+- T-S179-cli-bin-shim (`internal-ops/sprint_006` Tier 0)
+- Codex Operational Scenario Review finding #2 (2026-05-21)
+- Memory `feedback_test_honesty.md`: fail-silent violates 米軍規格
+
+## [0.9.0-rc5] — 2026-05-21 — cross-SDK version-lock (PyPI rc5 parity, no functional change)
+
+`internal-ops/sprint_006` Tier 0 follow-up. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). **Functional content identical to v0.9.0-rc4.**
+
+### Why rc5 (no behaviour change on the npm side)
+
+The Python `aegis-trust@0.9.0rc5` PyPI package was published with the F-055 wheel-packaging fix (the legacy `aegis` back-compat shim was re-included after the rc4 wheel target dropped it). The PyPI shim issue is Python-specific (module rename `aegis` → `aegis_trust`); npm has no analogous concept. Bumping npm to rc5 keeps cross-SDK version-lock per the "Version-locked to PyPI" doctrine.
+
+### Changed
+
+- `VERSION` 0.9.0-rc4 → 0.9.0-rc5
+- `package.json` version bump
+- `src/index.ts` `VERSION` export bump
+
+No source / behavioural changes vs v0.9.0-rc4.
+
+### Refs
+
+- F-054 published-artifact parity gate doctrine
+- F-055 wheel-packaging shim drift (PyPI-side)
+- Paired with PyPI `aegis-trust 0.9.0rc5`
+- T-006c-1 monorepo reconciliation (sprint_006 Tier 0) — closed the source ↔ registry drift that surfaced when `aegis-trust@0.9.0-rc5` was published to npm from `aegis-core/sdk/node-trust/` (commit `080d02cf`) without committing back to this monorepo. The published rc5 npm package was content-identical to rc4 at publish time and remains so.
+
+## [0.9.0-rc4] — 2026-05-21 — pre-GA preview (cross-SDK env-var canonicalisation + AUTO probe-first)
+
+`internal-ops/sprint_004` post-canonical-audit cross-SDK parity closure. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). Public API surface is additive over v0.9.0-rc3 with one **breaking-for-direct-callers** semantic change on an exported helper (see Migration below). Paired with PyPI `aegis-trust@0.9.0-rc4`.
+
+> **Why rc4 (not rc3)**: npm published `aegis-trust@0.9.0-rc3` from a commit that carried only the `Aegis-Api-Version` dated header + repository-metadata polish. The PyPI parity closure work below missed the rc3 cut and lands as v0.9.0-rc4 on both PyPI and npm in parity.
+
+### Added — `AEGIS_URL` canonical, `AEGIS_BASE_URL` deprecation alias
+
+- `resolveBaseUrl()` in `src/client.ts` resolves the gateway base URL via a documented precedence order: `AEGIS_URL` (canonical, parity with PyPI `aegis-trust` `shield.py:119`) → `AEGIS_BASE_URL` (deprecation alias) → `DEFAULT_BASE_URL` (`https://localhost:8443/api/v1`).
+- `AEGIS_BASE_URL` continues to work for v0.8.x → v0.9.x backward compatibility but emits a one-shot `console.warn` per process the first time it is read. The warning is re-armed by `resetModuleClient()` so test fixtures see one warning per logical reset. **`AEGIS_BASE_URL` will be removed in v1.0.0** per [`docs/VERSIONING.md`](docs/VERSIONING.md) deprecation policy.
+- `userIntendsFull()` (exported) now inspects `AEGIS_URL` and `AEGIS_BASE_URL` (alongside `AEGIS_TOKEN`) when deciding whether the user expects Full mode. Local hosts (`localhost` / `127.0.0.1` / `::1` / `*.local`) are treated as dev regardless of port so dev fixtures keep working.
+
+### Added — Mode detection TTL cache (parity with PyPI `_DETECT_MODE_TTL_S = 60.0`)
+
+- `_DETECT_MODE_TTL_MS = 60_000` in `src/client.ts`. `AEGIS_MODE=auto` re-probes the backend every 60 s so process state stays in sync with reality without a per-call probe.
+- Without this TTL, a stuck `lite` detection survives gateway recovery, and a stuck fail-closed `full` keeps warning even after the backend is healthy.
+
+### Changed — AUTO probe-first behaviour matrix (parity with PyPI `shield.py:_detect_mode` line 162-177)
+
+`detectMode()` now probes the backend FIRST and consults `userIntendsFull()` only when the probe fails. The full behaviour matrix:
+
+- `AEGIS_MODE=lite` → Lite.
+- `AEGIS_MODE=full` → Full (calls fail-closed at the gateway until the backend recovers).
+- `AEGIS_MODE=auto` + no Full intent (no token AND no non-dev URL) → Lite.
+- `AEGIS_MODE=auto` + Full intent + reachable backend → Full.
+- `AEGIS_MODE=auto` + Full intent + **unreachable backend** → **fail-closed Full** + one `console.warn`. Previously silently fell back to Lite, which would skip the user-visible warning and provide weaker semantics than the user asked for.
+
+### Migration — `userIntendsFull()` breaking-for-direct-callers (semantic)
+
+- **Pre-rc4**: `userIntendsFull()` returned `true` for `AEGIS_MODE=full` alone (no token / URL required).
+- **rc4+**: `userIntendsFull()` requires `AEGIS_TOKEN` OR a non-dev URL (via `AEGIS_URL` or `AEGIS_BASE_URL`). `AEGIS_MODE=full` is handled separately in `detectMode()` and is no longer a sole intent signal for direct callers of `userIntendsFull()`.
+- **Who is affected**: callers that import and invoke `userIntendsFull()` directly from `aegis-trust` and rely on `AEGIS_MODE=full` returning `true` from it.
+- **Migration recipe**: set `AEGIS_TOKEN` or a non-dev `AEGIS_URL` alongside `AEGIS_MODE=full`. Callers that use only `detectMode()` (the primary entry point) are unaffected — `AEGIS_MODE=full` continues to produce Full mode via the matrix above.
+
+### Tests
+
+- New `tests/fullMode.test.ts` coverage (5 added → 9 total): AUTO probe-first behaviour (LITE fallback when token absent AND backend unreachable; opportunistic FULL when backend reachable; FULL when token + backend reachable; fail-closed FULL with one warn when intent + unreachable), `AEGIS_BASE_URL` deprecation alias (exactly one warn per process), `AEGIS_URL` precedence over `AEGIS_BASE_URL` with no warn.
+
+### Refs
+
+- Paired with PyPI `aegis-trust@0.9.0-rc4` env-var canonicalisation + AUTO probe-first.
+- Mirrors PyPI `shield.py` `_resolve_base_url`, `_user_intends_full` extension, and `_detect_mode` probe-first ordering.
+- T-006c-1 monorepo reconciliation (sprint_006 Tier 0).
 ## [0.9.0-rc1] — 2026-05-17 — pre-GA preview
 
 `internal-ops/sprint_001` rollup. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). Public API surface is additive over v0.8.1; no breaking changes. SLA: none. Production use: at your own risk. See [`docs/VERSIONING.md`](docs/VERSIONING.md).

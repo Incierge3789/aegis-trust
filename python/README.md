@@ -275,6 +275,58 @@ aegis history       # show recent calls
 aegis stats         # aggregate by purpose / blocked field
 ```
 
+### Mode (LITE / FULL / AUTO)
+
+| Mode | Behaviour | Requires |
+|---|---|---|
+| `LITE` | In-process filter only. Deterministic, no I/O. | nothing |
+| `FULL` | Filter + audit chain ingest + central policy sync via aegis-core. | aegis-core running + `AEGIS_TOKEN` |
+| `AUTO` | Probe-first detection. See AUTO behaviour matrix below. | nothing |
+
+### AUTO behaviour matrix (rc4+)
+
+`AEGIS_MODE=auto` (the default) probes the backend FIRST (re-probe TTL = 60 s) and consults the Full-intent heuristic only when the probe fails. Behaviour:
+
+- `AEGIS_MODE=lite` → Lite.
+- `AEGIS_MODE=full` → Full (calls fail-closed at the gateway until the backend recovers).
+- `AEGIS_MODE=auto` + no Full intent (no `AEGIS_TOKEN` AND no non-dev URL) → Lite.
+- `AEGIS_MODE=auto` + Full intent + reachable backend → Full (opportunistic upgrade).
+- `AEGIS_MODE=auto` + Full intent + **unreachable backend** → **fail-closed Full** + one `logger.warning`. Silent LITE degrade is suppressed because it would skip the user-visible warning and provide weaker semantics than the user asked for.
+
+### Full mode env vars
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AEGIS_URL` | `https://localhost:8443/api/v1` | aegis-core REST endpoint (rc4+ **canonical**; parity with npm). |
+| `AEGIS_BASE_URL` | — | npm-parity deprecation alias for `AEGIS_URL`. Read only when `AEGIS_URL` is unset; emits one `logger.warning` per process the first time it is read (re-armed by `reset()`). **Removed in v1.0.0.** |
+| `AEGIS_TOKEN` | (empty) | Bearer token for auth |
+| `AEGIS_MODE` | `auto` | Override mode detection (`full` / `lite`) — see matrix above. |
+| `AEGIS_HISTORY` | (unset) | `1` to enable local audit log (`~/.aegis/history.db`). |
+| `AEGIS_HISTORY_PATH` | `~/.aegis/history.db` | Local audit file. |
+
+### FULL mode — gateway trust-boundary guarantees
+
+When `shield()` runs in FULL mode it calls the aegis-core gateway's `/check-access` endpoint before filtering. As of the Core Security Remediation track (CSR 4/4, landed in aegis-core 2026-05-21) that ingress provides four **scoped** guarantees:
+
+1. **Identity binding** — `/check-access` treats the identity established by the gateway's auth middleware as the sole authoritative requester identity (the JWT `sub` for Bearer-JWT auth; the literal `api-key` for API-key auth). A request body that claims a different `requester_id` is denied (HTTP 403) with an `identity_mismatch` audit record.
+2. **Ingress denial of unknown inputs** — an unknown `purpose`, an unknown `scope`, or a malformed / path-traversal `capsule_id` is denied (HTTP 403) at the `/check-access` ingress, each with an audit DENY record. (The unknown-purpose denial is RBAC-pathed; unknown-scope and malformed-capsule carry dedicated `policy.*` audit reasons.)
+3. **Audit-or-deny** — a `/check-access` decision fails closed if its audit record cannot be written: the gateway returns HTTP 503 rather than a silently-unaudited 200 ALLOW or 403 DENY.
+4. **Boot-time config validation** — started with `AEGIS_PROFILE=production`, the gateway fails its own boot (`exit(2)`) on missing critical config keys, disabled security controls, an enabled legacy dashboard socket, or an unparseable / zero `AEGIS_REST_PORT`, instead of degrading silently. `AEGIS_PROFILE` unset or `development` keeps the pre-existing permissive behaviour.
+
+**Scope of these guarantees — read before relying on them:**
+
+- The audit-or-deny guarantee (#3) applies to the `/check-access` endpoint only. It is **not** a gateway-wide audit fail-closed guarantee; other gateway endpoints are not yet swept.
+- The `/check-access` scope check (#2) validates `scope` against a known registry. It is **not** purpose × scope field-level minimum-disclosure enforcement; field-level redaction by purpose × scope is not wired.
+- `AEGIS_PROFILE=production` validation (#4) is operator opt-in. The gateway is **not** production-ready out of the box; the default profile keeps silent config fallbacks.
+- These four guarantees are `/check-access`-scoped and do **not** amount to an all-gateway-operations audit-complete claim.
+
+**Known follow-ups — tracked, not yet shipped:**
+
+- A missing `AEGIS_CAPSULE_ROOT` can still produce a runtime HTTP 500 with no audit record; that 500 path is evaluated after the identity check (#1) but before the unknown-purpose / scope / capsule checks (#2), so it pre-empts guarantee #2.
+- Gateway-wide audit-append fail-closed sweep (beyond `/check-access`).
+- Debug-log redaction (`RUST_LOG=debug` output hygiene).
+- Wiring validated `scope` through to RBAC / Reflex / field-level enforcement.
+
 ---
 
 ## Migration from `aegis-shield`

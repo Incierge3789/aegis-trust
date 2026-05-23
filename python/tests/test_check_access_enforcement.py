@@ -118,7 +118,9 @@ def test_sync_full_denied_returns_empty_and_skips_ingest():
         return {"ssn": "leaked-if-broken"}
 
     result = get_record()
-    assert result == {}  # fail-closed
+    # T-SDK-FULL-GATE-01: fail-closed FULL → wrapped fn never runs → None.
+    # (Node parity: wrapped function did not execute, no data shape to mirror.)
+    assert result is None
     paths = [p for _, p in calls]
     assert "/api/v1/shield/ingest" not in paths
 
@@ -132,7 +134,8 @@ def test_sync_deny_mode_denied_returns_empty():
         return {"name": "alice", "ssn": "123"}
 
     result = get_record()
-    assert result == {}
+    # T-SDK-FULL-GATE-01: fail-closed FULL → wrapped fn never runs → None.
+    assert result is None
     paths = [p for _, p in calls]
     assert "/api/v1/shield/ingest" not in paths
 
@@ -182,7 +185,8 @@ async def test_async_full_denied_returns_empty(monkeypatch):
         return {"name": "alice"}
 
     result = await get_record()
-    assert result == {}
+    # T-SDK-FULL-GATE-01: fail-closed FULL → wrapped fn never runs → None.
+    assert result is None
     paths = [p for _, p in calls]
     assert "/api/v1/shield/ingest" not in paths
 
@@ -197,6 +201,7 @@ async def test_async_concurrent_denied_all_empty(monkeypatch):
         return {"name": f"user-{i}"}
 
     results = await asyncio.gather(get_record(1), get_record(2), get_record(3))
-    assert results == [{}, {}, {}]
+    # T-SDK-FULL-GATE-01: fail-closed FULL → wrapped fn never runs → None.
+    assert results == [None, None, None]
     paths = [p for _, p in calls]
     assert "/api/v1/shield/ingest" not in paths
