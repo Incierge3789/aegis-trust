@@ -185,7 +185,7 @@ jobs:
               --output-certificate "${sbom}.pem" \
               "$sbom"
             echo "[cosign] verifying $sbom"
-            cosign verify-blob --yes \
+            cosign verify-blob \
               --certificate "${sbom}.pem" \
               --signature "${sbom}.sig" \
               --certificate-identity-regexp 'https://github\.com/.+/.github/workflows/release-attestation\.yml@.+' \
