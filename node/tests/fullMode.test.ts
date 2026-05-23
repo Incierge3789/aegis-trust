@@ -193,28 +193,30 @@ describe("Mode.AUTO — detect mode", () => {
       mode: Mode.AUTO,
     })(async (_: unknown) => ({ name: "A", ssn: "X" }));
     const result = await getUser(1);
-    // Wait for fire-and-forget ingest attempt to land in `calls` (it will
-    // throw because fetch is mocked to throw, but the attempt is observable).
+    // T-SDK-FULL-GATE-01: fail-closed FULL → wrapped fn never runs → call
+    // returns a bare null. Wait briefly to let the /check-access attempt
+    // settle in `calls`.
     await new Promise((r) => setTimeout(r, 30));
-    // Scope filter still applies: `ssn` (out of scope) is dropped.
-    expect(result).not.toHaveProperty("ssn");
+    // The wrapped function never ran — there is no return shape to mirror,
+    // so the fail-closed value is a bare null. Python `aegis-trust` matches
+    // this contract (see CHANGELOG "Python shield() FULL mode performs a
+    // real pre-call /check-access trust gate"). rc4-era expectation of a
+    // scope-filtered object on fail-closed FULL is superseded.
+    expect(result).toBeNull();
     // Exactly one fail-closed FULL escalation warning fired.
     const failClosedWarns = warnSpy.mock.calls.filter((args) =>
       String(args[0]).includes("unreachable"),
     );
     expect(failClosedWarns.length).toBeGreaterThanOrEqual(1);
-    // FULL-vs-LITE witness #1: detectMode() resolves to "full" (codex +
-    // cursor iter-1 consensus P1 — the test must distinguish FULL from
-    // LITE because scope filter + /health probe + warn could all match
-    // a silent LITE degrade. The /shield/ingest attempt is the operative
-    // behavioural witness because LITE never calls ingest).
+    // FULL-vs-LITE witness #1: detectMode() resolves to "full".
     const mode = await detectMode();
     expect(mode).toBe("full");
-    // FULL-vs-LITE witness #2: at least one /shield/ingest attempt was
-    // made against the unreachable backend (LITE would never attempt
-    // ingest; only FULL does). This makes the test fail when a
-    // regression silently flips AUTO+intent+unreachable back to LITE.
-    expect(calls.some((c) => c.url.includes("/shield/ingest"))).toBe(true);
+    // FULL-vs-LITE witness #2: at least one /check-access attempt was made
+    // against the unreachable backend (LITE never calls /check-access; FULL
+    // attempts the pre-call gate even when the backend is unreachable, then
+    // fails closed — see T-SDK-FULL-GATE-01). This makes the test fail when
+    // a regression silently flips AUTO+intent+unreachable back to LITE.
+    expect(calls.some((c) => c.url.includes("/check-access"))).toBe(true);
     // Full mode probe-first also fired the /health request.
     expect(calls.some((c) => c.url.includes("/health"))).toBe(true);
   });

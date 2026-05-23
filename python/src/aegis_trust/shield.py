@@ -805,6 +805,58 @@ def shield(
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 active_mode = mode if mode != Mode.AUTO else _detect_mode()
+                # FULL mode: gate /check-access BEFORE running fn (parity
+                # with Node T-SDK-FULL-GATE-01). The trust gate prevents
+                # the wrapped function's side effects (DB writes, billing,
+                # etc.), not merely discards their result. On deny /
+                # unreachable / network error the wrapped function never
+                # runs and the call returns None.
+                if active_mode == Mode.FULL:
+                    client = _get_client()
+                    gate_scope: list[str] = [] if use_deny else list(_scope or [])
+                    try:
+                        granted = await client.aauthorize(purpose, gate_scope)
+                    except Exception:
+                        logger.warning(
+                            "shield: /check-access raised for purpose=%s — "
+                            "fn '%s' not invoked (fail-closed)",
+                            purpose,
+                            fn.__name__,
+                        )
+                        return None
+                    if not granted:
+                        logger.warning(
+                            "shield: purpose=%s denied by /check-access — "
+                            "fn '%s' not invoked (fail-closed)",
+                            purpose,
+                            fn.__name__,
+                        )
+                        return None
+                    # Gate granted — safe to run fn.
+                    try:
+                        result = await fn(*args, **kwargs)
+                    except Exception:
+                        logger.error(
+                            "shield: wrapped function '%s' raised after gate "
+                            "grant, returning empty (fail-closed)",
+                            fn.__name__,
+                        )
+                        return ""
+                    if use_deny:
+                        return await _shield_deny_async(
+                            result,
+                            purpose,
+                            _deny,
+                            _deny_tree,
+                            fn.__name__,
+                            active_mode,
+                            pre_authorized=True,
+                        )
+                    return await _shield_full_async(
+                        result, purpose, _scope, _scope_tree, fn.__name__,
+                        pre_authorized=True,
+                    )
+                # LITE (or AUTO→LITE): no pre-call gate; existing flow.
                 try:
                     result = await fn(*args, **kwargs)
                 except Exception:
@@ -815,21 +867,8 @@ def shield(
                     )
                     return ""
                 if use_deny:
-                    if active_mode == Mode.FULL:
-                        return await _shield_deny_async(
-                            result,
-                            purpose,
-                            _deny,
-                            _deny_tree,
-                            fn.__name__,
-                            active_mode,
-                        )
                     return _shield_deny(
                         result, purpose, _deny, _deny_tree, fn.__name__, active_mode
-                    )
-                if active_mode == Mode.FULL:
-                    return await _shield_full_async(
-                        result, purpose, _scope, _scope_tree, fn.__name__
                     )
                 return _shield_lite(result, purpose, _scope, _scope_tree, fn.__name__)
 
@@ -838,6 +877,52 @@ def shield(
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             active_mode = mode if mode != Mode.AUTO else _detect_mode()
+            # FULL mode: gate /check-access BEFORE running fn (parity with
+            # Node T-SDK-FULL-GATE-01). The trust gate prevents the wrapped
+            # function's side effects, not merely discards their result. On
+            # deny / unreachable / network error the wrapped function never
+            # runs and the call returns None.
+            if active_mode == Mode.FULL:
+                client = _get_client()
+                gate_scope: list[str] = [] if use_deny else list(_scope or [])
+                try:
+                    granted = client.authorize(purpose, gate_scope)
+                except Exception:
+                    logger.warning(
+                        "shield: /check-access raised for purpose=%s — "
+                        "fn '%s' not invoked (fail-closed)",
+                        purpose,
+                        fn.__name__,
+                    )
+                    return None
+                if not granted:
+                    logger.warning(
+                        "shield: purpose=%s denied by /check-access — "
+                        "fn '%s' not invoked (fail-closed)",
+                        purpose,
+                        fn.__name__,
+                    )
+                    return None
+                # Gate granted — safe to run fn.
+                try:
+                    result = fn(*args, **kwargs)
+                except Exception:
+                    logger.error(
+                        "shield: wrapped function '%s' raised after gate "
+                        "grant, returning empty (fail-closed)",
+                        fn.__name__,
+                    )
+                    return ""
+                if use_deny:
+                    return _shield_deny(
+                        result, purpose, _deny, _deny_tree, fn.__name__, active_mode,
+                        pre_authorized=True,
+                    )
+                return _shield_full(
+                    result, purpose, _scope, _scope_tree, fn.__name__,
+                    pre_authorized=True,
+                )
+            # LITE (or AUTO→LITE): no pre-call gate; existing flow.
             try:
                 result = fn(*args, **kwargs)
             except Exception:
@@ -851,8 +936,6 @@ def shield(
                 return _shield_deny(
                     result, purpose, _deny, _deny_tree, fn.__name__, active_mode
                 )
-            if active_mode == Mode.FULL:
-                return _shield_full(result, purpose, _scope, _scope_tree, fn.__name__)
             return _shield_lite(result, purpose, _scope, _scope_tree, fn.__name__)
 
         return wrapper  # type: ignore[return-value]
@@ -867,12 +950,18 @@ def _shield_deny(
     deny_tree: dict[str, Any],
     fn_name: str,
     active_mode: Mode,
+    *,
+    pre_authorized: bool = False,
 ) -> Any:
-    """Apply deny_fields filtering. Full mode sends ingest record."""
+    """Apply deny_fields filtering. Full mode sends ingest record.
+
+    When ``pre_authorized=True``, skip the in-helper gate call (the shield
+    wrapper has already gated /check-access). See T-SDK-FULL-GATE-01.
+    """
     # AO-003: enforce purpose authorization in Full mode (deny-list uses
     # empty scope; the backend decides whether the purpose is allowed at
     # all for this caller).
-    if active_mode == Mode.FULL:
+    if active_mode == Mode.FULL and not pre_authorized:
         client = _get_client()
         if not client.authorize(purpose, []):
             logger.warning(
@@ -1007,20 +1096,28 @@ def _shield_full(
     scope: list[str],
     scope_tree: dict[str, Any],
     fn_name: str = "unknown",
+    *,
+    pre_authorized: bool = False,
 ) -> Any:
     """Connected mode: filter locally + send block record to the backend.
 
     Fail-closed: if ingest fails, return empty result.
+
+    When ``pre_authorized=True``, the caller (typically the shield wrapper
+    in FULL mode) has already invoked ``/check-access`` and the gate
+    granted; this function skips the in-helper gate call to avoid a double
+    audit and just performs filter + ingest. See T-SDK-FULL-GATE-01.
     """
     client = _get_client()
-    # AO-003 gate.
-    if not client.authorize(purpose, list(scope)):
-        logger.warning(
-            "shield: purpose=%s scope=%s denied by check-access (AO-003)",
-            purpose,
-            scope,
-        )
-        return _empty_for(data)
+    if not pre_authorized:
+        # AO-003 gate.
+        if not client.authorize(purpose, list(scope)):
+            logger.warning(
+                "shield: purpose=%s scope=%s denied by check-access (AO-003)",
+                purpose,
+                scope,
+            )
+            return _empty_for(data)
 
     try:
         # Normalize once so both the filter and the audit diff agree on shape.
@@ -1081,19 +1178,26 @@ async def _shield_full_async(
     scope: list[str],
     scope_tree: dict[str, Any],
     fn_name: str = "unknown",
+    *,
+    pre_authorized: bool = False,
 ) -> Any:
     """Async variant of :func:`_shield_full`. Uses ``AegisClient.aingest`` so
     the decorated coroutine never blocks the event loop on the ingest POST.
+
+    When ``pre_authorized=True``, skip the in-helper gate call (the shield
+    wrapper has already gated /check-access before invoking fn).
+    See T-SDK-FULL-GATE-01.
     """
     client = _get_client()
-    # AO-003 gate.
-    if not await client.aauthorize(purpose, list(scope)):
-        logger.warning(
-            "shield: purpose=%s scope=%s denied by check-access (AO-003)",
-            purpose,
-            scope,
-        )
-        return _empty_for(data)
+    if not pre_authorized:
+        # AO-003 gate.
+        if not await client.aauthorize(purpose, list(scope)):
+            logger.warning(
+                "shield: purpose=%s scope=%s denied by check-access (AO-003)",
+                purpose,
+                scope,
+            )
+            return _empty_for(data)
 
     try:
         normalized = _freeze_single_pass(_to_filterable(data))
@@ -1154,10 +1258,16 @@ async def _shield_deny_async(
     deny_tree: dict[str, Any],
     fn_name: str,
     active_mode: Mode,
+    *,
+    pre_authorized: bool = False,
 ) -> Any:
-    """Async variant of :func:`_shield_deny`."""
+    """Async variant of :func:`_shield_deny`.
+
+    When ``pre_authorized=True``, skip the in-helper gate call (the shield
+    wrapper has already gated /check-access). See T-SDK-FULL-GATE-01.
+    """
     # T-151 AO-003: enforce purpose authorization in Full mode.
-    if active_mode == Mode.FULL:
+    if active_mode == Mode.FULL and not pre_authorized:
         client = _get_client()
         if not await client.aauthorize(purpose, []):
             logger.warning(

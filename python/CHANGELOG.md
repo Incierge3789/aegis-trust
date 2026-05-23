@@ -1,10 +1,21 @@
 # Changelog
 
-## [Unreleased] — docs: FULL-mode gateway trust-boundary guarantees scoped to CSR 4/4
+## [Unreleased]
 
-**Docs-only, no API surface change. No version bump, no publish in this PR.**
+**No version bump, no publish in these PRs. Will land in the next release cut.**
 
-### Changed
+### Changed — `shield()` FULL mode now performs a real `/check-access` trust gate (T-SDK-FULL-GATE-01 parity)
+
+- **Python `shield()` FULL mode previously executed the wrapped function BEFORE calling `/check-access`** — the gate fired on the already-computed result, so any side effects (DB writes, billing, etc.) had already happened by the time the gate could deny. This release brings the Python SDK to parity with the Node `T-SDK-FULL-GATE-01` fix (landed on `main` 2026-05-22, commit `b687e99`):
+  - In `FULL` mode, both the async and sync shield wrappers now `await client.aauthorize(...)` / call `client.authorize(...)` **before** the wrapped function runs. The wrapped function executes **only** after authorization is granted.
+  - Deny / `/check-access` raised (network error, gateway unreachable) → wrapped function **never invoked**, call returns a bare `None`. Because the function never ran, there is no return shape to mirror — the fail-closed value is `None`, not the prior `_empty_for(data)` (shape-preserving empty). This is the same contract as the Node SDK.
+  - Audit ingest (`/shield/ingest`) runs only **after** authorization succeeds — post-authorization telemetry, never the gate.
+  - Filter / freeze exceptions after a granted authorization still fall back to a type-shaped safe empty (`_empty_for(data)`) since the function ran and the data shape is known.
+- Internal helpers `_shield_full`, `_shield_full_async`, `_shield_deny`, `_shield_deny_async` gain a keyword-only `pre_authorized: bool = False` parameter. When invoked from the shield wrapper (which now does the pre-call gate), the helpers skip the in-helper `authorize()` call to avoid a double audit. External call sites are unaffected (additive keyword arg, default preserves prior behaviour).
+- **Behavioral change**: callers that previously received a shape-preserving empty (`{}` / `[]` / `""`) on FULL deny / unreachable now receive `None`. Test fixtures asserting `result == {}` on fail-closed FULL must be updated to `result is None`; this release updates the in-repo Python tests accordingly.
+- **Routed scenarios** (operational-trust-review verification batch 1): `async_sync_behavior` (confirmed P0) — resolved. `python_node_parity` divergence #1 (FULL-mode gate timing) — resolved. Remaining parity divergences (AUTO degrade / mode TTL) are tracked separately; `isAsyncFn` `.bind()` mis-classification was refuted by ES §10.4.1.3 (BoundFunctionCreate preserves `AsyncFunction`).
+
+### Changed — README: `FULL mode — gateway trust-boundary guarantees` subsection (CSR 4/4 claim-scoping)
 
 - `README.md`: added a `### FULL mode — gateway trust-boundary guarantees` subsection. It states, in **scoped** wording verified against aegis-core code, the four guarantees the gateway `/check-access` ingress provides after the Core Security Remediation track (CSR 4/4, landed in aegis-core 2026-05-21): identity binding to the auth-middleware identity, ingress denial of unknown purpose / scope / malformed capsule, audit-or-deny (HTTP 503) fail-closed, and `AEGIS_PROFILE=production` boot-time config validation. The subsection also states explicitly what is **not** guaranteed (no gateway-wide audit fail-closed, no purpose × scope field-level minimum-disclosure, not production-ready out of the box, no all-gateway-operations audit-complete claim) and records four tracked follow-ups.
 
