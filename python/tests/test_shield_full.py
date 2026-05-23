@@ -218,7 +218,13 @@ def test_client_log_audit_requires_auth():
 
 
 def test_full_mode_fail_closed_when_unavailable(monkeypatch):
-    """AO-003: Full mode returns empty result when ingest fails (fail-closed)."""
+    """T-SDK-FULL-GATE-01: FULL mode fail-closed → wrapped fn never runs → None.
+
+    Pre-call /check-access gate: when the gateway is unreachable, the gate
+    fails closed and the wrapped function is not invoked. Because the
+    function never ran, there is no return shape to mirror — the call
+    returns a bare ``None`` (Node parity).
+    """
     monkeypatch.setenv("AEGIS_MODE", "full")
     monkeypatch.setenv("AEGIS_URL", "https://localhost:19999/api/v1")
 
@@ -226,9 +232,9 @@ def test_full_mode_fail_closed_when_unavailable(monkeypatch):
     def get_data():
         return {"a": 1, "b": 2}
 
-    # Should not raise — but returns empty dict (fail-closed)
+    # Should not raise — but returns None (fail-closed, fn never invoked).
     result = get_data()
-    assert result == {}
+    assert result is None
 
 
 # ── M3 regression: httpx timeout (S013) ────────────────────────

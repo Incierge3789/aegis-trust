@@ -1,5 +1,115 @@
 # Changelog
 
+## [Unreleased]
+
+**No version bump, no publish in these PRs. Will land in the next release cut.**
+
+### Changed — `_detect_mode` now intent-first (matches AUTO behaviour matrix; Node parity)
+
+- `python/src/aegis_trust/shield.py` `_detect_mode()` checks
+  `_user_intends_full()` BEFORE probing the backend, parity with the
+  node `detectMode` intent-first fix (same release). Removes the
+  opportunistic-upgrade path that called `/check-access` from no-token
+  dev environments and contradicted the documented matrix.
+- New behaviour:
+  - `AUTO + no Full intent` (no `AEGIS_TOKEN`, no non-dev URL) → LITE
+    (no probe, no `/check-access`).
+  - `AUTO + Full intent + reachable backend` → FULL (opportunistic
+    upgrade with intent).
+  - `AUTO + Full intent + unreachable backend` → fail-closed FULL +
+    warning. Unchanged.
+- **Routed scenarios** (operational-trust-review verification batch 1):
+  `python_node_parity` divergence #2 (AUTO degrade) — resolved.
+
+### Changed — `shield()` FULL mode now performs a real `/check-access` trust gate (T-SDK-FULL-GATE-01 parity)
+
+- **Python `shield()` FULL mode previously executed the wrapped function BEFORE calling `/check-access`** — the gate fired on the already-computed result, so any side effects (DB writes, billing, etc.) had already happened by the time the gate could deny. This release brings the Python SDK to parity with the Node `T-SDK-FULL-GATE-01` fix (landed on `main` 2026-05-22, commit `b687e99`):
+  - In `FULL` mode, both the async and sync shield wrappers now `await client.aauthorize(...)` / call `client.authorize(...)` **before** the wrapped function runs. The wrapped function executes **only** after authorization is granted.
+  - Deny / `/check-access` raised (network error, gateway unreachable) → wrapped function **never invoked**, call returns a bare `None`. Because the function never ran, there is no return shape to mirror — the fail-closed value is `None`, not the prior `_empty_for(data)` (shape-preserving empty). This is the same contract as the Node SDK.
+  - Audit ingest (`/shield/ingest`) runs only **after** authorization succeeds — post-authorization telemetry, never the gate.
+  - Filter / freeze exceptions after a granted authorization still fall back to a type-shaped safe empty (`_empty_for(data)`) since the function ran and the data shape is known.
+- Internal helpers `_shield_full`, `_shield_full_async`, `_shield_deny`, `_shield_deny_async` gain a keyword-only `pre_authorized: bool = False` parameter. When invoked from the shield wrapper (which now does the pre-call gate), the helpers skip the in-helper `authorize()` call to avoid a double audit. External call sites are unaffected (additive keyword arg, default preserves prior behaviour).
+- **Behavioral change**: callers that previously received a shape-preserving empty (`{}` / `[]` / `""`) on FULL deny / unreachable now receive `None`. Test fixtures asserting `result == {}` on fail-closed FULL must be updated to `result is None`; this release updates the in-repo Python tests accordingly.
+- **Routed scenarios** (operational-trust-review verification batch 1): `async_sync_behavior` (confirmed P0) — resolved. `python_node_parity` divergence #1 (FULL-mode gate timing) — resolved. Remaining parity divergences (AUTO degrade / mode TTL) are tracked separately; `isAsyncFn` `.bind()` mis-classification was refuted by ES §10.4.1.3 (BoundFunctionCreate preserves `AsyncFunction`).
+
+### Changed — README: `FULL mode — gateway trust-boundary guarantees` subsection (CSR 4/4 claim-scoping)
+
+- `README.md`: added a `### FULL mode — gateway trust-boundary guarantees` subsection. It states, in **scoped** wording verified against aegis-core code, the four guarantees the gateway `/check-access` ingress provides after the Core Security Remediation track (CSR 4/4, landed in aegis-core 2026-05-21): identity binding to the auth-middleware identity, ingress denial of unknown purpose / scope / malformed capsule, audit-or-deny (HTTP 503) fail-closed, and `AEGIS_PROFILE=production` boot-time config validation. The subsection also states explicitly what is **not** guaranteed (no gateway-wide audit fail-closed, no purpose × scope field-level minimum-disclosure, not production-ready out of the box, no all-gateway-operations audit-complete claim) and records four tracked follow-ups.
+
+## [0.9.0-rc5] — 2026-05-21 — wheel-packaging fix for legacy `aegis` shim (release-integrity follow-up)
+
+`productization-ops/sprint_006` Tier 0 follow-up to the F-054 release-integrity remediation. **Preview release** (`STABILITY_LEVEL = "preview"`). Public API surface is identical to rc4; this release fixes wheel packaging so the documented back-compat shim is actually shipped.
+
+### Fixed — `from aegis import shield` legacy shim now packaged (F-055)
+
+- `pyproject.toml` `[tool.hatch.build.targets.wheel] packages` updated from `["src/aegis_trust"]` to `["src/aegis_trust", "src/aegis"]`. The rc2 CHANGELOG entry promised the `aegis` back-compat shim would remain until v2.0.0, but the wheel target only included `src/aegis_trust`. `pip install aegis-trust==0.9.0rc4` therefore did not provide `import aegis` compatibility, contradicting the documented migration path.
+- Verified post-publish on the live PyPI artifact: wheel contains both `aegis_trust/__init__.py` (canonical) and `aegis/__init__.py` (shim, emits `DeprecationWarning`). `pip install aegis-trust==0.9.0rc5 && python -c "from aegis import shield"` works as documented.
+
+### Release-integrity gate (post-F-054)
+
+The live PyPI `aegis-trust==0.9.0rc5` artifact was originally published from `aegis-shield` (commit `e06ac9df`, 2026-05-18) via the **Published Artifact Parity Gate** (5-stage: local build → record artifact hash → publish to PyPI → download from registry → verify local hash == registry hash → clean venv install → canonical import + legacy shim import + `AEGIS_BASE_URL` alias all PASS).
+
+> **Hard rule going forward**: No release claim unless source, build config, registry artifact, clean install, and documented compatibility behavior all match.
+
+### Changed
+
+- `VERSION` 0.9.0-rc4 → 0.9.0-rc5
+- `pyproject.toml` version bump
+- `src/aegis_trust/__init__.py` `__version__` bump
+
+### Refs
+
+- F-054 release-integrity incident (published rc3 source ≠ canonical repo source)
+- F-055 wheel-packaging shim drift (rc4 wheel missed `src/aegis`, fixed in rc5)
+- Paired with npm `aegis-trust@0.9.0-rc5` (cross-SDK version-lock; npm rc5 is content-identical to rc4 because the wheel-shim issue is Python-specific)
+- T-006c-1 monorepo reconciliation (sprint_006 Tier 0) — closed the source ↔ registry drift that surfaced when `aegis-trust@0.9.0rc5` was published to PyPI from `aegis-shield` without committing back to this monorepo.
+
+## [0.9.0-rc4] — 2026-05-21 — pre-GA preview (cross-SDK env-var canonicalisation + AUTO probe-first)
+
+`productization-ops/sprint_004` post-canonical-audit cross-SDK parity closure. **Preview release** (`STABILITY_LEVEL = "preview"`). Public API surface is additive over v0.9.0-rc3 with one **breaking-for-direct-callers** semantic change on an exported helper (see Migration below). Paired with npm `aegis-trust@0.9.0-rc4`.
+
+### Added — `AEGIS_URL` canonical, `AEGIS_BASE_URL` npm-parity deprecation alias
+
+- `_resolve_base_url()` in `src/aegis_trust/shield.py` resolves the gateway base URL via a documented precedence order: `AEGIS_URL` (canonical, parity with npm `aegis-trust` `client.ts:resolveBaseUrl`) → `AEGIS_BASE_URL` (npm-parity deprecation alias) → default (`https://localhost:8443/api/v1`).
+- The npm SDK historically read `AEGIS_BASE_URL`; from v0.9.0-rc3 onward, both SDKs accept both env vars, with `AEGIS_URL` as the canonical name. `AEGIS_BASE_URL` continues to work but emits a one-shot `logger.warning` per process the first time it is read. The warning is re-armed by `reset()` so test fixtures see one warning per logical reset. **`AEGIS_BASE_URL` will be removed in v1.0.0** per [`docs/VERSIONING.md`](docs/VERSIONING.md) deprecation policy.
+- `_user_intends_full()` extended to inspect `AEGIS_URL` / `AEGIS_BASE_URL` (alongside `AEGIS_TOKEN`) when deciding whether the user expects Full mode. Local hosts (`localhost` / `127.0.0.1` / `::1` / `*.local`) are treated as dev regardless of port so dev fixtures keep working.
+
+### Added — Mode detection TTL cache (parity with npm `_DETECT_MODE_TTL_MS = 60_000`)
+
+- The existing `_DETECT_MODE_TTL_S = 60.0` constant in `shield.py` is now mirrored on the npm side so both SDKs re-probe the backend every 60 s under `AEGIS_MODE=auto`. Without this TTL, a stuck `lite` detection survives gateway recovery, and a stuck fail-closed `full` keeps warning even after the backend is healthy.
+
+### Changed — AUTO probe-first behaviour matrix
+
+`_detect_mode()` continues to probe the backend FIRST and consults `_user_intends_full()` only when the probe fails. The full behaviour matrix (now also enforced on the npm side):
+
+- `AEGIS_MODE=lite` → Lite.
+- `AEGIS_MODE=full` → Full (calls fail-closed at the gateway until the backend recovers).
+- `AEGIS_MODE=auto` + no Full intent (no token AND no non-dev URL) → Lite.
+- `AEGIS_MODE=auto` + Full intent + reachable backend → Full.
+- `AEGIS_MODE=auto` + Full intent + **unreachable backend** → **fail-closed Full** + one `logger.warning`. Previously silently fell back to Lite, which would skip the user-visible warning and provide weaker semantics than the user asked for.
+
+### Added — `[tool.mypy]` strict configuration with documented exemptions
+
+- `pyproject.toml` `[tool.mypy]` block: `files = ["src/aegis_trust"]`, `ignore_missing_imports = true`, and `disable_error_code = ["arg-type", "no-any-return", "no-untyped-def", "attr-defined"]` for pre-existing type-narrowing tech debt in `shield.py` / `config.py` / `history.py`. Documented exemption per F-005 (no silent bypass; explicit + audit-visible). Tightening is queued for a dedicated sprint.
+- Productization gate `type_safety` verifier compatible.
+
+### Changed — `reset()` re-arms deprecation-warning state
+
+- `reset()` now also resets `_base_url_alias_warned` so test fixtures can verify the deprecation-warning contract repeatedly (one warning per logical reset). Mirrors npm `resetModuleClient()`.
+
+### Migration — `_user_intends_full()` breaking-for-direct-callers (semantic)
+
+- **Pre-rc4**: `_user_intends_full()` returned `True` for `AEGIS_MODE=full` alone (no token / URL required).
+- **rc4+**: `_user_intends_full()` requires `AEGIS_TOKEN` OR a non-dev URL (via `AEGIS_URL` or `AEGIS_BASE_URL`). `AEGIS_MODE=full` is handled separately in `_detect_mode()` and is no longer a sole intent signal for direct callers.
+- **Who is affected**: callers that invoke `_user_intends_full()` directly from `aegis_trust.shield` (or its re-exports) and rely on `AEGIS_MODE=full` returning `True` from it.
+- **Migration recipe**: set `AEGIS_TOKEN` or a non-dev `AEGIS_URL` alongside `AEGIS_MODE=full`. Callers that use only `_detect_mode()` (the primary entry point) are unaffected — `AEGIS_MODE=full` continues to produce Full mode via the matrix above.
+
+### Refs
+
+- Paired with npm `aegis-trust@0.9.0-rc4` env-var canonicalisation + AUTO probe-first.
+- Mirrors npm `client.ts` `resolveBaseUrl`, `userIntendsFull` extension, and `detectMode` probe-first ordering.
+- T-006c-1 monorepo reconciliation (sprint_006 Tier 0).
+
 ## [0.9.0-rc2] — 2026-05-18 — Python module rename `aegis` → `aegis_trust` (productization-ops/sprint_003)
 
 `productization-ops/sprint_003` Phase A. **Breaking-but-shimmed**: the Python module

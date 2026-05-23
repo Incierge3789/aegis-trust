@@ -14,8 +14,8 @@ const u = await safeFetch("C-001"); // agent only ever sees { name, issue }
 Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffic (LangChain.js, CrewAI, Vercel AI SDK, MCP, Mastra). When procurement asks *"will your AI read our customer data?"*, the answer is in the line above.
 
 - **30-second understanding**: `shield({ purpose, scope })(fn)` returns `fn` with the same signature; the return value is filtered to `scope` client-side, blocked fields are recorded in the local audit log, and a `trace_id` from `withTraceContext()` is propagated end-to-end.
-- **TypeScript port** of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same semantics, same fail-closed decorator behaviour, same local audit log.
-- **Pre-GA**: v0.9.0-rc1 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk.
+- **TypeScript port** of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same `shield()` API surface and `LITE`-mode fail-closed decorator behaviour, same local audit log. `FULL`/`AUTO` behavioural parity with the Python SDK is tracked (see CHANGELOG); the two SDKs are not yet guaranteed identical.
+- **Pre-GA**: v0.9.0-rc5 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk.
 
 ```bash
 npm install aegis-trust@rc
@@ -31,8 +31,8 @@ npx aegis sandbox
 …or with Docker:
 
 ```bash
-git clone https://github.com/Incierge3789/aegis_core
-cd aegis_core/sdk/node-trust/examples/docker
+git clone https://github.com/Incierge3789/aegis-trust
+cd aegis-trust/node/examples/docker
 docker compose -f docker-compose.dev.yml up --build
 # In another shell:
 curl -s http://localhost:8080/demo/agent-request | jq
@@ -231,22 +231,56 @@ shield({ purpose: "lookup", scope: ["name"] })(
 |---|---|---|
 | `LITE` | In-process filter only. Deterministic, no I/O. | nothing |
 | `FULL` | **Pre-call `/check-access` authorization** (the trust gate) runs *before* the wrapped function; the function executes only on a granted authz, then the result is filtered client-side. Deny / `403` / `503` / gateway-unreachable → wrapped function never runs, call returns `null`. Audit ingest runs only *after* authorization succeeds (best-effort telemetry, never the gate). Async wrapped function only. See [Trust-boundary scope](#trust-boundary-scope). | aegis-core running + `AEGIS_TOKEN` + async fn |
-| `AUTO` | Detect: `FULL` if `AEGIS_TOKEN` set **and** backend reachable, else `LITE`. Non-`async` wrapped fn: always `LITE` (the gate cannot be inserted ahead of execution). | nothing |
+| `AUTO` | Probe-first detection. See [AUTO behaviour matrix](#auto-behaviour-matrix-rc4) below. | nothing |
 
 **Sync functions and `Mode.FULL`**: `Mode.FULL` runs the awaited `/check-access` gate *before* the wrapped function, so it requires a function **declared** `async` — that declaration is the wrapper's pre-execution await point. A function not declared `async` (including a plain function that merely returns a `Promise`) wrapped with explicit `Mode.FULL` throws `AegisValidationError` (`code: aegis.shield.mode.sync_full_unsupported`) on invocation — it is never silently downgraded to a label-only "full". `AUTO` on a non-`async` function resolves to `LITE` (the gate cannot be inserted ahead of execution).
+
+### AUTO behaviour matrix (rc4+)
+
+`Mode.AUTO` probes the backend FIRST (parity with PyPI `aegis-trust`, re-probe TTL = 60 s) and consults the Full-intent heuristic only when the probe fails. Behaviour:
+
+- `AEGIS_MODE=lite` → Lite.
+- `AEGIS_MODE=full` → Full (calls fail-closed at the gateway until the backend recovers).
+- `AEGIS_MODE=auto` + no Full intent (no `AEGIS_TOKEN` AND no non-dev URL) → Lite.
+- `AEGIS_MODE=auto` + Full intent + reachable backend → Full (opportunistic upgrade).
+- `AEGIS_MODE=auto` + Full intent + **unreachable backend** → **fail-closed Full** + one `console.warn`. Silent LITE degrade is suppressed because it would skip the user-visible warning and provide weaker semantics than the user asked for.
 
 ### Full mode env vars
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AEGIS_BASE_URL` | `https://localhost:8443/api/v1` | aegis-core REST endpoint |
+| `AEGIS_URL` | `https://localhost:8443/api/v1` | aegis-core REST endpoint (rc4+ **canonical**; parity with PyPI). |
+| `AEGIS_BASE_URL` | — | Deprecation alias for `AEGIS_URL`. Read only when `AEGIS_URL` is unset; emits one `console.warn` per process the first time it is read (re-armed by `resetModuleClient()`). **Removed in v1.0.0.** |
 | `AEGIS_TOKEN` | (empty) | Bearer token for auth |
 | `AEGIS_VERIFY_SSL` | `true` | TLS verify (prod-locked: ignored unless host is dev) |
 | `AEGIS_DEV_INSECURE` | (unset) | Allow TLS verify off, dev hosts only |
-| `AEGIS_MODE` | `auto` | Override mode detection (`full` / `lite`) |
+| `AEGIS_MODE` | `auto` | Override mode detection (`full` / `lite`) — see matrix above. |
 | `AEGIS_HISTORY` | (unset) | `1` to enable local audit log |
 | `AEGIS_HISTORY_PATH` | `~/.aegis/history.jsonl` | Local audit file |
 | `AEGIS_CONFIG` | (unset) | Override YAML config path |
+
+### FULL mode — gateway trust-boundary guarantees
+
+When `shield()` runs in FULL mode it calls the aegis-core gateway's `/check-access` endpoint before filtering. As of the Core Security Remediation track (CSR 4/4, landed in aegis-core 2026-05-21) that ingress provides four **scoped** guarantees:
+
+1. **Identity binding** — `/check-access` treats the identity established by the gateway's auth middleware as the sole authoritative requester identity (the JWT `sub` for Bearer-JWT auth; the literal `api-key` for API-key auth). A request body that claims a different `requester_id` is denied (HTTP 403) with an `identity_mismatch` audit record.
+2. **Ingress denial of unknown inputs** — an unknown `purpose`, an unknown `scope`, or a malformed / path-traversal `capsule_id` is denied (HTTP 403) at the `/check-access` ingress, each with an audit DENY record. (The unknown-purpose denial is RBAC-pathed; unknown-scope and malformed-capsule carry dedicated `policy.*` audit reasons.)
+3. **Audit-or-deny** — a `/check-access` decision fails closed if its audit record cannot be written: the gateway returns HTTP 503 rather than a silently-unaudited 200 ALLOW or 403 DENY.
+4. **Boot-time config validation** — started with `AEGIS_PROFILE=production`, the gateway fails its own boot (`exit(2)`) on missing critical config keys, disabled security controls, an enabled legacy dashboard socket, or an unparseable / zero `AEGIS_REST_PORT`, instead of degrading silently. `AEGIS_PROFILE` unset or `development` keeps the pre-existing permissive behaviour.
+
+**Scope of these guarantees — read before relying on them:**
+
+- The audit-or-deny guarantee (#3) applies to the `/check-access` endpoint only. It is **not** a gateway-wide audit fail-closed guarantee; other gateway endpoints are not yet swept.
+- The `/check-access` scope check (#2) validates `scope` against a known registry. It is **not** purpose × scope field-level minimum-disclosure enforcement; field-level redaction by purpose × scope is not wired.
+- `AEGIS_PROFILE=production` validation (#4) is operator opt-in. The gateway is **not** production-ready out of the box; the default profile keeps silent config fallbacks.
+- These four guarantees are `/check-access`-scoped and do **not** amount to an all-gateway-operations audit-complete claim.
+
+**Known follow-ups — tracked, not yet shipped:**
+
+- A missing `AEGIS_CAPSULE_ROOT` can still produce a runtime HTTP 500 with no audit record; that 500 path is evaluated after the identity check (#1) but before the unknown-purpose / scope / capsule checks (#2), so it pre-empts guarantee #2.
+- Gateway-wide audit-append fail-closed sweep (beyond `/check-access`).
+- Debug-log redaction (`RUST_LOG=debug` output hygiene).
+- Wiring validated `scope` through to RBAC / Reflex / field-level enforcement.
 
 ## YAML config (optional)
 

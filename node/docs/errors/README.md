@@ -103,9 +103,9 @@ try {
 
 Error codes are part of the SDK's public contract. See [VERSIONING.md](../VERSIONING.md):
 
-- v0.9.0-rc1 is a **preview** release (`STABILITY_LEVEL = "preview"`). Codes may
+- v0.9.0-rc5 is a **preview** release (`STABILITY_LEVEL = "preview"`). Codes may
   change between rc tags without a major bump — every change will appear in
-  CHANGELOG. Pin `aegis-trust@0.9.0-rc1` exactly if you switch on codes
+  CHANGELOG. Pin `aegis-trust@0.9.0-rc5` exactly if you switch on codes
   in production code paths.
 - From v1.0.0 onward (stable): adding a new code is **additive** (no major
   bump); removing or renaming a code is **breaking** (major bump required).

@@ -113,10 +113,39 @@ def _resolve_verify_ssl(base_url: str) -> bool:
     return True
 
 
+_base_url_alias_warned: bool = False
+
+
+def _resolve_base_url() -> str:
+    """Resolve aegis-core REST base URL.
+
+    AEGIS_URL is canonical. AEGIS_BASE_URL is accepted as an npm-parity
+    alias (npm aegis-trust historically read AEGIS_BASE_URL; both SDKs
+    accept both env vars from v0.9.0-rc3 onward, with AEGIS_URL as the
+    canonical name. AEGIS_BASE_URL removed in v1.0.0 per docs/VERSIONING.md
+    deprecation policy.
+    """
+    global _base_url_alias_warned
+    url = os.environ.get("AEGIS_URL", "").strip()
+    if url:
+        return url
+    base = os.environ.get("AEGIS_BASE_URL", "").strip()
+    if base:
+        if not _base_url_alias_warned:
+            _base_url_alias_warned = True
+            logger.warning(
+                "aegis-trust: AEGIS_BASE_URL is accepted as an npm-parity "
+                "alias but AEGIS_URL is canonical. Migrate to AEGIS_URL; "
+                "AEGIS_BASE_URL will be removed in v1.0.0."
+            )
+        return base
+    return "https://localhost:8443/api/v1"
+
+
 def _get_client() -> AegisClient:
     global _client
     if _client is None:
-        base_url = os.environ.get("AEGIS_URL", "https://localhost:8443/api/v1")
+        base_url = _resolve_base_url()
         _client = AegisClient(
             base_url=base_url,
             token=os.environ.get("AEGIS_TOKEN", ""),
@@ -135,15 +164,19 @@ _detected_mode_ts: float = 0.0
 def _user_intends_full() -> bool:
     """Heuristic for "user expects Full mode" under AEGIS_MODE=auto.
 
-    Returns True when AEGIS_TOKEN is set, or AEGIS_URL points at a non-dev
-    host. When True, _detect_mode refuses to silently degrade to Lite on a
-    transient backend outage — Gateway-uniqueness (AO-001) outranks
-    availability. Local hosts (localhost / 127.0.0.1 / ::1 / *.local) are
-    treated as dev regardless of port so dev fixtures keep working.
+    Returns True when AEGIS_TOKEN is set, or AEGIS_URL / AEGIS_BASE_URL
+    points at a non-dev host. When True, _detect_mode refuses to silently
+    degrade to Lite on a transient backend outage — Gateway-uniqueness
+    (AO-001) outranks availability. Local hosts (localhost / 127.0.0.1 /
+    ::1 / *.local) are treated as dev regardless of port so dev fixtures
+    keep working.
     """
     if os.environ.get("AEGIS_TOKEN", "").strip():
         return True
-    url = os.environ.get("AEGIS_URL", "").strip()
+    url = (
+        os.environ.get("AEGIS_URL", "").strip()
+        or os.environ.get("AEGIS_BASE_URL", "").strip()
+    )
     return bool(url) and not _is_dev_host(url)
 
 
@@ -160,21 +193,31 @@ def _detect_mode() -> Mode:
     elif env_mode == "full":
         _detected_mode = Mode.FULL
     else:
-        client = _get_client()
-        if client.is_available():
-            _detected_mode = Mode.FULL
-        elif _user_intends_full():
-            # Explicit URL/TOKEN signals Full intent. Refuse silent Lite
-            # degrade — Gateway-uniqueness (AO-001) outranks availability.
-            # Calls fail-closed until the backend recovers.
-            _detected_mode = Mode.FULL
-            logger.warning(
-                "shield: AEGIS_MODE=auto with explicit URL/TOKEN but backend "
-                "unreachable — staying in Full mode (fail-closed). All @shield "
-                "calls will deny until the gateway recovers."
-            )
-        else:
+        # AUTO branch — intent-first per the README AUTO behaviour matrix:
+        #   - no Full intent (no AEGIS_TOKEN, no non-dev URL) → LITE (no probe)
+        #   - Full intent + reachable backend                 → FULL
+        #   - Full intent + unreachable backend               → fail-closed FULL warn
+        # The intent check runs BEFORE the /health probe so a dev
+        # environment without credentials does not opportunistically call
+        # the gateway. This matches the documented matrix exactly and
+        # avoids unnecessary /check-access traffic from no-token AUTO
+        # callers (parity with node client.ts detectMode).
+        if not _user_intends_full():
             _detected_mode = Mode.LITE
+        else:
+            client = _get_client()
+            if client.is_available():
+                _detected_mode = Mode.FULL
+            else:
+                # Explicit URL/TOKEN signals Full intent. Refuse silent Lite
+                # degrade — Gateway-uniqueness (AO-001) outranks availability.
+                # Calls fail-closed until the backend recovers.
+                _detected_mode = Mode.FULL
+                logger.warning(
+                    "shield: AEGIS_MODE=auto with explicit URL/TOKEN but backend "
+                    "unreachable — staying in Full mode (fail-closed). All @shield "
+                    "calls will deny until the gateway recovers."
+                )
     _detected_mode_ts = now
 
     # AO-006: emit an explicit event whenever the mode flips so an audit
@@ -772,6 +815,62 @@ def shield(
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 active_mode = mode if mode != Mode.AUTO else _detect_mode()
+                # FULL mode: gate /check-access BEFORE running fn (parity
+                # with Node T-SDK-FULL-GATE-01). The trust gate prevents
+                # the wrapped function's side effects (DB writes, billing,
+                # etc.), not merely discards their result. On deny /
+                # unreachable / network error the wrapped function never
+                # runs and the call returns None.
+                if active_mode == Mode.FULL:
+                    client = _get_client()
+                    gate_scope: list[str] = [] if use_deny else list(_scope or [])
+                    try:
+                        granted = await client.aauthorize(purpose, gate_scope)
+                    except Exception:
+                        logger.warning(
+                            "shield: /check-access raised for purpose=%s — "
+                            "fn '%s' not invoked (fail-closed)",
+                            purpose,
+                            fn.__name__,
+                        )
+                        return None
+                    if not granted:
+                        logger.warning(
+                            "shield: purpose=%s denied by /check-access — "
+                            "fn '%s' not invoked (fail-closed)",
+                            purpose,
+                            fn.__name__,
+                        )
+                        return None
+                    # Gate granted — safe to run fn.
+                    try:
+                        result = await fn(*args, **kwargs)
+                    except Exception:
+                        logger.error(
+                            "shield: wrapped function '%s' raised after gate "
+                            "grant, returning empty (fail-closed)",
+                            fn.__name__,
+                        )
+                        return ""
+                    if use_deny:
+                        return await _shield_deny_async(
+                            result,
+                            purpose,
+                            _deny,
+                            _deny_tree,
+                            fn.__name__,
+                            active_mode,
+                            pre_authorized=True,
+                        )
+                    return await _shield_full_async(
+                        result,
+                        purpose,
+                        _scope,
+                        _scope_tree,
+                        fn.__name__,
+                        pre_authorized=True,
+                    )
+                # LITE (or AUTO→LITE): no pre-call gate; existing flow.
                 try:
                     result = await fn(*args, **kwargs)
                 except Exception:
@@ -782,21 +881,8 @@ def shield(
                     )
                     return ""
                 if use_deny:
-                    if active_mode == Mode.FULL:
-                        return await _shield_deny_async(
-                            result,
-                            purpose,
-                            _deny,
-                            _deny_tree,
-                            fn.__name__,
-                            active_mode,
-                        )
                     return _shield_deny(
                         result, purpose, _deny, _deny_tree, fn.__name__, active_mode
-                    )
-                if active_mode == Mode.FULL:
-                    return await _shield_full_async(
-                        result, purpose, _scope, _scope_tree, fn.__name__
                     )
                 return _shield_lite(result, purpose, _scope, _scope_tree, fn.__name__)
 
@@ -805,6 +891,61 @@ def shield(
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             active_mode = mode if mode != Mode.AUTO else _detect_mode()
+            # FULL mode: gate /check-access BEFORE running fn (parity with
+            # Node T-SDK-FULL-GATE-01). The trust gate prevents the wrapped
+            # function's side effects, not merely discards their result. On
+            # deny / unreachable / network error the wrapped function never
+            # runs and the call returns None.
+            if active_mode == Mode.FULL:
+                client = _get_client()
+                gate_scope: list[str] = [] if use_deny else list(_scope or [])
+                try:
+                    granted = client.authorize(purpose, gate_scope)
+                except Exception:
+                    logger.warning(
+                        "shield: /check-access raised for purpose=%s — "
+                        "fn '%s' not invoked (fail-closed)",
+                        purpose,
+                        fn.__name__,
+                    )
+                    return None
+                if not granted:
+                    logger.warning(
+                        "shield: purpose=%s denied by /check-access — "
+                        "fn '%s' not invoked (fail-closed)",
+                        purpose,
+                        fn.__name__,
+                    )
+                    return None
+                # Gate granted — safe to run fn.
+                try:
+                    result = fn(*args, **kwargs)
+                except Exception:
+                    logger.error(
+                        "shield: wrapped function '%s' raised after gate "
+                        "grant, returning empty (fail-closed)",
+                        fn.__name__,
+                    )
+                    return ""
+                if use_deny:
+                    return _shield_deny(
+                        result,
+                        purpose,
+                        _deny,
+                        _deny_tree,
+                        fn.__name__,
+                        active_mode,
+                        pre_authorized=True,
+                    )
+                return _shield_full(
+                    result,
+                    purpose,
+                    _scope,
+                    _scope_tree,
+                    fn.__name__,
+                    pre_authorized=True,
+                )
+            # LITE (or AUTO→LITE): no pre-call gate; existing flow.
             try:
                 result = fn(*args, **kwargs)
             except Exception:
@@ -818,8 +959,6 @@ def shield(
                 return _shield_deny(
                     result, purpose, _deny, _deny_tree, fn.__name__, active_mode
                 )
-            if active_mode == Mode.FULL:
-                return _shield_full(result, purpose, _scope, _scope_tree, fn.__name__)
             return _shield_lite(result, purpose, _scope, _scope_tree, fn.__name__)
 
         return wrapper  # type: ignore[return-value]
@@ -834,12 +973,18 @@ def _shield_deny(
     deny_tree: dict[str, Any],
     fn_name: str,
     active_mode: Mode,
+    *,
+    pre_authorized: bool = False,
 ) -> Any:
-    """Apply deny_fields filtering. Full mode sends ingest record."""
+    """Apply deny_fields filtering. Full mode sends ingest record.
+
+    When ``pre_authorized=True``, skip the in-helper gate call (the shield
+    wrapper has already gated /check-access). See T-SDK-FULL-GATE-01.
+    """
     # AO-003: enforce purpose authorization in Full mode (deny-list uses
     # empty scope; the backend decides whether the purpose is allowed at
     # all for this caller).
-    if active_mode == Mode.FULL:
+    if active_mode == Mode.FULL and not pre_authorized:
         client = _get_client()
         if not client.authorize(purpose, []):
             logger.warning(
@@ -974,20 +1119,28 @@ def _shield_full(
     scope: list[str],
     scope_tree: dict[str, Any],
     fn_name: str = "unknown",
+    *,
+    pre_authorized: bool = False,
 ) -> Any:
     """Connected mode: filter locally + send block record to the backend.
 
     Fail-closed: if ingest fails, return empty result.
+
+    When ``pre_authorized=True``, the caller (typically the shield wrapper
+    in FULL mode) has already invoked ``/check-access`` and the gate
+    granted; this function skips the in-helper gate call to avoid a double
+    audit and just performs filter + ingest. See T-SDK-FULL-GATE-01.
     """
     client = _get_client()
-    # AO-003 gate.
-    if not client.authorize(purpose, list(scope)):
-        logger.warning(
-            "shield: purpose=%s scope=%s denied by check-access (AO-003)",
-            purpose,
-            scope,
-        )
-        return _empty_for(data)
+    if not pre_authorized:
+        # AO-003 gate.
+        if not client.authorize(purpose, list(scope)):
+            logger.warning(
+                "shield: purpose=%s scope=%s denied by check-access (AO-003)",
+                purpose,
+                scope,
+            )
+            return _empty_for(data)
 
     try:
         # Normalize once so both the filter and the audit diff agree on shape.
@@ -1048,19 +1201,26 @@ async def _shield_full_async(
     scope: list[str],
     scope_tree: dict[str, Any],
     fn_name: str = "unknown",
+    *,
+    pre_authorized: bool = False,
 ) -> Any:
     """Async variant of :func:`_shield_full`. Uses ``AegisClient.aingest`` so
     the decorated coroutine never blocks the event loop on the ingest POST.
+
+    When ``pre_authorized=True``, skip the in-helper gate call (the shield
+    wrapper has already gated /check-access before invoking fn).
+    See T-SDK-FULL-GATE-01.
     """
     client = _get_client()
-    # AO-003 gate.
-    if not await client.aauthorize(purpose, list(scope)):
-        logger.warning(
-            "shield: purpose=%s scope=%s denied by check-access (AO-003)",
-            purpose,
-            scope,
-        )
-        return _empty_for(data)
+    if not pre_authorized:
+        # AO-003 gate.
+        if not await client.aauthorize(purpose, list(scope)):
+            logger.warning(
+                "shield: purpose=%s scope=%s denied by check-access (AO-003)",
+                purpose,
+                scope,
+            )
+            return _empty_for(data)
 
     try:
         normalized = _freeze_single_pass(_to_filterable(data))
@@ -1121,10 +1281,16 @@ async def _shield_deny_async(
     deny_tree: dict[str, Any],
     fn_name: str,
     active_mode: Mode,
+    *,
+    pre_authorized: bool = False,
 ) -> Any:
-    """Async variant of :func:`_shield_deny`."""
+    """Async variant of :func:`_shield_deny`.
+
+    When ``pre_authorized=True``, skip the in-helper gate call (the shield
+    wrapper has already gated /check-access). See T-SDK-FULL-GATE-01.
+    """
     # T-151 AO-003: enforce purpose authorization in Full mode.
-    if active_mode == Mode.FULL:
+    if active_mode == Mode.FULL and not pre_authorized:
         client = _get_client()
         if not await client.aauthorize(purpose, []):
             logger.warning(
@@ -1284,11 +1450,17 @@ def sync_policies(policies: dict[str, PolicySyncEntry]) -> None:
 
 
 def reset() -> None:
-    """Reset cached client and mode detection. Useful for testing."""
-    global _client, _detected_mode, _detected_mode_ts
+    """Reset cached client, mode detection, and deprecation-warning state.
+
+    Useful for testing. Mirrors npm ``resetModuleClient()`` (which also
+    re-arms the AEGIS_BASE_URL deprecation warning) so test fixtures
+    behave identically across both SDKs.
+    """
+    global _client, _detected_mode, _detected_mode_ts, _base_url_alias_warned
     _client = None
     _detected_mode = None
     _detected_mode_ts = 0.0
+    _base_url_alias_warned = False
 
 
 def refresh_token() -> None:
