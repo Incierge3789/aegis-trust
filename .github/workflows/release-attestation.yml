@@ -15,7 +15,12 @@
 #      別 workflow / 手動 operator action。 本 workflow は **SBOM + attestation 生成
 #      + release artifact attach のみ**。
 #   4. 全 third-party action は 40-char commit SHA pin。 tag pin 禁止 (mutation attack)。
-#   5. Runner = ubuntu-latest (GitHub-hosted ephemeral)。 self-hosted runner は禁止。
+#   5. Runner = **self-hosted aegis-mac mandatory** (Block B = release-class、 supply
+#      chain trust の核心)。 ubuntu-latest = GitHub-hosted は禁止 (= cosign keyless OIDC
+#      identity を GitHub infra に依存させる = supply chain attack surface)。 aegis-core
+#      release.yml (runs-on: [self-hosted, macOS, ARM64, aegis-mac]) と同 mandate。
+#      ci.yml の Block A (read-only) のみ ubuntu-latest 例外。
+#      F-060 record: 過去 T-009-1 で本 mandate 違反、 sprint_009 iter 1e で literal 修正。
 #
 # === OUTPUT (sprint_009 closure 要件) ===
 #
@@ -62,7 +67,7 @@ concurrency:
 jobs:
   sbom-node:
     name: SBOM (Node — CycloneDX)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, aegis-mac]
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
@@ -103,7 +108,7 @@ jobs:
 
   sbom-python:
     name: SBOM (Python — CycloneDX)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, aegis-mac]
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
@@ -148,7 +153,7 @@ jobs:
   collect-and-sign:
     name: Cosign sign SBOMs + Release attach
     needs: [sbom-node, sbom-python]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, aegis-mac]
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
