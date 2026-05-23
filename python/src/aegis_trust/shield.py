@@ -853,7 +853,11 @@ def shield(
                             pre_authorized=True,
                         )
                     return await _shield_full_async(
-                        result, purpose, _scope, _scope_tree, fn.__name__,
+                        result,
+                        purpose,
+                        _scope,
+                        _scope_tree,
+                        fn.__name__,
                         pre_authorized=True,
                     )
                 # LITE (or AUTO→LITE): no pre-call gate; existing flow.
@@ -915,11 +919,20 @@ def shield(
                     return ""
                 if use_deny:
                     return _shield_deny(
-                        result, purpose, _deny, _deny_tree, fn.__name__, active_mode,
+                        result,
+                        purpose,
+                        _deny,
+                        _deny_tree,
+                        fn.__name__,
+                        active_mode,
                         pre_authorized=True,
                     )
                 return _shield_full(
-                    result, purpose, _scope, _scope_tree, fn.__name__,
+                    result,
+                    purpose,
+                    _scope,
+                    _scope_tree,
+                    fn.__name__,
                     pre_authorized=True,
                 )
             # LITE (or AUTO→LITE): no pre-call gate; existing flow.

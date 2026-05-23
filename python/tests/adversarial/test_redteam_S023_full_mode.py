@@ -205,10 +205,7 @@ def test_purpose_invalid_denied(purpose):
             # `.strip()` is what catches the " " parametrize case — without
             # it, " " is truthy and the test would grant, then incorrectly
             # rely on the ingest-fail fallback to look like a denial.
-            if (
-                not body.get("purpose", "").strip()
-                or "/" in body.get("purpose", "")
-            ):
+            if not body.get("purpose", "").strip() or "/" in body.get("purpose", ""):
                 return httpx.Response(403, json={"error": "denied"})
             return httpx.Response(200, json={"allowed": True})
         return httpx.Response(200, json={"status": "ok"})
