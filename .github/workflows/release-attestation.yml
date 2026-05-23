@@ -215,3 +215,120 @@ jobs:
             sbom/*.sig
             sbom/*.pem
           fail_on_unmatched_files: true
+
+  # === Block B Phase 2 (sprint_010 T-010-5) =========================================
+  # SDK 本体 artifact (npm tarball + PyPI wheel) を cosign keyless で署名。
+  # SBOM 署名 (上の collect-and-sign job) だけでは顧客が `npm install aegis-trust` /
+  # `pip install aegis-trust` した時に検証できるのは「dependency 一覧」 のみで、
+  # SDK 本体の正当性 (= 顧客が真に検証したい trust signal) は未 cover。 本 job が
+  # SDK artifact 自体を sign することで「artifact = signed-by-aegis-org の同一性」
+  # を Sigstore Rekor public log に literal 記録 → enterprise procurement (CSO /
+  # supply-chain auditor) が `cosign verify-blob` で literal 検証可能に。
+  #
+  # Phase 2 scope:
+  #   - npm pack で aegis-trust-<version>.tgz を build
+  #   - python -m build で aegis_trust-<version>-py3-none-any.whl + .tar.gz を build
+  #   - cosign sign-blob keyless で 3 artifact (tgz + whl + sdist) を署名
+  #   - upload signed bundle + release attach (tag push 時)
+  #
+  # Not yet (sprint_011+):
+  #   - npm publish --provenance flag (publish workflow 統合、 Stage A 再開後)
+  #   - PyPI trusted publisher attestation (PyPI 側設定 + workflow 拡張)
+  #   - Reproducible build verification
+  #
+  pack-and-sign-sdk:
+    name: Pack + Cosign sign SDK artifacts (npm tarball + PyPI wheel/sdist)
+    needs: [sbom-node, sbom-python]
+    runs-on: [self-hosted, macOS, ARM64, self-hosted-runner]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Python build tools
+        run: pip install --no-cache-dir build hatchling
+
+      - name: Build npm tarball
+        working-directory: node
+        run: |
+          set -euo pipefail
+          npm ci --omit=dev
+          npm run build
+          rm -f aegis-trust-*.tgz
+          npm pack
+          ls -la aegis-trust-*.tgz
+
+      - name: Build PyPI wheel + sdist
+        working-directory: python
+        run: |
+          set -euo pipefail
+          python -m build
+          ls -la dist/
+
+      - name: Collect SDK artifacts into single dir
+        run: |
+          set -euo pipefail
+          mkdir -p sdk-artifacts
+          cp node/aegis-trust-*.tgz sdk-artifacts/
+          cp python/dist/aegis_trust-*.whl sdk-artifacts/
+          cp python/dist/aegis_trust-*.tar.gz sdk-artifacts/
+          ls -la sdk-artifacts/
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62  # v3.10.0
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Cosign sign SDK artifacts (keyless, Sigstore Rekor)
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          set -euo pipefail
+          for artifact in sdk-artifacts/*; do
+            case "$artifact" in
+              *.sig|*.pem) continue ;;
+            esac
+            echo "[cosign] signing $artifact (keyless)"
+            cosign sign-blob --yes \
+              --output-signature "${artifact}.sig" \
+              --output-certificate "${artifact}.pem" \
+              "$artifact"
+            echo "[cosign] verifying $artifact"
+            cosign verify-blob \
+              --certificate "${artifact}.pem" \
+              --signature "${artifact}.sig" \
+              --certificate-identity-regexp 'https://github\.com/.+/.github/workflows/release-attestation\.yml@.+' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              "$artifact"
+          done
+          ls -la sdk-artifacts/
+
+      - name: Upload signed SDK artifact bundle
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: sdk-artifacts-signed
+          path: sdk-artifacts/*
+          retention-days: 90
+
+      - name: Upload SDK artifacts + signatures to Release (tag push only)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
+        with:
+          files: |
+            sdk-artifacts/*.tgz
+            sdk-artifacts/*.whl
+            sdk-artifacts/*.tar.gz
+            sdk-artifacts/*.sig
+            sdk-artifacts/*.pem
+          fail_on_unmatched_files: true
