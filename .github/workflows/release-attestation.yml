@@ -112,32 +112,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node (for cdxgen)
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: '20'
+
       - name: Setup Python
         uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
         with:
           python-version: '3.12'
 
-      - name: Install cyclonedx-bom
-        run: pip install --no-cache-dir cyclonedx-bom
-
-      - name: Generate CycloneDX SBOM (Python)
+      - name: Generate CycloneDX SBOM (Python via cdxgen)
         id: gen
-        working-directory: python
         run: |
           set -euo pipefail
-          mkdir -p ../sbom
-          # cyclonedx-bom は requirements / poetry / pipenv / pdm を auto-detect
-          # aegis-trust は pyproject.toml + hatch なので pdm/poetry に近い扱い
-          cyclonedx-py environment \
-            --output-format JSON \
-            --schema-version 1.5 \
-            --output-file ../sbom/aegis-trust-python.cdx.json || \
-          cyclonedx-py requirements \
-            --output-format JSON \
-            --schema-version 1.5 \
-            --output-file ../sbom/aegis-trust-python.cdx.json \
-            pyproject.toml
-          cd ..
+          mkdir -p sbom
+          # cdxgen は --type python で pyproject.toml + lock 系 auto-detect
+          # cyclonedx-bom CLI は v7 で flag 仕様変更 (--schema-version 不認識) のため
+          # 既に sbom-node で実績ある cdxgen に統一 (single tool variance 0)
+          npx -y @cyclonedx/cdxgen@10 \
+            --type python \
+            --output sbom/aegis-trust-python.cdx.json \
+            --spec-version 1.5 \
+            python/
           echo "sbom-path=sbom/aegis-trust-python.cdx.json" >> "$GITHUB_OUTPUT"
           echo "[sbom-python] generated $(wc -l < sbom/aegis-trust-python.cdx.json) lines"
 
