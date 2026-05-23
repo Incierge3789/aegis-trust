@@ -1,0 +1,181 @@
+# aegis-trust release-attestation workflow (Block B)
+#
+# Sprint: internal-ops/sprint_009 T-009-1
+# PR: internal review Batch 1 P1 `supply_chain_attestation` closure
+# Closes: cso_review (P0 partial_closure) の唯一の dependency
+#
+# === SAFETY INVARIANTS (must hold) ===
+#
+#   1. Trigger は workflow_dispatch (manual) または tag push (`v*`) のみ。
+#      pull_request_target を **使わない** (token theft 攻撃面)。
+#   2. permissions に `id-token: write` を持つ — Sigstore keyless signing (cosign)
+#      と GitHub native build provenance (actions/attest-build-provenance) のため。
+#      Block A の ci.yml と完全分離 (ci.yml は read-only contract)。
+#   3. Secrets (NPM_TOKEN / PYPI_TOKEN) は本 workflow は **使わない** — publish 自体は
+#      別 workflow / 手動 operator action。 本 workflow は **SBOM + attestation 生成
+#      + release artifact attach のみ**。
+#   4. 全 third-party action は 40-char commit SHA pin。 tag pin 禁止 (mutation attack)。
+#   5. Runner = ubuntu-latest (GitHub-hosted ephemeral)。 self-hosted runner は禁止。
+#
+# === OUTPUT (sprint_009 closure 要件) ===
+#
+#   - node SBOM (CycloneDX JSON) attached to release
+#   - python SBOM (CycloneDX JSON) attached to release
+#   - GitHub native build provenance attestation (SLSA Level 3 equivalent) for both
+#   - Source-snapshot SHA recorded in attestation predicate
+#
+# === NOT YET (sprint_010+ scope) ===
+#
+#   - Sigstore cosign signing of npm tarball / PyPI wheel (requires Block B-2)
+#   - npm provenance flag (`npm publish --provenance`) — Block C publish workflow
+#   - PyPI trusted publisher attestation — Block C publish workflow
+#   - Reproducible build verification (deferred, audit/integrity 系)
+#
+# References:
+#   - https://github.com/CycloneDX/cdxgen
+#   - https://github.com/actions/attest-build-provenance
+#   - https://slsa.dev/spec/v1.0/levels#build-l3
+#   - internal review: family_5_ops_ci_release / supply_chain_attestation
+
+name: release-attestation
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to attest (omit to attest current commit as preview)'
+        required: false
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write       # release artifact upload
+  id-token: write       # OIDC token for Sigstore + GitHub native attestation
+  attestations: write   # GitHub native attestation API
+
+concurrency:
+  group: release-attestation-${{ github.ref }}
+  cancel-in-progress: false   # release は途中中断 NG
+
+jobs:
+  sbom-node:
+    name: SBOM (Node — CycloneDX)
+    runs-on: ubuntu-latest
+    outputs:
+      sbom-path: ${{ steps.gen.outputs.sbom-path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: '20'
+
+      - name: Install Node deps (production only)
+        working-directory: node
+        run: npm ci --omit=dev
+
+      - name: Generate CycloneDX SBOM (Node)
+        id: gen
+        run: |
+          set -euo pipefail
+          mkdir -p sbom
+          # cdxgen via npx (no global install)、 CycloneDX v1.5 JSON format
+          npx -y @cyclonedx/cdxgen@10 \
+            --type js \
+            --output sbom/aegis-trust-node.cdx.json \
+            --spec-version 1.5 \
+            node/
+          echo "sbom-path=sbom/aegis-trust-node.cdx.json" >> "$GITHUB_OUTPUT"
+          echo "[sbom-node] generated $(wc -l < sbom/aegis-trust-node.cdx.json) lines"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: sbom-node
+          path: sbom/aegis-trust-node.cdx.json
+          retention-days: 90
+
+  sbom-python:
+    name: SBOM (Python — CycloneDX)
+    runs-on: ubuntu-latest
+    outputs:
+      sbom-path: ${{ steps.gen.outputs.sbom-path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install cyclonedx-bom
+        run: pip install --no-cache-dir cyclonedx-bom
+
+      - name: Generate CycloneDX SBOM (Python)
+        id: gen
+        working-directory: python
+        run: |
+          set -euo pipefail
+          mkdir -p ../sbom
+          # cyclonedx-bom は requirements / poetry / pipenv / pdm を auto-detect
+          # aegis-trust は pyproject.toml + hatch なので pdm/poetry に近い扱い
+          cyclonedx-py environment \
+            --output-format JSON \
+            --schema-version 1.5 \
+            --output-file ../sbom/aegis-trust-python.cdx.json || \
+          cyclonedx-py requirements \
+            --output-format JSON \
+            --schema-version 1.5 \
+            --output-file ../sbom/aegis-trust-python.cdx.json \
+            pyproject.toml
+          cd ..
+          echo "sbom-path=sbom/aegis-trust-python.cdx.json" >> "$GITHUB_OUTPUT"
+          echo "[sbom-python] generated $(wc -l < sbom/aegis-trust-python.cdx.json) lines"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: sbom-python
+          path: sbom/aegis-trust-python.cdx.json
+          retention-days: 90
+
+  attest:
+    name: Build provenance attestation (SLSA L3 equivalent)
+    needs: [sbom-node, sbom-python]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          path: sbom-input
+
+      - name: Collect SBOMs into single dir
+        run: |
+          set -euo pipefail
+          mkdir -p sbom
+          find sbom-input -name '*.cdx.json' -exec cp {} sbom/ \;
+          ls -la sbom/
+
+      - name: Attest SBOMs (GitHub native, OIDC-backed)
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018  # v1.4.4
+        with:
+          subject-path: 'sbom/*.cdx.json'
+
+      - name: Upload SBOMs to Release (tag push only)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
+        with:
+          files: sbom/*.cdx.json
+          fail_on_unmatched_files: true
