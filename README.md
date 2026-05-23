@@ -45,6 +45,32 @@ Honest list of what does NOT work in `0.9.0-rc5`. We list these here so a real e
 
 If any of the above is a blocker for your use case, wait for v1.0 GA rather than adopting rc5.
 
+## Procurement & Compliance posture (Alpha)
+
+Honest disclosure for procurement teams, security review, and compliance officers. None of the below is a marketing claim — it is the literal state of this preview. If your evaluation requires anything beyond what is listed, the answer for `0.9.0-rc5` is "not yet".
+
+**Commercial / procurement**
+
+- **License**: Apache 2.0 (see [`LICENSE`](LICENSE); `python/LICENSE` is identical byte-for-byte). No contribution under any other license is solicited or accepted.
+- **SLA**: **none**. There is no uptime, support response, or remediation timeline commitment in this preview release.
+- **Support channel**: GitHub issues at this repo + email `contact@aegisagentcontrol.com`. No paid tier. No 24/7 channel.
+- **Vendor of record**: Incierge3789 (info@incierge.jp). Single-maintainer project at preview stage. Procurement teams that require multi-engineer bus-factor evidence should treat this as a risk factor for rc5.
+- **Enterprise agreement / DPA / MSA**: not offered for rc5. The Apache 2.0 license is the only legal instrument.
+- **Pricing**: open-source SDK is free. No commercial SKU is available.
+
+**Audit / compliance attestation**
+
+- **SOC 2 Type II / ISO 27001 / PCI-DSS / HIPAA**: **no certification or attestation exists** for `aegis-trust` or its aegis-core gateway dependency in the preview release. Compliance evaluation is the operator's responsibility.
+- **GDPR**: the SDK is a *data-minimization tool by design* (declared `purpose` × `scope` enforces field-level reduction before data leaves the function boundary), but no Data Processing Agreement is offered, no controller / processor split is contractually defined, and no DSR (data subject request) tooling is provided. Operators integrating into a GDPR-regulated pipeline must perform their own DPIA.
+- **CCPA / CPRA**: same posture as GDPR — minimization helps, no contractual instruments provided.
+- **Data residency**: the SDK in `LITE` mode does not transmit data; in `FULL` mode it calls an `aegis-core` gateway whose deployment topology is operator-controlled. There is no managed-service control over residency.
+- **Audit log retention**: written locally (`~/.aegis/history.jsonl` for Node, `~/.aegis/history.db` for Python). The SDK does not manage retention, encryption-at-rest, or transport to a SIEM — that is the operator's responsibility.
+- **Breach notification**: best-effort via the security disclosure process documented in [`python/SECURITY.md`](python/SECURITY.md) / [`node/SECURITY.md`](node/SECURITY.md) (48h acknowledgment, 7-day triage, 30-day fix for CVSS ≥ 7.0). No track record exists for the preview release.
+- **Right to be forgotten / data deletion**: the SDK is stateless except for the local audit log. Deletion of audit entries is the operator's responsibility.
+- **SBOM / SLSA / supply-chain attestation**: not yet shipped for rc5. Tracked as `supply_chain_attestation` (P1) in internal review; planned for the CI/release infrastructure sprint.
+
+**What this section is not**: a compliance certification, a legal commitment, a roadmap commitment, or an invitation to negotiate. It is an honest static snapshot of preview-state posture so a procurement or compliance review can make a `proceed / wait for GA / decline` call without a back-and-forth with the maintainer.
+
 ## Runnable integrations today
 
 The table below lists what has a working example file in this repo and what is exercised by the test suite. If an integration is **not** in this table, it does not have a dedicated example or test yet — use the generic [Drop-in wrapper pattern](#drop-in-wrapper-pattern) instead.

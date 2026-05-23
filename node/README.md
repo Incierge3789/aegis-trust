@@ -162,9 +162,15 @@ Modern AI agents request raw records and decide what to use. That's a security b
 - `AEGIS_CAPSULE_ROOT`-missing → `500` path emits no audit record.
 - `scope` → RBAC / Reflex / field-level minimum-disclosure wiring.
 - Debug-log identity-field redaction.
-- SDK access-cache TTL: `authorize()` caches an allow decision for 30 s, so a
-  same-token server-side policy change is invisible for ≤ 30 s (token rotation
-  invalidates immediately). Tracked as a P1 follow-up.
+- SDK access-cache TTL: `authorize()` caches an *allow* decision for 30 s
+  (`ACCESS_CACHE_TTL_MS = 30_000`). Deny decisions are **never** cached
+  (fail-closed). A same-token server-side policy change is invisible to this
+  SDK process for ≤ 30 s after the last allow; a token rotation
+  (`setToken(...)`) invalidates the entire allow-cache immediately by epoch
+  bump. Parity with the Python SDK `_ACCESS_CACHE_TTL_S = 30.0` (same value,
+  same fail-closed deny semantics). A bounded TTL window for allow decisions
+  is the explicit trade-off; operators that require zero allow-staleness
+  should call `setToken()` on policy change.
 
 ## API surface (parity with PyPI `aegis-trust` 0.8.1)
 
