@@ -129,10 +129,16 @@ describe("Mode.AUTO — detect mode", () => {
     expect(calls.find((c) => c.url.includes("/shield/ingest"))).toBeUndefined();
   });
 
-  it("upgrades to FULL when backend reachable, even without AEGIS_TOKEN (post-rc3 PyPI parity)", async () => {
-    // Post-rc3: AUTO opportunistically upgrades to FULL when /health returns
-    // 200, matching PyPI shield.py _detect_mode line 163-165 (probe first,
-    // then intent check for fail-closed escalation).
+  it("AUTO + no token + reachable backend → LITE (no opportunistic upgrade without intent)", async () => {
+    // README AUTO matrix: "auto + no Full intent (no AEGIS_TOKEN AND no
+    // non-dev URL) → Lite". Earlier rc4-rc5 builds probed the backend
+    // first and upgraded to FULL whenever /health returned 200, even
+    // without intent — that behaviour contradicted the documented matrix
+    // and made dev environments without credentials call /check-access
+    // against the gateway. The intent-first detectMode (T-SDK-FULL-GATE-01
+    // follow-up; PyPI parity intent-first variant) restores the matrix:
+    // no-token AUTO stays in LITE regardless of backend reachability —
+    // no /check-access, no /shield/ingest.
     const m = fetchMock();
     globalThis.fetch = m.fetch;
     const getUser = shield({
@@ -142,8 +148,8 @@ describe("Mode.AUTO — detect mode", () => {
     })(async (_: unknown) => ({ name: "A", ssn: "X" }));
     await getUser(1);
     await new Promise((r) => setTimeout(r, 30));
-    const ingestCall = m.calls.find((c) => c.url.includes("/shield/ingest"));
-    expect(ingestCall).toBeDefined();
+    expect(m.calls.find((c) => c.url.includes("/check-access"))).toBeUndefined();
+    expect(m.calls.find((c) => c.url.includes("/shield/ingest"))).toBeUndefined();
   });
 
   it("upgrades to FULL when token present and backend reachable", async () => {

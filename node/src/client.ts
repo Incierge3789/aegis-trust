@@ -645,10 +645,22 @@ export async function detectMode(): Promise<"lite" | "full"> {
     _detectedModeTs = nowMs;
     return _detectedMode;
   }
-  // AUTO branch — parity with PyPI shield.py _detect_mode line 162-177.
-  // Probe the backend FIRST so AUTO opportunistically upgrades to Full
-  // when the gateway is reachable, even without explicit Full intent.
-  // Then fall back via the intent check for fail-closed semantics.
+  // AUTO branch — intent-first per the README AUTO behaviour matrix:
+  //   - no Full intent (no AEGIS_TOKEN, no non-dev URL) → LITE (no probe)
+  //   - Full intent + reachable backend                 → FULL
+  //   - Full intent + unreachable backend               → fail-closed FULL + warn
+  // The intent check runs BEFORE the /health probe so a dev environment
+  // without credentials does not opportunistically call the gateway —
+  // this matches the documented matrix exactly. Earlier rc4-rc5 builds
+  // probed first and upgraded to Full whenever the gateway was reachable
+  // regardless of intent; that behaviour contradicted the matrix line
+  // "auto + no Full intent → Lite" and is corrected here. Mirrors PyPI
+  // shield.py _detect_mode intent-first variant.
+  if (!userIntendsFull()) {
+    _detectedMode = "lite";
+    _detectedModeTs = nowMs;
+    return _detectedMode;
+  }
   const client = getModuleClient();
   const available = await client.isAvailable();
   if (available) {
@@ -656,21 +668,16 @@ export async function detectMode(): Promise<"lite" | "full"> {
     _detectedModeTs = nowMs;
     return _detectedMode;
   }
-  if (userIntendsFull()) {
-    // AUTO + explicit Full intent + unreachable: fail-closed Full.
-    // Silent Lite degrade would leak data the user asked the gateway to
-    // filter. Mirrors PyPI shield.py _detect_mode line 166-175.
-    _detectedMode = "full";
-    _detectedModeTs = nowMs;
-    console.warn(
-      "aegis-trust: AEGIS_MODE=auto with explicit URL/TOKEN but backend "
-        + "unreachable — staying in Full mode (fail-closed). All shield() "
-        + "calls will deny until the gateway recovers.",
-    );
-    return _detectedMode;
-  }
-  _detectedMode = "lite";
+  // AUTO + explicit Full intent + unreachable: fail-closed Full.
+  // Silent Lite degrade would leak data the user asked the gateway to
+  // filter.
+  _detectedMode = "full";
   _detectedModeTs = nowMs;
+  console.warn(
+    "aegis-trust: AEGIS_MODE=auto with explicit URL/TOKEN but backend "
+      + "unreachable — staying in Full mode (fail-closed). All shield() "
+      + "calls will deny until the gateway recovers.",
+  );
   return _detectedMode;
 }
 

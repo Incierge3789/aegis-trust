@@ -4,6 +4,31 @@
 
 **No version bump, no publish in these PRs. Will land in the next release cut.**
 
+### Changed — `detectMode` now intent-first (matches README AUTO behaviour matrix)
+
+- `node/src/client.ts` `detectMode()` checks `userIntendsFull()` BEFORE
+  probing the backend. Earlier rc4-rc5 builds probed `/health` first and
+  opportunistically upgraded AUTO to Full whenever the gateway was
+  reachable, even without intent — that contradicted the README matrix
+  line "auto + no Full intent → Lite" and made dev environments without
+  credentials call `/check-access` against the gateway. The intent-first
+  variant restores the documented matrix exactly.
+- New behaviour:
+  - `AUTO + no Full intent` (no `AEGIS_TOKEN` AND no non-dev URL) → LITE
+    (no probe, no `/check-access`).
+  - `AUTO + Full intent + reachable backend` → FULL (opportunistic upgrade
+    with intent).
+  - `AUTO + Full intent + unreachable backend` → fail-closed FULL + one
+    `console.warn`. Unchanged.
+- `tests/fullMode.test.ts`: the rc4 "AUTO opportunistically upgrades to
+  FULL when backend reachable, even without AEGIS_TOKEN" test asserted
+  the now-removed probe-first behaviour. Replaced with the matrix-aligned
+  assertion: "AUTO + no token + reachable backend → LITE (no opportunistic
+  upgrade without intent)".
+- **Routed scenarios** (operational-trust-review verification batch 1):
+  `python_node_parity` divergence #2 (AUTO degrade semantics) — resolved.
+  `auto_mode_behavior` (P1) — resolved.
+
 ### Changed — `shield()` FULL mode now performs a real `/check-access` trust gate
 
 - **`shield()` FULL mode previously did client-side filtering + best-effort

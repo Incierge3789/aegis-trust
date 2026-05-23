@@ -193,21 +193,31 @@ def _detect_mode() -> Mode:
     elif env_mode == "full":
         _detected_mode = Mode.FULL
     else:
-        client = _get_client()
-        if client.is_available():
-            _detected_mode = Mode.FULL
-        elif _user_intends_full():
-            # Explicit URL/TOKEN signals Full intent. Refuse silent Lite
-            # degrade — Gateway-uniqueness (AO-001) outranks availability.
-            # Calls fail-closed until the backend recovers.
-            _detected_mode = Mode.FULL
-            logger.warning(
-                "shield: AEGIS_MODE=auto with explicit URL/TOKEN but backend "
-                "unreachable — staying in Full mode (fail-closed). All @shield "
-                "calls will deny until the gateway recovers."
-            )
-        else:
+        # AUTO branch — intent-first per the README AUTO behaviour matrix:
+        #   - no Full intent (no AEGIS_TOKEN, no non-dev URL) → LITE (no probe)
+        #   - Full intent + reachable backend                 → FULL
+        #   - Full intent + unreachable backend               → fail-closed FULL warn
+        # The intent check runs BEFORE the /health probe so a dev
+        # environment without credentials does not opportunistically call
+        # the gateway. This matches the documented matrix exactly and
+        # avoids unnecessary /check-access traffic from no-token AUTO
+        # callers (parity with node client.ts detectMode).
+        if not _user_intends_full():
             _detected_mode = Mode.LITE
+        else:
+            client = _get_client()
+            if client.is_available():
+                _detected_mode = Mode.FULL
+            else:
+                # Explicit URL/TOKEN signals Full intent. Refuse silent Lite
+                # degrade — Gateway-uniqueness (AO-001) outranks availability.
+                # Calls fail-closed until the backend recovers.
+                _detected_mode = Mode.FULL
+                logger.warning(
+                    "shield: AEGIS_MODE=auto with explicit URL/TOKEN but backend "
+                    "unreachable — staying in Full mode (fail-closed). All @shield "
+                    "calls will deny until the gateway recovers."
+                )
     _detected_mode_ts = now
 
     # AO-006: emit an explicit event whenever the mode flips so an audit

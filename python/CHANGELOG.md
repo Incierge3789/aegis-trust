@@ -4,6 +4,23 @@
 
 **No version bump, no publish in these PRs. Will land in the next release cut.**
 
+### Changed — `_detect_mode` now intent-first (matches AUTO behaviour matrix; Node parity)
+
+- `python/src/aegis_trust/shield.py` `_detect_mode()` checks
+  `_user_intends_full()` BEFORE probing the backend, parity with the
+  node `detectMode` intent-first fix (same release). Removes the
+  opportunistic-upgrade path that called `/check-access` from no-token
+  dev environments and contradicted the documented matrix.
+- New behaviour:
+  - `AUTO + no Full intent` (no `AEGIS_TOKEN`, no non-dev URL) → LITE
+    (no probe, no `/check-access`).
+  - `AUTO + Full intent + reachable backend` → FULL (opportunistic
+    upgrade with intent).
+  - `AUTO + Full intent + unreachable backend` → fail-closed FULL +
+    warning. Unchanged.
+- **Routed scenarios** (operational-trust-review verification batch 1):
+  `python_node_parity` divergence #2 (AUTO degrade) — resolved.
+
 ### Changed — `shield()` FULL mode now performs a real `/check-access` trust gate (T-SDK-FULL-GATE-01 parity)
 
 - **Python `shield()` FULL mode previously executed the wrapped function BEFORE calling `/check-access`** — the gate fired on the already-computed result, so any side effects (DB writes, billing, etc.) had already happened by the time the gate could deny. This release brings the Python SDK to parity with the Node `T-SDK-FULL-GATE-01` fix (landed on `main` 2026-05-22, commit `b687e99`):
