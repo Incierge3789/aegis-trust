@@ -145,8 +145,8 @@ jobs:
           path: sbom/aegis-trust-python.cdx.json
           retention-days: 90
 
-  attest:
-    name: Build provenance attestation (SLSA L3 equivalent)
+  collect-and-sign:
+    name: Cosign sign SBOMs + Release attach
     needs: [sbom-node, sbom-python]
     runs-on: ubuntu-latest
     steps:
@@ -165,14 +165,48 @@ jobs:
           find sbom-input -name '*.cdx.json' -exec cp {} sbom/ \;
           ls -la sbom/
 
-      - name: Attest SBOMs (GitHub native, OIDC-backed)
-        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018  # v1.4.4
+      # Sigstore cosign keyless signing — private repo でも動作 (OIDC + Rekor 公開 log)。
+      # GitHub native attest-build-provenance は user-owned private repo 非対応のため
+      # cosign 経由で SLSA-equivalent signing 実現。 keyless = no key 管理 overhead。
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7d6e4ff52a1bdce0a64ba9b6e83e2c79afa5a09  # v3.7.0
         with:
-          subject-path: 'sbom/*.cdx.json'
+          cosign-release: 'v2.4.1'
 
-      - name: Upload SBOMs to Release (tag push only)
+      - name: Cosign sign SBOMs (keyless, Sigstore Rekor)
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          set -euo pipefail
+          for sbom in sbom/*.cdx.json; do
+            echo "[cosign] signing $sbom (keyless)"
+            cosign sign-blob --yes \
+              --output-signature "${sbom}.sig" \
+              --output-certificate "${sbom}.pem" \
+              "$sbom"
+            echo "[cosign] verifying $sbom"
+            cosign verify-blob --yes \
+              --certificate "${sbom}.pem" \
+              --signature "${sbom}.sig" \
+              --certificate-identity-regexp 'https://github\.com/.+/.github/workflows/release-attestation\.yml@.+' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              "$sbom"
+          done
+          ls -la sbom/
+
+      - name: Upload signed SBOM bundle as artifact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: sbom-signed
+          path: sbom/*
+          retention-days: 90
+
+      - name: Upload SBOMs + signatures to Release (tag push only)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
-          files: sbom/*.cdx.json
+          files: |
+            sbom/*.cdx.json
+            sbom/*.sig
+            sbom/*.pem
           fail_on_unmatched_files: true
