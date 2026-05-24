@@ -359,3 +359,77 @@ jobs:
             sdk-artifacts/*.sig
             sdk-artifacts/*.pem
           fail_on_unmatched_files: true
+
+      # === Block C (internal-ops/sprint_011 T-011-11): npm Trusted Publisher OIDC publish ==
+      # 1-event setup → 0-event automation。 token/OTP/recovery code 永続不要。
+      #
+      # Prerequisites (one-time, operator-side):
+      #   1. https://www.npmjs.com/package/aegis-trust/access → Trusted Publishers tab
+      #   2. Add publisher: GitHub Actions
+      #   3. Repository: Incierge3789/aegis-trust
+      #   4. Workflow filename: release-attestation.yml
+      #   5. (Optional) Environment: leave blank (no environment gate)
+      #   6. Save
+      # After this one-time UI setup, every tag push (v*) auto-publishes to npm
+      # with provenance attestation, with NO token / NO OTP / NO recovery code.
+      #
+      # Why id-token: write here is sufficient:
+      #   The job already declares id-token: write at the workflow permissions
+      #   block (line 60) for Sigstore. npm trusted publisher uses the same
+      #   OIDC issuer (token.actions.githubusercontent.com). No additional
+      #   permission required.
+      #
+      # provenance flag:
+      #   --provenance attaches an SLSA Level 3 build provenance statement
+      #   that customers can verify with `npm audit signatures`. Requires
+      #   trusted publisher (cannot coexist with --auth-type=legacy token).
+      - name: Setup Node for npm publish
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: npm publish via Trusted Publisher OIDC (tag push only, no token)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        working-directory: sdk-artifacts
+        run: |
+          set -euo pipefail
+          # tag name like v0.9.0-rc6 → npm dist-tag = "rc" for pre-release,
+          # "latest" for final release. Pre-release detection: presence of "-"
+          # in the version part (rc, beta, alpha, etc.).
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" == *-* ]]; then
+            DIST_TAG="rc"
+            echo "[npm] pre-release version $VERSION → publishing with --tag rc"
+          else
+            DIST_TAG="latest"
+            echo "[npm] stable version $VERSION → publishing with --tag latest"
+          fi
+          # Find the tarball built by the Pack step earlier in this job.
+          # File layout: sdk-artifacts/aegis-trust-<version>.tgz
+          TGZ="aegis-trust-${VERSION}.tgz"
+          if [ ! -f "$TGZ" ]; then
+            echo "ERROR: expected tarball $TGZ not found in sdk-artifacts/" >&2
+            ls -la
+            exit 1
+          fi
+          echo "[npm] publishing $TGZ with --provenance --tag $DIST_TAG --access public"
+          npm publish "$TGZ" --provenance --tag "$DIST_TAG" --access public
+
+      - name: npm dist-tag promote to latest (final release only, tag push)
+        # Promote `latest` only when the published version is a final release
+        # (no pre-release suffix). For rc / beta / alpha, leave `latest` alone
+        # so a bare `npm install aegis-trust` does not regress to a preview.
+        # Operators can manually `npm dist-tag add aegis-trust@<rc> latest` if
+        # they intentionally want rc as the default.
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "[npm] pre-release $VERSION — skipping latest promotion (already published with --tag rc)"
+          else
+            echo "[npm] stable $VERSION — confirming latest tag (npm publish with --tag latest already set it)"
+            npm dist-tag ls aegis-trust
+          fi
