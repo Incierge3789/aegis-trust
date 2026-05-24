@@ -11,9 +11,12 @@
 #   2. permissions に `id-token: write` を持つ — Sigstore keyless signing (cosign)
 #      と GitHub native build provenance (actions/attest-build-provenance) のため。
 #      Block A の ci.yml と完全分離 (ci.yml は read-only contract)。
-#   3. Secrets (NPM_TOKEN / PYPI_TOKEN) は本 workflow は **使わない** — publish 自体は
-#      別 workflow / 手動 operator action。 本 workflow は **SBOM + attestation 生成
-#      + release artifact attach のみ**。
+#   3. Secrets (NPM_TOKEN / PYPI_TOKEN) は本 workflow は **使わない**。 npm publish は
+#      **Block C で npm Trusted Publisher OIDC** 経由 (token なし、 id-token: write OIDC、
+#      npm ≥11.5.1 で literal supported)。 PyPI publish は **将来 Trusted Publisher**
+#      経由 (本 file line 245 follow-up)、 現状 PyPI 側は manual twine + ~/.pypirc 経由
+#      (本 workflow は触らない)。 outputs = SBOM + attestation + release artifact attach
+#      + npm tag-push-only publish (Block C)。
 #   4. 全 third-party action は 40-char commit SHA pin。 tag pin 禁止 (mutation attack)。
 #   5. Runner = **self-hosted self-hosted-runner mandatory** (Block B = release-class、 supply
 #      chain trust の核心)。 ubuntu-latest = GitHub-hosted は禁止 (= cosign keyless OIDC
@@ -29,12 +32,14 @@
 #   - GitHub native build provenance attestation (SLSA Level 3 equivalent) for both
 #   - Source-snapshot SHA recorded in attestation predicate
 #
-# === NOT YET (sprint_010+ scope) ===
+# === Block status ===
 #
-#   - Sigstore cosign signing of npm tarball / PyPI wheel (requires Block B-2)
-#   - npm provenance flag (`npm publish --provenance`) — Block C publish workflow
-#   - PyPI trusted publisher attestation — Block C publish workflow
-#   - Reproducible build verification (deferred, audit/integrity 系)
+#   - Block A (SBOM + cosign sign-blob keyless + Release attach): ✅ wired (sprint_009)
+#   - Block B Phase 2 (SDK 本体 artifact pack + cosign sign + Release attach): ✅ wired (sprint_010)
+#   - Block C (npm Trusted Publisher OIDC publish + provenance + dist-tag): ✅ wired
+#     (T-011-11, line 363+, `if: tag push only` gated, requires npm ≥11.5.1)
+#   - PyPI Trusted Publisher attestation: pending (follow-up, line 245 stub)
+#   - Reproducible build verification: deferred (audit/integrity 系)
 #
 # References:
 #   - https://github.com/CycloneDX/cdxgen
@@ -278,8 +283,16 @@ jobs:
           which python3
           python3 --version
 
-      - name: Install Python build tools
-        run: pip install --no-cache-dir build hatchling
+      - name: Install Python build tools (PEP 668 break-system-packages for Homebrew Python)
+        # macOS Homebrew Python 3.11+ enforces PEP 668 (externally-managed-environment):
+        # `pip install ...` directly into system site-packages → crash with
+        # `error: externally-managed-environment`. The release-only context
+        # (ephemeral runner job, no long-lived environment to protect) allows
+        # `--break-system-packages` safely. Alternative would be a venv per job;
+        # break-system-packages is simpler and well-scoped here.
+        # Use `python3 -m pip` to bind to the python3 we just verified, not a
+        # potentially-missing unversioned `pip` (Homebrew installs only `pip3`).
+        run: python3 -m pip install --no-cache-dir --break-system-packages build hatchling
 
       - name: Build npm tarball
         working-directory: node
@@ -300,7 +313,9 @@ jobs:
         working-directory: python
         run: |
           set -euo pipefail
-          python -m build
+          # python3 (versioned) to match the rest of the job — Homebrew Python
+          # installs `python3` only, no unversioned `python` symlink.
+          python3 -m build
           ls -la dist/
 
       - name: Collect SDK artifacts into single dir
@@ -383,12 +398,20 @@ jobs:
       #   --provenance attaches an SLSA Level 3 build provenance statement
       #   that customers can verify with `npm audit signatures`. Requires
       #   trusted publisher (cannot coexist with --auth-type=legacy token).
-      - name: Setup Node for npm publish
+      - name: Setup Node for npm publish (Node 24 = npm ≥11.5.1 for Trusted Publisher OIDC)
+        # npm Trusted Publisher OIDC requires npm >= 11.5.1 (`--otp` replaced by
+        # OIDC token exchange). Node 20 ships npm 10.x → publish fails with auth
+        # error despite `id-token: write`. Node 24 ships npm ≥11.5.1.
+        #
+        # registry-url is deliberately NOT set: setting it auto-generates
+        # `.npmrc` with `_authToken=${NODE_AUTH_TOKEN}`, but Trusted Publisher
+        # OIDC does NOT set NODE_AUTH_TOKEN → npm CLI crashes with
+        # `Failed to replace env in config: ${NODE_AUTH_TOKEN}` before the
+        # OIDC exchange even starts. Default registry is npmjs.org anyway.
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '24'
 
       - name: npm publish via Trusted Publisher OIDC (tag push only, no token)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
