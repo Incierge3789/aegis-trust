@@ -441,7 +441,24 @@ jobs:
         with:
           node-version: '24'
 
-      - name: npm publish via Trusted Publisher OIDC + --provenance
+      - name: npm publish via Trusted Publisher OIDC (no --provenance, private-repo constraint)
+        # --provenance is intentionally OMITTED here. npm registry rejects
+        # provenance from private GitHub repositories:
+        #   literal 422 on run 26353466944 2026-05-24:
+        #     "Unsupported GitHub Actions source repository visibility:
+        #      'private'. Only public source repositories are supported
+        #      when publishing with provenance."
+        # aegis-trust is PRIVATE per F-050 mandate (repo public flip
+        # requires explicit Giri authorization, blocked until
+        # productization quality evidence is in).
+        # Trusted Publisher OIDC token-free publish still works WITHOUT
+        # provenance (no token / no OTP / no recovery code consumed).
+        # Customer-side provenance verification is available via
+        # `cosign verify-blob` against the GitHub Release attached .tgz
+        # (Block B Phase 2 above). Only the npm-side `npm audit
+        # signatures` feed is missing until the repo flips to public.
+        # Re-enable: add `--provenance` back to the npm publish command
+        # the same day the repo goes public.
         working-directory: tarball
         run: |
           set -euo pipefail
@@ -459,8 +476,8 @@ jobs:
             ls -la
             exit 1
           fi
-          echo "[npm] publishing $TGZ with --provenance --tag $DIST_TAG --access public"
-          npm publish "$TGZ" --provenance --tag "$DIST_TAG" --access public
+          echo "[npm] publishing $TGZ with --tag $DIST_TAG --access public (OIDC, no --provenance, private repo)"
+          npm publish "$TGZ" --tag "$DIST_TAG" --access public
 
       - name: npm dist-tag verify (pre-release leaves latest alone)
         # Pre-release versions (-rc, -beta, -alpha) intentionally do NOT
