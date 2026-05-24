@@ -375,52 +375,76 @@ jobs:
             sdk-artifacts/*.pem
           fail_on_unmatched_files: true
 
-      # === Block C (internal-ops/sprint_011 T-011-11): npm Trusted Publisher OIDC publish ==
-      # 1-event setup → 0-event automation。 token/OTP/recovery code 永続不要。
+      # === Block C build artifact handoff for github-hosted publish ==
+      # npm Trusted Publisher provenance (--provenance flag + OIDC) is rejected
+      # by the registry when run from a self-hosted runner: literal error from
+      # npm 11.x registry side is `422 Unprocessable Entity - Error verifying
+      # sigstore provenance bundle: Unsupported GitHub Actions runner
+      # environment: "self-hosted". Only "github-hosted" runners are supported
+      # when publishing with provenance.` (literal observed on run 26353133043
+      # 2026-05-24 against self-hosted-runner runner).
       #
-      # Prerequisites (one-time, operator-side):
-      #   1. https://www.npmjs.com/package/aegis-trust/access → Trusted Publishers tab
-      #   2. Add publisher: GitHub Actions
-      #   3. Repository: Incierge3789/aegis-trust
-      #   4. Workflow filename: release-attestation.yml
-      #   5. (Optional) Environment: leave blank (no environment gate)
-      #   6. Save
-      # After this one-time UI setup, every tag push (v*) auto-publishes to npm
-      # with provenance attestation, with NO token / NO OTP / NO recovery code.
-      #
-      # Why id-token: write here is sufficient:
-      #   The job already declares id-token: write at the workflow permissions
-      #   block (line 60) for Sigstore. npm trusted publisher uses the same
-      #   OIDC issuer (token.actions.githubusercontent.com). No additional
-      #   permission required.
-      #
-      # provenance flag:
-      #   --provenance attaches an SLSA Level 3 build provenance statement
-      #   that customers can verify with `npm audit signatures`. Requires
-      #   trusted publisher (cannot coexist with --auth-type=legacy token).
-      - name: Setup Node for npm publish (Node 24 = npm ≥11.5.1 for Trusted Publisher OIDC)
-        # npm Trusted Publisher OIDC requires npm >= 11.5.1 (`--otp` replaced by
-        # OIDC token exchange). Node 20 ships npm 10.x → publish fails with auth
-        # error despite `id-token: write`. Node 24 ships npm ≥11.5.1.
-        #
-        # registry-url is deliberately NOT set: setting it auto-generates
-        # `.npmrc` with `_authToken=${NODE_AUTH_TOKEN}`, but Trusted Publisher
-        # OIDC does NOT set NODE_AUTH_TOKEN → npm CLI crashes with
-        # `Failed to replace env in config: ${NODE_AUTH_TOKEN}` before the
-        # OIDC exchange even starts. Default registry is npmjs.org anyway.
+      # Block C is therefore split across two jobs:
+      #   - pack-and-sign-sdk (this self-hosted job): build + cosign keyless
+      #     sign-blob + GitHub Release attach. Stays on self-hosted self-hosted-runner
+      #     so cosign keyless OIDC identity does NOT depend on GitHub-hosted
+      #     infra (SAFETY INVARIANT #5 preserved).
+      #   - publish-npm-trusted-publisher (github-hosted ubuntu-latest job
+      #     below): npm publish --provenance via Trusted Publisher OIDC.
+      #     Receives the already-cosign-signed .tgz via upload-artifact /
+      #     download-artifact handoff so the artifact ingested by the
+      #     publish step is byte-identical to the one cosign signed on
+      #     self-hosted.
+      - name: Upload .tgz for github-hosted publish job (Block C handoff)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: npm-tarball-for-publish
+          path: sdk-artifacts/aegis-trust-*.tgz
+          retention-days: 1
+          if-no-files-found: error
+
+  # === Block C publish job (github-hosted) ============================================
+  # Runs ONLY on tag push. Receives the cosign-signed .tgz from pack-and-sign-sdk
+  # via download-artifact, then publishes to npm with Trusted Publisher OIDC +
+  # --provenance. github-hosted runner is mandatory here because npm registry
+  # 422-rejects --provenance from self-hosted runners (see comment in
+  # pack-and-sign-sdk above).
+  #
+  # SAFETY INVARIANT #5 boundary: cosign keyless OIDC identity stays on
+  # self-hosted (signing path). npm registry OIDC happens on github-hosted
+  # (token exchange, distinct identity, audited via npm Trusted Publisher
+  # cert-identity regexp tied to this exact workflow file). No cosign on
+  # github-hosted, no signing keys on github-hosted.
+  publish-npm-trusted-publisher:
+    name: npm publish (Trusted Publisher OIDC, github-hosted, --provenance)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [pack-and-sign-sdk]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # OIDC for npm Trusted Publisher (token exchange only)
+    steps:
+      - name: Download cosign-signed .tgz from build job
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: npm-tarball-for-publish
+          path: tarball
+
+      - name: Setup Node 24 (npm ≥11.5.1 required for Trusted Publisher OIDC)
+        # Node 20 ships npm 10.x; OIDC token exchange requires npm >= 11.5.1.
+        # registry-url is deliberately omitted: setting it auto-generates
+        # .npmrc with _authToken=${NODE_AUTH_TOKEN}, but Trusted Publisher
+        # OIDC does not set NODE_AUTH_TOKEN -> npm CLI crashes before the
+        # OIDC exchange even starts.
         uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
         with:
           node-version: '24'
 
-      - name: npm publish via Trusted Publisher OIDC (tag push only, no token)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        working-directory: sdk-artifacts
+      - name: npm publish via Trusted Publisher OIDC + --provenance
+        working-directory: tarball
         run: |
           set -euo pipefail
-          # tag name like v0.9.0-rc6 → npm dist-tag = "rc" for pre-release,
-          # "latest" for final release. Pre-release detection: presence of "-"
-          # in the version part (rc, beta, alpha, etc.).
           VERSION="${GITHUB_REF_NAME#v}"
           if [[ "$VERSION" == *-* ]]; then
             DIST_TAG="rc"
@@ -429,30 +453,28 @@ jobs:
             DIST_TAG="latest"
             echo "[npm] stable version $VERSION → publishing with --tag latest"
           fi
-          # Find the tarball built by the Pack step earlier in this job.
-          # File layout: sdk-artifacts/aegis-trust-<version>.tgz
           TGZ="aegis-trust-${VERSION}.tgz"
           if [ ! -f "$TGZ" ]; then
-            echo "ERROR: expected tarball $TGZ not found in sdk-artifacts/" >&2
+            echo "ERROR: expected tarball $TGZ not found in tarball/" >&2
             ls -la
             exit 1
           fi
           echo "[npm] publishing $TGZ with --provenance --tag $DIST_TAG --access public"
           npm publish "$TGZ" --provenance --tag "$DIST_TAG" --access public
 
-      - name: npm dist-tag promote to latest (final release only, tag push)
-        # Promote `latest` only when the published version is a final release
-        # (no pre-release suffix). For rc / beta / alpha, leave `latest` alone
-        # so a bare `npm install aegis-trust` does not regress to a preview.
-        # Operators can manually `npm dist-tag add aegis-trust@<rc> latest` if
-        # they intentionally want rc as the default.
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      - name: npm dist-tag verify (pre-release leaves latest alone)
+        # Pre-release versions (-rc, -beta, -alpha) intentionally do NOT
+        # promote latest, so a bare `npm install aegis-trust` does not
+        # regress to a preview. The bare-install -> rc redirect waits for
+        # the v1.0 GA cut (mirrors the PyPI semver semantics in README
+        # alpha-limitation 6).
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
+          echo "[npm] post-publish dist-tag state:"
+          npm dist-tag ls aegis-trust
           if [[ "$VERSION" == *-* ]]; then
-            echo "[npm] pre-release $VERSION — skipping latest promotion (already published with --tag rc)"
+            echo "[npm] pre-release $VERSION → latest tag intentionally not promoted"
           else
-            echo "[npm] stable $VERSION — confirming latest tag (npm publish with --tag latest already set it)"
-            npm dist-tag ls aegis-trust
+            echo "[npm] stable $VERSION → latest tag set by npm publish above"
           fi
