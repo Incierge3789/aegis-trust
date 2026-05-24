@@ -285,7 +285,12 @@ jobs:
         working-directory: node
         run: |
           set -euo pipefail
-          npm ci --omit=dev
+          # devDeps (typescript / tsc) required for `npm run build`; --omit=dev
+          # would skip them and produce `sh: tsc: command not found` (verified
+          # on dry-run #26349851993, 2026-05-24). Use the full install for the
+          # build step; the published tarball only contains the compiled dist/
+          # so the runtime install set is unaffected.
+          npm ci
           npm run build
           rm -f aegis-trust-*.tgz
           npm pack
