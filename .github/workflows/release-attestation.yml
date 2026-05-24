@@ -122,10 +122,21 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Python
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
-        with:
-          python-version: '3.12'
+      - name: Verify system Python (self-hosted aegis-mac runner)
+        # actions/setup-python hardcodes /Users/runner/hostedtoolcache as the
+        # macOS install target (install-python.sh "Creating Python hostedtoolcache
+        # folder..." → `mkdir /Users/runner` → Permission denied on self-hosted
+        # runner whose home is /Users/incierge). Setting AGENT_TOOLSDIRECTORY /
+        # RUNNER_TOOL_CACHE in the runner launchd plist did not override the
+        # hardcoded path (verified 2026-05-24 on mac-m5-aegis-trust runner).
+        # SBOM generation only needs python3 in PATH for cdxgen subprocess
+        # invocation (Python is not the executor — cdxgen is node-launched);
+        # system Python from /opt/homebrew/bin is sufficient and avoids the
+        # setup-python hostedtoolcache trap entirely.
+        run: |
+          set -euo pipefail
+          which python3
+          python3 --version
 
       - name: Generate CycloneDX SBOM (Python via cdxgen)
         id: gen
@@ -251,10 +262,21 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Python
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
-        with:
-          python-version: '3.12'
+      - name: Verify system Python (self-hosted aegis-mac runner)
+        # actions/setup-python hardcodes /Users/runner/hostedtoolcache as the
+        # macOS install target (install-python.sh "Creating Python hostedtoolcache
+        # folder..." → `mkdir /Users/runner` → Permission denied on self-hosted
+        # runner whose home is /Users/incierge). Setting AGENT_TOOLSDIRECTORY /
+        # RUNNER_TOOL_CACHE in the runner launchd plist did not override the
+        # hardcoded path (verified 2026-05-24 on mac-m5-aegis-trust runner).
+        # SBOM generation only needs python3 in PATH for cdxgen subprocess
+        # invocation (Python is not the executor — cdxgen is node-launched);
+        # system Python from /opt/homebrew/bin is sufficient and avoids the
+        # setup-python hostedtoolcache trap entirely.
+        run: |
+          set -euo pipefail
+          which python3
+          python3 --version
 
       - name: Install Python build tools
         run: pip install --no-cache-dir build hatchling
@@ -263,7 +285,12 @@ jobs:
         working-directory: node
         run: |
           set -euo pipefail
-          npm ci --omit=dev
+          # devDeps (typescript / tsc) required for `npm run build`; --omit=dev
+          # would skip them and produce `sh: tsc: command not found` (verified
+          # on dry-run #26349851993, 2026-05-24). Use the full install for the
+          # build step; the published tarball only contains the compiled dist/
+          # so the runtime install set is unaffected.
+          npm ci
           npm run build
           rm -f aegis-trust-*.tgz
           npm pack
