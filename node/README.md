@@ -15,7 +15,7 @@ Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffi
 
 - **30-second understanding**: `shield({ purpose, scope })(fn)` returns `fn` with the same signature; the return value is filtered to `scope` client-side, blocked fields are recorded in the local audit log, and a `trace_id` from `withTraceContext()` is propagated end-to-end.
 - **TypeScript port** of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same `shield()` API surface and `LITE`-mode fail-closed decorator behaviour, same local audit log. `FULL`/`AUTO` behavioural parity with the Python SDK is tracked (see CHANGELOG); the two SDKs are not yet guaranteed identical.
-- **Pre-GA**: v0.9.0-rc5 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk.
+- **Pre-GA**: v0.9.0-rc6 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk. rc6 npm publish is pending internal-ops/sprint_011 T-011-10 (Giri-approval required); the currently *published* preview on npm is **rc5**.
 
 ```bash
 npm install aegis-trust@rc

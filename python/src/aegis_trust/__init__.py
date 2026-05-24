@@ -52,7 +52,7 @@ __all__ = [
     "AUDIT_SCHEMA_VERSION",
     "STABILITY_LEVEL",
 ]
-__version__ = "0.9.0-rc5"
+__version__ = "0.9.0-rc6"
 
 # Schema version for audit event format (parity with npm aegis-trust
 # AUDIT_SCHEMA_VERSION). Bumped when audit record shape changes.
