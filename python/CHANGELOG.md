@@ -199,7 +199,7 @@ TypeScript port). Public API is additive over v0.8.1; no breaking changes.
 
 ## [0.8.1] — 2026-04-17
 
-Sprint S024 "β attestation + Full mode 実通電証明" — closes S023's
+Sprint S024 "Beta attestation + live Full-mode end-to-end proof" — closes S023's
 "electricity never confirmed" gap. v0.8.0 shipped the Full-mode
 wiring but the Tier β workflow had never seen a live green run;
 `docker compose up --build` hung on a 40-50 minute Rust rebuild
@@ -309,7 +309,7 @@ and records the project's first live all-green Tier β pass
 
 ## [0.8.0] — 2026-04-14
 
-Sprint S023 "Full mode 通電" — first end-to-end Full mode integration
+Sprint S023 "Full-mode live wiring" — first end-to-end Full mode integration
 sprint. v0.7.x shipped Full mode code paths (`@shield` Full,
 `AegisClient.ingest`, audit POST, `_diff_keys`) but they had never been
 exercised against a live aegis-core. v0.8.0 closes that gap on the
