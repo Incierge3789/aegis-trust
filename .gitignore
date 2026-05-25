@@ -21,6 +21,13 @@ node_modules/
 coverage/
 .vite/
 
+# Root-level npm install sandbox (smoke-tests published rc tarballs against the
+# canonical `node/package.json`). The repo root is not an npm package itself;
+# `node/` is. These appear when contributors run `npm install aegis-trust` at
+# the root for ad-hoc verification — keep them local-only.
+/package.json
+/package-lock.json
+
 # OS
 .DS_Store
 Thumbs.db

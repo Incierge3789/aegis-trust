@@ -70,9 +70,38 @@ concurrency:
   cancel-in-progress: false   # release は途中中断 NG
 
 jobs:
+  productization-gate:
+    name: Productization Gate (9-verifier dogfood, fail-closed)
+    runs-on: [self-hosted, macOS, ARM64, aegis-mac]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Verify ops-meta gate present on self-hosted runner
+        run: |
+          set -euo pipefail
+          GATE="$HOME/ops-meta/ops/productization-ops/_shared/scripts/dogfood_aegis_trust.sh"
+          if [ ! -x "$GATE" ]; then
+            echo "productization gate runner not found at $GATE" >&2
+            echo "expected ops-meta layout: ~/ops-meta/ops/productization-ops/_shared/{hooks,scripts}/ + verifiers/" >&2
+            exit 2
+          fi
+          echo "[productization-gate] runner OK: $GATE"
+
+      - name: Run 9-verifier dogfood (P0 fail-closed; P1 MANUAL_PENDING accepted under sprint_005)
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          [ -n "$TAG" ] || TAG="${{ inputs.tag }}"
+          [ -n "$TAG" ] || TAG="manual-dispatch"
+          bash "$HOME/ops-meta/ops/productization-ops/_shared/scripts/dogfood_aegis_trust.sh" "$TAG" "$GITHUB_WORKSPACE"
+
   sbom-node:
     name: SBOM (Node — CycloneDX)
     runs-on: [self-hosted, macOS, ARM64, aegis-mac]
+    needs: [productization-gate]
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
@@ -114,6 +143,7 @@ jobs:
   sbom-python:
     name: SBOM (Python — CycloneDX)
     runs-on: [self-hosted, macOS, ARM64, aegis-mac]
+    needs: [productization-gate]
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
