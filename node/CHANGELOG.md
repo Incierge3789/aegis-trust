@@ -125,7 +125,7 @@ This is also the **first release cut from the `aegis-trust` monorepo itself** (r
 
 - T-S179-cli-bin-shim (`internal-ops/sprint_006` Tier 0)
 - Codex Operational Scenario Review finding #2 (2026-05-21)
-- Memory `feedback_test_honesty.md`: fail-silent violates 米軍規格
+- Memory `feedback_test_honesty.md`: fail-silent violates the mil-spec test-honesty doctrine
 
 ## [0.9.0-rc5] — 2026-05-21 — cross-SDK version-lock (PyPI rc5 parity, no functional change)
 
