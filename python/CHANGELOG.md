@@ -2,7 +2,30 @@
 
 ## [Unreleased]
 
-## [0.9.0-rc6] — 2026-05-24 — Python parity (FULL gate + detectMode intent-first) + README CSR scoping (productization-ops/sprint_011)
+## [0.9.0-rc7] — 2026-05-26 — Pre-publish substrate gate wire + CHANGELOG artifact cleanup (productization-ops/sprint_S202)
+
+`productization-ops/sprint_S202` rc7 cut. **Preview release** (`STABILITY_LEVEL = "preview"`). **No public API change**; this release moves the productization 9-verifier gate into the release pipeline so every future tag push is mechanically audited before any artifact is built or published, and cleans sprint-internal Japanese strings out of the shipped `CHANGELOG.md`. Paired with npm `aegis-trust@0.9.0-rc7` (cross-SDK version-lock).
+
+### Changed — release pipeline now runs a fail-closed 9-verifier gate before publish
+
+- `.github/workflows/release-attestation.yml`: new `productization-gate` job (runs-on self-hosted aegis-mac). Invokes `~/ops-meta/ops/productization-ops/_shared/scripts/dogfood_aegis_trust.sh` which exercises the productization-ops 9 verifiers (5 P0 + 4 P1) against the workspace. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. P1 verifiers in `MANUAL_PENDING` (per sprint_005 transitional doctrine, e.g. `top_1_pct_readability` while the 5-oracle survey is queued, or `agent_callable_surface` for JSDoc-incomplete TS exports) do not block.
+- The gate substrate lives in `~/ops-meta/ops/productization-ops/`; the workflow assumes the self-hosted runner has that path. Different runner / clean machine → gate fails closed (`runner not found` exit 2). This is the productization-ops `pre_release_gate_productization.sh` literal contract, wired into the public release pipeline for the first time.
+
+### Changed — `CHANGELOG.md` is now english-first (artifact cleanup, no code change)
+
+- `python/CHANGELOG.md` S023 + S024 entries: drop sprint-internal annotation that was non-english (it referenced the integration sprint's working title in the original ops language). The CHANGELOG is bundled inside the PyPI wheel / sdist (`hatch.build.targets.sdist` includes `CHANGELOG.md`), so customer-facing artifact text must be english-first per `productization-ops/9-verifier #2 english_first_artifact`. The S024 entry now reads "Beta attestation + live Full-mode end-to-end proof"; the S023 entry now reads "Full-mode live wiring". No semantic difference from the prior text — the dropped strings were sprint-internal annotation, never customer-facing claims.
+- Same fix on the Node side (`node/CHANGELOG.md` S179 reference line): the non-english sprint annotation is replaced with "mil-spec test-honesty doctrine".
+
+### Added — Python-side idempotency invocation script (closes verifier coverage gap)
+
+- `python/tests/idempotency/invocation.py`: mirrors `node/tests/idempotency/invocation.py` contract. The productization-ops `idempotency_guarantee` verifier copies this script to `python/.productization_idempotency_test.tmp` and exercises `HistoryStore.record_idempotent` under a fixed `idempotency_key` for 1 initial + 100 retries. State is observed via a deterministic JSONL snapshot of audit rows projected to fields that are invariant under idempotent retry (function / purpose / scope / deny_fields / blocked_fields / mode); SQLite row id + timestamp are excluded because they would differ across the initial-vs-retry boundary if the system clock or auto-increment counter advanced. Previously the Python-side verifier ran with no invocation script and reported `ERROR`; rc7 fixes this gap so the gate produces a real PASS/FAIL verdict for both SDKs.
+
+### Routed scenarios (operational-trust-review)
+
+- `family_5_ops_ci_release / supply_chain_attestation`: incremental — gate is now invoked by the publish pipeline (was only a maintainer-local dogfood through rc6). Still `closure_candidate` until external oracle walk closes the literal residual.
+- `family_5_ops_ci_release / npm_pypi_latest_rc_tag_drift`: unchanged — `dist-tags.latest` intentionally stays on `0.9.0-rc3` per the pre-release-doesn't-promote-to-latest design. `npm install aegis-trust@rc` resolves to rc7.
+
+
 
 `productization-ops/sprint_011` rc6 cut. **Preview release** (`STABILITY_LEVEL = "preview"`). Public API is additive over rc5 with one **behavioral change** on FULL-mode fail-closed return value (see `shield()` FULL mode entry below: shape-preserving empty → `None`). Paired with npm `aegis-trust@0.9.0-rc6` (cross-SDK version-lock).
 
