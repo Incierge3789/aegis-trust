@@ -90,6 +90,19 @@ jobs:
           fi
           echo "[productization-gate] runner OK: $GATE"
 
+      - name: Build node SDK (dist/) for gate verifiers that scan compiled output
+        # idempotency_guarantee invocation_runner.mjs imports from node/dist/index.js;
+        # agent_callable_surface scans dist/*.d.ts. Both need a built artifact.
+        # tsc must run before the verifier dogfood so a fresh-checkout runner has dist/.
+        working-directory: node
+        run: |
+          set -euo pipefail
+          npm ci --no-audit
+          npm run build
+          [ -f dist/index.js ] || { echo "node dist/index.js missing after build" >&2; exit 2; }
+          [ -f dist/index.d.ts ] || { echo "node dist/index.d.ts missing after build" >&2; exit 2; }
+          echo "[productization-gate] node dist/ built ($(ls dist | wc -l | tr -d ' ') files)"
+
       - name: Run 9-verifier dogfood (P0 fail-closed; P1 MANUAL_PENDING accepted under sprint_005)
         run: |
           set -euo pipefail
