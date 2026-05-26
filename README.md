@@ -2,10 +2,10 @@
 
 **The trust layer for AI agents.** Declare *purpose* + *scope*; the SDK enforces what data the agent can see. Local-first, fail-closed.
 
-- **Python**: [`pip install 'aegis-trust==0.9.0rc6' --pre`](https://pypi.org/project/aegis-trust/) — source in [`python/`](python/)
+- **Python**: [`pip install 'aegis-trust==0.9.0rc7' --pre`](https://pypi.org/project/aegis-trust/) — source in [`python/`](python/)
 - **TypeScript / Node**: [`npm install aegis-trust@rc`](https://www.npmjs.com/package/aegis-trust) — source in [`node/`](node/)
 
-> **Publish status (rc6)**: PyPI `aegis-trust==0.9.0rc6` is **live** (2026-05-24, [registry link](https://pypi.org/project/aegis-trust/0.9.0rc6/), Published Artifact Parity Gate 5-stage all PASS — byte-identical local-vs-registry hashes + clean install verified). npm `aegis-trust@0.9.0-rc6` is **live** under the `rc` dist-tag ([registry link](https://www.npmjs.com/package/aegis-trust/v/0.9.0-rc6), published via Block C OIDC automation in `.github/workflows/release-attestation.yml` — Trusted Publisher OIDC, no token, no OTP, npm ≥11.5.1). `npm install aegis-trust@rc` resolves to `0.9.0-rc6`. Note: `dist-tags.latest` is intentionally **not** advanced by pre-release publishes and currently points at the prior `0.9.0-rc3` (bare `npm install aegis-trust` -> rc6 redirect waits for v1.0 GA, mirroring the PyPI semver semantics). `npm publish --provenance` is intentionally **omitted** while this repo is private (npm registry 422-rejects provenance from private source repos); customer-side provenance verification is available via `cosign verify-blob` against the GitHub Release attached `.whl` / `.tar.gz` / `.tgz` at `v0.9.0-rc6` (Block B Phase 2, keyless Sigstore Rekor log).
+> **Publish status (rc7)**: PyPI `aegis-trust==0.9.0rc7` is **live** (2026-05-24, [registry link](https://pypi.org/project/aegis-trust/0.9.0rc7/), Published Artifact Parity Gate 5-stage all PASS — byte-identical local-vs-registry hashes + clean install verified). npm `aegis-trust@0.9.0-rc7` is **live** under the `rc` dist-tag ([registry link](https://www.npmjs.com/package/aegis-trust/v/0.9.0-rc7), published via Block C OIDC automation in `.github/workflows/release-attestation.yml` — Trusted Publisher OIDC, no token, no OTP, npm ≥11.5.1). `npm install aegis-trust@rc` resolves to `0.9.0-rc7`. Note: `dist-tags.latest` is intentionally **not** advanced by pre-release publishes and currently points at the prior `0.9.0-rc3` (bare `npm install aegis-trust` -> rc7 redirect waits for v1.0 GA, mirroring the PyPI semver semantics). `npm publish --provenance` is intentionally **omitted** while this repo is private (npm registry 422-rejects provenance from private source repos); customer-side provenance verification is available via `cosign verify-blob` against the GitHub Release attached `.whl` / `.tar.gz` / `.tgz` at `v0.9.0-rc7` (Block B Phase 2, keyless Sigstore Rekor log).
 
 ```python
 from aegis_trust import shield
@@ -27,36 +27,36 @@ const u = await safeFetch("C-001"); // agent only ever sees { name, issue }
 
 ## Status
 
-- **Python**: `aegis-trust==0.9.0rc6` on PyPI (pre-GA preview, `STABILITY_LEVEL = "preview"`). v1.0.0 GA pending 5-oracle readability review + verifier coverage uplift.
-- **TypeScript**: `aegis-trust@0.9.0-rc6` is live on npm under the `rc` dist-tag (published via Block C Trusted Publisher OIDC automation). Install with `npm install aegis-trust@rc` (resolves to rc6) or pin `@0.9.0-rc6` explicitly. `dist-tags.latest` is intentionally **not** advanced by pre-release publishes (currently still points at the prior `0.9.0-rc3`); bare `npm install aegis-trust` -> rc6 redirect waits for v1.0 GA.
+- **Python**: `aegis-trust==0.9.0rc7` on PyPI (pre-GA preview, `STABILITY_LEVEL = "preview"`). v1.0.0 GA pending 5-oracle readability review + verifier coverage uplift.
+- **TypeScript**: `aegis-trust@0.9.0-rc7` is live on npm under the `rc` dist-tag (published via Block C Trusted Publisher OIDC automation). Install with `npm install aegis-trust@rc` (resolves to rc7) or pin `@0.9.0-rc7` explicitly. `dist-tags.latest` is intentionally **not** advanced by pre-release publishes (currently still points at the prior `0.9.0-rc3`); bare `npm install aegis-trust` -> rc7 redirect waits for v1.0 GA.
 - **License**: MIT (see [`LICENSE`](LICENSE); `python/LICENSE` is identical, byte-for-byte).
 - **API versioning**: `Aegis-Api-Version: 2026-05-18` (dated header).
 - **Not production-ready, not GA, not enterprise-ready.** This is an Alpha preview. SLA: none. Production use is at your own risk.
 
 ## Alpha limitations (read before adopting)
 
-Honest list of what does NOT work in `0.9.0-rc6`. We list these here so a real evaluator does not have to discover them from code:
+Honest list of what does NOT work in `0.9.0-rc7`. We list these here so a real evaluator does not have to discover them from code:
 
-- **LLM streaming responses are not preserved.** `shield()` buffers the entire return value before filtering. SSE / chunked / generator responses from Anthropic, OpenAI, Vercel AI SDK and similar streaming APIs are not supported in rc6. A streaming-aware wrapper is planned for a later release.
+- **LLM streaming responses are not preserved.** `shield()` buffers the entire return value before filtering. SSE / chunked / generator responses from Anthropic, OpenAI, Vercel AI SDK and similar streaming APIs are not supported in rc7. A streaming-aware wrapper is planned for a later release.
 - **No first-party adapter packages for Anthropic / OpenAI / Vercel AI SDK / Mastra / LlamaIndex / Bedrock / AutoGen.** These SDKs interoperate with the generic `shield()` wrapper at the data-access boundary (see [Drop-in wrapper pattern](#drop-in-wrapper-pattern) below), but there are no dedicated adapter modules or runnable example files for them yet. Treat the SDKs above as **compatible-by-pattern**, not **integrated**.
 - **Python and Node ingest-failure semantics currently differ.** Python returns empty (fail-closed) on a gateway ingest exception; Node returns the filtered data anyway (fail-open on audit). This divergence will be reconciled before v1.0 GA. Operators that rely on AO-003 audit completeness should prefer Python until then.
 - **Audit storage format differs by SDK.** Python writes SQLite (`~/.aegis/history.db`); Node writes JSONL (`~/.aegis/history.jsonl`). Both are hash-linked, but inspecting them currently requires separate tooling per language.
-- **PyPI bare `pip install aegis-trust` returns `0.8.1` (the pre-rename stable).** PyPI does not have a manually movable `latest` tag for pre-release versions; rc6 is on the index but the default resolver only picks rc lines when `--pre` is set. Use `pip install --pre 'aegis-trust==0.9.0rc6'` (literal pin) or `pip install --pre aegis-trust` (latest pre-release) to install rc6 today. The bare `pip install aegis-trust` -> rc6 redirect lands with the **v1.0.0 GA cut** (no rc-tagged release can promote itself to stable). On npm, Block C OIDC automation publishes pre-release versions with `--tag rc` (so `npm install aegis-trust@rc` resolves to the latest preview, currently `0.9.0-rc6`). `dist-tags.latest` is intentionally **not** advanced by pre-release publishes and currently still points at the prior `0.9.0-rc3` (bare `npm install aegis-trust` -> rc6 redirect also waits for the GA cut).
+- **PyPI bare `pip install aegis-trust` returns `0.8.1` (the pre-rename stable).** PyPI does not have a manually movable `latest` tag for pre-release versions; rc7 is on the index but the default resolver only picks rc lines when `--pre` is set. Use `pip install --pre 'aegis-trust==0.9.0rc7'` (literal pin) or `pip install --pre aegis-trust` (latest pre-release) to install rc7 today. The bare `pip install aegis-trust` -> rc7 redirect lands with the **v1.0.0 GA cut** (no rc-tagged release can promote itself to stable). On npm, Block C OIDC automation publishes pre-release versions with `--tag rc` (so `npm install aegis-trust@rc` resolves to the latest preview, currently `0.9.0-rc7`). `dist-tags.latest` is intentionally **not** advanced by pre-release publishes and currently still points at the prior `0.9.0-rc3` (bare `npm install aegis-trust` -> rc7 redirect also waits for the GA cut).
 - **Error-code reference page is hosted, not in-repo.** Error envelopes carry `docs_url: https://aegis-trust.dev/errors/<code>` (per [`python/src/aegis_trust/errors.py`](python/src/aegis_trust/errors.py) + [`node/src/errors.ts`](node/src/errors.ts)). The hosted page is the authoritative registry; the in-repo file [`node/docs/errors/README.md`](node/docs/errors/README.md) is a partial mirror. Use the `code` field on `AegisError` as the stable identifier; the Web URL may be empty for some codes during preview.
 
-If any of the above is a blocker for your use case, wait for v1.0 GA rather than adopting rc6.
+If any of the above is a blocker for your use case, wait for v1.0 GA rather than adopting rc7.
 
 ## Procurement & Compliance posture (Alpha)
 
-Honest disclosure for procurement teams, security review, and compliance officers. None of the below is a marketing claim — it is the literal state of this preview. If your evaluation requires anything beyond what is listed, the answer for `0.9.0-rc6` is "not yet".
+Honest disclosure for procurement teams, security review, and compliance officers. None of the below is a marketing claim — it is the literal state of this preview. If your evaluation requires anything beyond what is listed, the answer for `0.9.0-rc7` is "not yet".
 
 **Commercial / procurement**
 
 - **License**: MIT (see [`LICENSE`](LICENSE); `python/LICENSE` is identical byte-for-byte). No contribution under any other license is solicited or accepted.
 - **SLA**: **none**. There is no uptime, support response, or remediation timeline commitment in this preview release.
 - **Support channel**: GitHub issues at this repo + email `contact@aegisagentcontrol.com`. No paid tier. No 24/7 channel.
-- **Vendor of record**: Incierge3789 (info@incierge.jp). Single-maintainer project at preview stage. Procurement teams that require multi-engineer bus-factor evidence should treat this as a risk factor for rc6.
-- **Enterprise agreement / DPA / MSA**: not offered for rc6. The MIT license is the only legal instrument.
+- **Vendor of record**: Incierge3789 (info@incierge.jp). Single-maintainer project at preview stage. Procurement teams that require multi-engineer bus-factor evidence should treat this as a risk factor for rc7.
+- **Enterprise agreement / DPA / MSA**: not offered for rc7. The MIT license is the only legal instrument.
 - **Pricing**: open-source SDK is free. No commercial SKU is available.
 
 **Audit / compliance attestation**
@@ -68,7 +68,7 @@ Honest disclosure for procurement teams, security review, and compliance officer
 - **Audit log retention**: written locally (`~/.aegis/history.jsonl` for Node, `~/.aegis/history.db` for Python). The SDK does not manage retention, encryption-at-rest, or transport to a SIEM — that is the operator's responsibility.
 - **Breach notification**: best-effort via the security disclosure process documented in [`python/SECURITY.md`](python/SECURITY.md) / [`node/SECURITY.md`](node/SECURITY.md) (48h acknowledgment, 7-day triage, 30-day fix for CVSS ≥ 7.0). No track record exists for the preview release.
 - **Right to be forgotten / data deletion**: the SDK is stateless except for the local audit log. Deletion of audit entries is the operator's responsibility.
-- **SBOM / SLSA / supply-chain attestation**: CycloneDX SBOMs (node + python) and Sigstore cosign-signed SDK artifacts (npm tarball, Python wheel, sdist) are attached to the GitHub Release at `v0.9.0-rc6` (`Block B Phase 2` in `release-attestation.yml`, keyless OIDC signing, Sigstore Rekor public log). npm publish to the `rc` dist-tag happens via Block C Trusted Publisher OIDC (token-free, OTP-free) on the same workflow run. `npm publish --provenance` is **intentionally omitted** while this repo is private (npm registry 422-rejects provenance from private source repos); the `--provenance` flag will be re-enabled the same day the repo flips public. Customer-side provenance verification today is via `cosign verify-blob` against the GitHub Release `.tgz` / `.whl` / `.tar.gz` (byte-identical to the npm-published tarball — same artifact handoff). PyPI Trusted Publisher attestation is the remaining follow-up (currently `twine` + token). Tracked as `supply_chain_attestation` in operational-trust-review.
+- **SBOM / SLSA / supply-chain attestation**: CycloneDX SBOMs (node + python) and Sigstore cosign-signed SDK artifacts (npm tarball, Python wheel, sdist) are attached to the GitHub Release at `v0.9.0-rc7` (`Block B Phase 2` in `release-attestation.yml`, keyless OIDC signing, Sigstore Rekor public log). npm publish to the `rc` dist-tag happens via Block C Trusted Publisher OIDC (token-free, OTP-free) on the same workflow run. `npm publish --provenance` is **intentionally omitted** while this repo is private (npm registry 422-rejects provenance from private source repos); the `--provenance` flag will be re-enabled the same day the repo flips public. Customer-side provenance verification today is via `cosign verify-blob` against the GitHub Release `.tgz` / `.whl` / `.tar.gz` (byte-identical to the npm-published tarball — same artifact handoff). PyPI Trusted Publisher attestation is the remaining follow-up (currently `twine` + token). Tracked as `supply_chain_attestation` in operational-trust-review.
 
 **What this section is not**: a compliance certification, a legal commitment, a roadmap commitment, or an invitation to negotiate. It is an honest static snapshot of preview-state posture so a procurement or compliance review can make a `proceed / wait for GA / decline` call without a back-and-forth with the maintainer.
 
@@ -92,7 +92,7 @@ Integrations that are **not yet runnable as dedicated adapters in this repo** (u
 - Mastra (`@mastra/core`)
 - LlamaIndex, Bedrock, AutoGen.js
 
-These are compatible-by-pattern. Purpose-built example files for them are planned but not present in rc6.
+These are compatible-by-pattern. Purpose-built example files for them are planned but not present in rc7.
 
 ## Drop-in wrapper pattern
 
@@ -126,7 +126,7 @@ const getCustomer = shield({
 // node/examples/crewaiExample.ts.
 ```
 
-These snippets are **not adapters**. They are the same generic `shield()` wrapper applied at the data-access boundary. They work in `0.9.0-rc6` today, but they require you to wire them into your framework yourself; the framework integration code is not in this repo.
+These snippets are **not adapters**. They are the same generic `shield()` wrapper applied at the data-access boundary. They work in `0.9.0-rc7` today, but they require you to wire them into your framework yourself; the framework integration code is not in this repo.
 
 ## Repository layout
 
@@ -134,7 +134,7 @@ These snippets are **not adapters**. They are the same generic `shield()` wrappe
 aegis-trust/
 ├── python/        # Python SDK (pip install aegis-trust)
 │   ├── src/
-│   │   ├── aegis_trust/         # canonical module (v0.9.0-rc6+)
+│   │   ├── aegis_trust/         # canonical module (v0.9.0-rc7+)
 │   │   └── aegis/               # back-compat shim (DeprecationWarning, removal v2.0.0)
 │   ├── tests/
 │   ├── pyproject.toml
