@@ -26,6 +26,12 @@ await getCustomer("C-001");
 // → { name: "Tanaka Taro", issue: "Login problem" }
 ```
 
+> **Running the examples.** Snippets here are TypeScript. The fastest path is
+> [`tsx`](https://www.npmjs.com/package/tsx): `npx tsx quickstart.ts`. To run as
+> plain JS, save as `quickstart.mjs`, drop the `: string` type annotation, and
+> `node quickstart.mjs` (the package is ESM — use `.mjs` or `"type":"module"`).
+> Top-level `await` works in both. No build step, no gateway, no token (LITE).
+
 The agent never sees `email` or `card`. No config files. No middleware. One wrapper.
 
 Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffic (LangChain.js, CrewAI, Vercel AI SDK, MCP, Mastra). When procurement asks *"will your AI read our customer data?"*, the answer is the line above.
@@ -264,13 +270,13 @@ shield({ purpose: "lookup", scope: ["name"] })(
 |---|---|---|
 | `LITE` | In-process filter only. Deterministic, no I/O. | nothing |
 | `FULL` | **Pre-call `/check-access` authorization** (the trust gate) runs *before* the wrapped function; the function executes only on a granted authz, then the result is filtered client-side. Deny / `403` / `503` / gateway-unreachable → wrapped function never runs, call returns `null`. Audit ingest runs only *after* authorization succeeds (best-effort telemetry, never the gate). Async wrapped function only. See [Trust-boundary scope](#trust-boundary-scope). | aegis-core running + `AEGIS_TOKEN` + async fn |
-| `AUTO` | Probe-first detection. See [AUTO behaviour matrix](#auto-behaviour-matrix-rc4) below. | nothing |
+| `AUTO` | Intent-first detection (checks Full-intent *before* any probe). See [AUTO behaviour matrix](#auto-behaviour-matrix-rc4) below. | nothing |
 
 **Sync functions and `Mode.FULL`**: `Mode.FULL` runs the awaited `/check-access` gate *before* the wrapped function, so it requires a function **declared** `async` — that declaration is the wrapper's pre-execution await point. A function not declared `async` (including a plain function that merely returns a `Promise`) wrapped with explicit `Mode.FULL` throws `AegisValidationError` (`code: aegis.shield.mode.sync_full_unsupported`) on invocation — it is never silently downgraded to a label-only "full". `AUTO` on a non-`async` function resolves to `LITE` (the gate cannot be inserted ahead of execution).
 
 ### AUTO behaviour matrix (rc4+)
 
-`Mode.AUTO` probes the backend FIRST (parity with PyPI `aegis-trust`, re-probe TTL = 60 s) and consults the Full-intent heuristic only when the probe fails. Behaviour:
+`Mode.AUTO` is **intent-first**: it checks Full-intent (`AEGIS_TOKEN` set, or a non-dev `AEGIS_URL`) **before** making any network probe. With no Full-intent it resolves to LITE and makes **zero** network calls (no `/health` probe). Only when Full-intent is present does it probe the backend (re-probe TTL = 60 s). Behaviour:
 
 - `AEGIS_MODE=lite` → Lite.
 - `AEGIS_MODE=full` → Full (calls fail-closed at the gateway until the backend recovers).
