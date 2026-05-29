@@ -110,7 +110,10 @@ export function filterDict(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
-    if (!(k in pathTree)) continue;
+    // hasOwnProperty, not `k in pathTree`: a data key named `toString` /
+    // `constructor` etc. must not match an inherited Object.prototype member
+    // and pass the whitelist un-granted (fail-OPEN scope bypass). S015 P0.
+    if (!Object.prototype.hasOwnProperty.call(pathTree, k)) continue;
     const subtree = pathTree[k]!;
     const isLeaf = Object.keys(subtree).length === 0;
 
@@ -169,7 +172,9 @@ export function denyFilterDict(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
-    if (!(k in pathTree)) {
+    // hasOwnProperty, not `k in pathTree` (prototype-member parity with the
+    // scope path above). S015 P0.
+    if (!Object.prototype.hasOwnProperty.call(pathTree, k)) {
       result[k] = v;
       continue;
     }
@@ -206,7 +211,11 @@ function denyFilterResult(
   if (Array.isArray(normalized)) {
     return normalized.map((item) => denyFilterResult(item, pathTree, warn));
   }
-  return data;
+  // Scalar where a deny path was expected — fail-closed (parity with Python
+  // `_deny_filter_result`, shield.py:700, which returns ""). A bare scalar
+  // carries no named fields for the blacklist to act on; returning it raw
+  // would leak the value under a deny that "matched nothing". S015 P0-2.
+  return emptyFor(data);
 }
 
 // ── Helpers ───────────────────────────────────────────────

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.9.0-rc8] — 2026-05-30 — cross-SDK version-lock (no Python code change)
+
+`productization-ops/sprint_015`. **No Python API or behavior change.** This SDK
+is the fail-closed reference; rc8 reconciled the **Node** SDK to match Python
+on four data-path edges (empty-spec rejection, deny-over-non-record, wrapped-fn
+exception, FULL-mode audit-completeness) plus a Node-only prototype-name `scope`
+bypass. Python was already fail-closed on all of these and is unchanged. Version
+bumped to keep the cross-SDK version-lock with npm `aegis-trust@0.9.0-rc8`.
+
 ## [0.9.0-rc7] — 2026-05-26 — Pre-publish substrate gate wire + CHANGELOG artifact cleanup (productization-ops/sprint_S202)
 
 `productization-ops/sprint_S202` rc7 cut. **Preview release** (`STABILITY_LEVEL = "preview"`). **No public API change**; this release moves the productization 9-verifier gate into the release pipeline so every future tag push is mechanically audited before any artifact is built or published, and cleans sprint-internal Japanese strings out of the shipped `CHANGELOG.md`. Paired with npm `aegis-trust@0.9.0-rc7` (cross-SDK version-lock).

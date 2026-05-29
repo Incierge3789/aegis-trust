@@ -71,6 +71,24 @@ export function shield(options: ShieldOptions) {
     });
   }
 
+  // Minimum disclosure (parity with Python shield.py:761-774). An empty spec
+  // — neither scope (whitelist) nor denyFields (blacklist) — would return the
+  // wrapped function's data entirely unfiltered, leaking every field. Refuse
+  // it loudly rather than fail open. S015 P0-1 / H5 / H9.
+  // (Python additionally falls back to an aegis.yaml purpose policy here; that
+  // lookup is async in Node and cannot run in this sync factory — Node
+  // requires an explicit call-site spec instead. Safe-direction divergence,
+  // tracked as a follow-up, not a leak.)
+  if (scope.length === 0 && denyFields.length === 0) {
+    throw new AegisValidationError({
+      code: "aegis.shield.spec.required",
+      remediation:
+        "Pass either `scope` (whitelist, e.g. scope: [\"name\", \"email\"]) or `denyFields` (blacklist, e.g. denyFields: [\"ssn\"]). An empty spec returns all data unfiltered.",
+      docs_url: aegisDocsUrl("aegis.shield.spec.required"),
+      message: "shield: either scope or denyFields is required (minimum disclosure)",
+    });
+  }
+
   const scopeTree = parsePaths(scope);
   const denyTree = parsePaths(denyFields, { broaderWins: true });
 
@@ -87,7 +105,12 @@ export function shield(options: ShieldOptions) {
       if (mode === Mode.LITE) {
         // AUTO degraded to LITE (no token / backend unreachable). LITE has
         // no trust gate, so running the function here is correct.
-        const out = await fn.apply(thisArg, args);
+        let out: unknown;
+        try {
+          out = await fn.apply(thisArg, args);
+        } catch (err) {
+          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err);
+        }
         return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
       }
       return gateAndRunFull(
@@ -108,10 +131,17 @@ export function shield(options: ShieldOptions) {
       // No trust gate, no mode detection. Call the function directly and
       // preserve its sync-or-async return shape.
       if (requestedMode === Mode.LITE) {
-        const out = fn.apply(this, args);
+        let out: unknown;
+        try {
+          out = fn.apply(this, args);
+        } catch (err) {
+          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err);
+        }
         if (isPromise(out)) {
-          return (out as Promise<unknown>).then((resolved) =>
-            applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
+          return (out as Promise<unknown>).then(
+            (resolved) =>
+              applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
+            (err) => failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err),
           );
         }
         return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
@@ -137,10 +167,17 @@ export function shield(options: ShieldOptions) {
       // AUTO can only reach FULL when there is a pre-execution await point.
       // A non-async function degrades to LITE — preserve the sync return.
       if (requestedMode === Mode.AUTO && !isAsyncFn(fn)) {
-        const out = fn.apply(this, args);
+        let out: unknown;
+        try {
+          out = fn.apply(this, args);
+        } catch (err) {
+          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err);
+        }
         if (isPromise(out)) {
-          return (out as Promise<unknown>).then((resolved) =>
-            applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
+          return (out as Promise<unknown>).then(
+            (resolved) =>
+              applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
+            (err) => failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err),
           );
         }
         return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
@@ -201,6 +238,44 @@ function emitAudit(
     ...(decision !== undefined ? { decision } : {}),
     ...(reason !== undefined ? { reason } : {}),
   });
+}
+
+// Fail-closed disposition when the protected function itself throws. Parity
+// with Python (shield.py:848 / :876 / :921), which catches the wrapped
+// function's exception and returns "" rather than letting it propagate. A
+// thrown error can carry PII in its message/stack; re-raising it raw would
+// leak that data past the shield. Return a safe empty and record the
+// fail-closed outcome. S015 P0-3.
+function failClosedOnThrow(
+  purpose: string,
+  scope: ReadonlyArray<string>,
+  denyFields: ReadonlyArray<string>,
+  fnName: string,
+  modeStr: string,
+  err?: unknown,
+): unknown {
+  // Diagnostic: name the function and the error TYPE so a genuine bug in the
+  // wrapped function is debuggable, WITHOUT echoing the error message/stack
+  // (which can carry the very PII we are failing closed to contain). S015.
+  const errType = err instanceof Error ? err.constructor.name : typeof err;
+  console.warn(
+    `aegis-trust: wrapped function '${fnName}' threw (${errType}) — failing `
+    + `closed (mode=${modeStr}). The error is not propagated; its message is `
+    + `withheld to avoid leaking any data it carries.`,
+  );
+  emitAudit(
+    fnName,
+    purpose,
+    scope,
+    denyFields,
+    [],
+    new Date().toISOString(),
+    modeStr,
+    getTraceContext()?.traceId,
+    "fail_closed",
+    "wrapped_fn_error",
+  );
+  return "";
 }
 
 // LITE path — in-process filter only, no network. Synchronous.
@@ -312,10 +387,17 @@ async function gateAndRunFull(
     return emptyFor(undefined);
   }
 
-  // Authorized — only now is the protected function executed. Its own
-  // errors (a fault in the caller's code, not a trust-gate concern)
-  // propagate to the caller unchanged.
-  const data = await fn.apply(thisArg, args);
+  // Authorized — only now is the protected function executed. If it throws,
+  // fail closed: the exception can carry PII in its message/stack, so we
+  // return a safe empty and record the fail-closed outcome rather than let
+  // it propagate raw past the shield (parity with Python shield.py:921-929).
+  // S015 P0-3.
+  let data: unknown;
+  try {
+    data = await fn.apply(thisArg, args);
+  } catch (err) {
+    return failClosedOnThrow(purpose, scope, denyFields, fnName, "full", err);
+  }
 
   // Freeze + filter; an internal error anywhere here is fail-closed → a
   // type-shaped safe empty (the function ran, so `data` exists and its
@@ -326,6 +408,44 @@ async function gateAndRunFull(
     const filtered = runFilter(original, scope, denyFields, scopeTree, denyTree);
     const blockedFields = diffKeys(original, filtered);
     const timestamp = new Date().toISOString();
+
+    // FULL-mode audit ingest is part of the AO-003 audit-completeness
+    // contract, NOT best-effort telemetry. Parity with Python
+    // (shield.py:1017-1043): EVERY authorized FULL access is ingested
+    // (unconditionally, not only when fields were blocked), and the filtered
+    // data is released to the caller ONLY after the audit record is durably
+    // accepted. The `allow` audit is emitted AFTER a successful ingest — never
+    // before — so a withheld (ingest-failed) access is never recorded as
+    // allowed. If ingest fails, fail closed → a type-shaped safe empty
+    // mirroring the filtered shape, and a single `fail_closed`/`ingest_failed`
+    // record. S015 align-audit-ingest (Direction A: Node→Python).
+    const entry: IngestEntry = {
+      function: fnName,
+      purpose,
+      scope,
+      blockedFields,
+      timestamp,
+      count: 1,
+      denyFields,
+      ...(traceId !== undefined ? { trace_id: traceId } : {}),
+    };
+    try {
+      await client.ingest([entry]);
+    } catch {
+      emitAudit(
+        fnName,
+        purpose,
+        scope,
+        denyFields,
+        [],
+        new Date().toISOString(),
+        "full",
+        traceId,
+        "fail_closed",
+        "ingest_failed",
+      );
+      return emptyFor(filtered);
+    }
     emitAudit(
       fnName,
       purpose,
@@ -338,39 +458,6 @@ async function gateAndRunFull(
       "allow",
       "allowed",
     );
-
-    // Post-authorization telemetry. Fire-and-forget; ingest failure is
-    // fail-OPEN — it is NOT the trust gate (the gate is authorizeDetailed()
-    // above, which already succeeded).
-    //
-    // === KNOWN DIVERGENCE FROM PYTHON SDK (tracked for v1.0 GA) ===
-    // The Python SDK returns empty (fail-CLOSED) on a gateway ingest exception
-    // in the same code path, by design — it treats audit completeness as part
-    // of the AO-003 contract. Node's fail-open here is the intentional
-    // alternative design (audit = best-effort telemetry, gate = trust boundary,
-    // strict separation). The two SDKs are intentionally NOT identical on this
-    // edge today; the reconciliation decision is a v1.0 GA design item:
-    //   - Option A: align Node to Python (audit fail-closed, breaking-behavior)
-    //   - Option B: align Python to Node (audit fail-open, weakens AO-003)
-    //   - Option C: env-var-controlled (AEGIS_AUDIT_FAIL_CLOSED=1 opt-in)
-    // Operators that require AO-003 audit completeness today MUST prefer the
-    // Python SDK (literal disclosure: root README.md §Alpha limitations + node
-    // README.md §first-fold exception note).
-    // Routing: operational-trust-review backlog `python_node_parity` family +
-    // sprint_010 T-010-3 record + design review sprint (sprint_011+ planning).
-    if (blockedFields.length > 0) {
-      const entry: IngestEntry = {
-        function: fnName,
-        purpose,
-        scope,
-        blockedFields,
-        timestamp,
-        count: 1,
-        denyFields,
-        ...(traceId !== undefined ? { trace_id: traceId } : {}),
-      };
-      void ingestSafe(client, [entry]);
-    }
     return filtered;
   } catch {
     emitAudit(
@@ -386,17 +473,6 @@ async function gateAndRunFull(
       "internal_error",
     );
     return emptyFor(data);
-  }
-}
-
-async function ingestSafe(
-  client: AegisClient,
-  entries: IngestEntry[],
-): Promise<void> {
-  try {
-    await client.ingest(entries);
-  } catch {
-    // Telemetry failure swallowed — never break the data path.
   }
 }
 
@@ -430,8 +506,17 @@ function runFilter(
     } else if (Array.isArray(filtered)) {
       filtered = filtered.map((item) => {
         const it = toFilterable(item);
-        return isPlainObject(it) ? denyFilterDict(it, denyTree, defaultWarn) : it;
+        // A scalar element carries no named field for the blacklist to act
+        // on — fail-closed rather than pass it raw (parity with Python
+        // `_deny_filter_result`). S015 P0-2 / H6.
+        return isPlainObject(it) ? denyFilterDict(it, denyTree, defaultWarn) : emptyFor(it);
       });
+    } else {
+      // Non-object, non-array value under a deny spec: there is nothing for
+      // the blacklist to remove, so passing it through would leak the raw
+      // value. Fail-closed, symmetric with the scope branch above (which
+      // sets `filtered = ""` for the same shape). S015 P0-2 / H10.
+      filtered = emptyFor(filtered);
     }
   }
 
@@ -473,6 +558,17 @@ export function wrap<T>(value: T, options: ShieldOptions): ShieldResult<T> {
       remediation: "Pass a non-empty string to `purpose` (e.g. \"customer_support\").",
       docs_url: aegisDocsUrl("aegis.wrap.purpose.required"),
       message: "wrap: purpose must be a non-empty string",
+    });
+  }
+  // Minimum disclosure (parity with shield()/Python). An empty spec would
+  // return `value` entirely unfiltered. S015 P0-1 / H5.
+  if (scope.length === 0 && denyFields.length === 0) {
+    throw new AegisValidationError({
+      code: "aegis.wrap.spec.required",
+      remediation:
+        "Pass either `scope` (whitelist) or `denyFields` (blacklist). An empty spec returns all data unfiltered.",
+      docs_url: aegisDocsUrl("aegis.wrap.spec.required"),
+      message: "wrap: either scope or denyFields is required (minimum disclosure)",
     });
   }
   const scopeTree = parsePaths(scope);
