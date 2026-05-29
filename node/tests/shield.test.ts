@@ -164,10 +164,103 @@ describe("validation", () => {
   });
 });
 
-describe("empty scope and deny → pass-through", () => {
-  it("returns data unchanged", () => {
-    const data = { a: 1, b: { c: 2 } };
-    const fn = shield({ purpose: "p" })((_: unknown) => data);
-    expect(fn(0)).toEqual(data);
+// S015 P0-1 / H5 / H9: an empty spec (neither scope nor deny) must fail
+// closed at construction. rc7 returned the wrapped function's data entirely
+// unfiltered here — every field, incl. PII — which is the leak D-161 found.
+// Parity with Python (shield.py:761-774, raises "minimum disclosure").
+describe("empty scope and deny → minimum-disclosure error (S015)", () => {
+  it("shield() rejects a purpose-only spec", () => {
+    expect(() => shield({ purpose: "p" })).toThrow(/minimum disclosure|required/);
+  });
+  it("shield() rejects explicit empty arrays", () => {
+    expect(() => shield({ purpose: "p", scope: [], denyFields: [] })).toThrow(
+      /minimum disclosure|required/,
+    );
+  });
+  it("wrap() rejects a purpose-only spec", () => {
+    expect(() => wrap({ ssn: "x" }, { purpose: "p" })).toThrow(/minimum disclosure|required/);
+  });
+});
+
+// S015 P0-2 / H6 / H10: deny over a value that carries no named fields
+// (scalar, array-of-scalars) must fail closed — rc7 returned the raw value.
+describe("deny over a non-record value → fail-closed empty (S015)", () => {
+  it("deny over a bare scalar returns empty string", () => {
+    const fn = shield({ purpose: "p", denyFields: ["ssn"] })(() => "123-45-6789");
+    expect(fn()).toBe("");
+  });
+  it("deny over an array of scalars returns emptied elements", () => {
+    const fn = shield({ purpose: "p", denyFields: ["ssn"] })(() => ["123-45-6789", "ok"]);
+    expect(fn()).toEqual(["", ""]);
+  });
+  it("deny over an object still removes only the denied field (control)", () => {
+    const fn = shield({ purpose: "p", denyFields: ["ssn"] })(() => ({
+      name: "A",
+      ssn: "X",
+    }));
+    expect(fn()).toEqual({ name: "A" });
+  });
+});
+
+// S015 P0 (prototype-name scope bypass): a data field whose name collides
+// with an Object.prototype member (toString / constructor / hasOwnProperty …)
+// must NOT pass the scope whitelist un-granted. `k in pathTree` walked the
+// prototype chain and returned the raw field; hasOwnProperty + null-proto tree
+// close it. Found by a 3-reviewer cross-model pass that agy + the first
+// falsification sweep missed.
+describe("prototype-name fields do not bypass scope (S015 P0)", () => {
+  const PROTO_NAMES = [
+    "toString",
+    "constructor",
+    "hasOwnProperty",
+    "valueOf",
+    "isPrototypeOf",
+    "toLocaleString",
+    "propertyIsEnumerable",
+    "__proto__",
+  ];
+  for (const name of PROTO_NAMES) {
+    it(`drops un-whitelisted field named '${name}'`, () => {
+      const obj: Record<string, unknown> = { name: "n" };
+      obj[name] = "111-22-3333";
+      const out = shield({ purpose: "p", scope: ["name"] })(() => obj)() as Record<
+        string,
+        unknown
+      >;
+      expect(out).toEqual({ name: "n" });
+      expect(JSON.stringify(out)).not.toContain("111-22-3333");
+    });
+  }
+  it("drops a nested prototype-name field under a sub-path scope", () => {
+    const fn = shield({ purpose: "p", scope: ["a.name"] })(() => ({
+      a: { name: "n", toString: "111-22-3333" },
+    }));
+    expect(fn()).toEqual({ a: { name: "n" } });
+  });
+  it("still removes a denied prototype-name field", () => {
+    const fn = shield({ purpose: "p", denyFields: ["constructor"] })(() => ({
+      name: "n",
+      constructor: "111-22-3333",
+    }));
+    expect(fn()).toEqual({ name: "n" });
+  });
+});
+
+// S015 P0-3: a wrapped function that throws must fail closed — the exception
+// can carry PII in its message/stack. rc7 let it propagate raw to the caller.
+describe("wrapped function throws → fail-closed empty (S015)", () => {
+  it("does not propagate a PII-carrying exception (LITE)", () => {
+    const fn = shield({ purpose: "p", scope: ["name"] })(() => {
+      throw new Error("db dump ssn=123-45-6789");
+    });
+    let threw = false;
+    let out: unknown;
+    try {
+      out = fn();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(out).toBe("");
   });
 });

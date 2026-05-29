@@ -103,7 +103,7 @@ try {
 
 Error codes are part of the SDK's public contract. See [VERSIONING.md](../VERSIONING.md):
 
-- v0.9.0-rc7 is a **preview** release (`STABILITY_LEVEL = "preview"`). Codes may
+- v0.9.0-rc8 is a **preview** release (`STABILITY_LEVEL = "preview"`). Codes may
   change between rc tags without a major bump — every change will appear in
   CHANGELOG. Pin `aegis-trust@0.9.0-rc7` exactly if you switch on codes
   in production code paths.

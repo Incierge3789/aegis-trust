@@ -2,6 +2,79 @@
 
 ## [Unreleased]
 
+## [0.9.0-rc8] — 2026-05-30 — fail-open → fail-closed remediation (internal-ops/sprint_015)
+
+`internal-ops/sprint_015` remediation of the S014 distribution-readiness
+NO-GO. Adversarial falsification (single-model + a 3-reviewer cross-model pass)
+found data-path edges where the Node SDK returned data **fail-open** while the
+Python SDK fail-closes, contradicting both READMEs' fail-closed contract — incl.
+a prototype-name `scope` bypass that the first single-model sweep missed. All
+are now aligned to Python (Direction A). **Behavioral / breaking** for callers
+that relied on the previous fail-open shapes. Verified: prototype-name + 25
+adversarial surfaces → 0 leaks; suite 130/130; `sdk_public_surface_parity` PASS.
+Paired with PyPI `aegis-trust==0.9.0rc8` (cross-SDK version-lock).
+
+### Changed — `shield()` / `wrap()` reject an empty spec (minimum disclosure)
+
+- Calling `shield({ purpose })` (or `wrap(value, { purpose })`) with **neither
+  `scope` nor `denyFields`** now throws `AegisValidationError`
+  (`aegis.shield.spec.required` / `aegis.wrap.spec.required`). Previously the
+  wrapped function's data was returned **entirely unfiltered**, leaking every
+  field. Parity with Python `shield.py:761-774`.
+  **Migration:** pass an explicit `scope` (whitelist) or `denyFields`
+  (blacklist). An empty spec was never safe.
+
+### Fixed — prototype-name fields no longer bypass `scope` (fail-closed)
+
+- A returned field whose name collides with an `Object.prototype` member
+  (`toString`, `constructor`, `hasOwnProperty`, `valueOf`, `__proto__`, …) was
+  kept and returned **raw** even when not whitelisted, because the scope check
+  used `key in pathTree` (which walks the prototype chain). Scope is a
+  whitelist, so this was fail-OPEN. Fixed: the path tree is now a
+  null-prototype object and both the scope and deny checks use
+  `hasOwnProperty`. (Pre-existing since rc2; the Python SDK was never affected
+  because it uses a real `dict`.) Surfaced by a multi-reviewer cross-model
+  pass during S015.
+
+### Changed — `denyFields` over a non-record value fails closed
+
+- `denyFields` applied to a **scalar** (e.g. a bare string) or an
+  **array of scalars** now returns a type-shaped empty (via `emptyFor`:
+  `""` for a string, `0` for a number, `false` for a boolean, `[]`/`["…"]` for
+  arrays), instead of the raw value. This is the fail-closed direction; a
+  blacklist cannot prove a bare scalar is not itself the secret. (Python
+  `_deny_filter_result` returns `""` for all non-record scalars; Node mirrors
+  the *fail-closed intent* but keeps the value's empty-of-type shape — a
+  documented, benign shape difference, never a leak.) Objects (incl. class
+  instances, normalized via `toFilterable`) are filtered field-wise as before
+  — only field-less shapes fail closed.
+
+### Note — `scope: []` / empty spec is stricter than Python (safe direction)
+
+- Node throws on an explicit empty spec (`scope: []` with no `denyFields`),
+  whereas Python treats `scope=[]` as "disclose nothing" and returns `{}`.
+  Node's filter passes unfiltered data through when `scope.length === 0`, so
+  rejecting the empty spec at construction is the fail-closed choice. This is
+  an intentional, safe-direction divergence, not a parity bug.
+
+### Changed — a wrapped function that throws now fails closed
+
+- If the protected function throws, all paths (LITE sync/async, AUTO→LITE,
+  FULL `gateAndRunFull`) now catch and return a fail-closed empty rather than
+  letting the exception propagate raw. A thrown error can carry PII in its
+  message/stack; re-raising it leaked that data past the shield. Parity with
+  Python `shield.py:921-929`.
+
+### Changed — FULL-mode audit ingest is fail-closed (AO-003 audit completeness)
+
+- FULL-mode `/shield/ingest` is now **awaited** and part of the trust
+  contract: filtered data is released only after the audit record is durably
+  accepted. On ingest failure the call fails closed to a type-shaped empty,
+  matching Python `shield.py:1017-1035`. Previously ingest was fire-and-forget
+  (fail-open) and the rc7 code documented this as a `python_node_parity`
+  divergence deferred to v1.0 GA — that divergence is now **resolved** in favor
+  of the Python fail-closed contract.
+
 ## [0.9.0-rc7] — 2026-05-26 — Pre-publish substrate gate wire + CHANGELOG artifact cleanup (internal-ops/sprint_S202)
 
 `internal-ops/sprint_S202` rc7 cut. **Preview release** (`STABILITY_LEVEL = "preview"`). **No public API change**; this release moves the productization 9-verifier gate into the release pipeline so every future tag push is mechanically audited before any artifact is built or published, and cleans sprint-internal Japanese strings out of the shipped `CHANGELOG.md`. Paired with PyPI `aegis-trust==0.9.0rc7` (cross-SDK version-lock).
