@@ -23,6 +23,10 @@ import {
   type ShieldResult,
 } from "./types.js";
 
+// Valid runtime values for `mode`. Used to reject unrecognized / mis-cased
+// mode strings at construction (a trust boundary must not silently downgrade).
+const MODE_VALUES: ReadonlySet<string> = new Set(Object.values(Mode));
+
 // Module-level test hook — set by vitestPlugin to capture shield calls.
 type ShieldCallHook = (record: {
   function: string;
@@ -86,6 +90,22 @@ export function shield(options: ShieldOptions) {
         "Pass either `scope` (whitelist, e.g. scope: [\"name\", \"email\"]) or `denyFields` (blacklist, e.g. denyFields: [\"ssn\"]). An empty spec returns all data unfiltered.",
       docs_url: aegisDocsUrl("aegis.shield.spec.required"),
       message: "shield: either scope or denyFields is required (minimum disclosure)",
+    });
+  }
+
+  // Mode validation (S016 failure-UX P0). An unrecognized / mis-cased mode
+  // string (e.g. "FULL", "Lite", "fulll") must NOT silently fall through to
+  // AUTO — that would downgrade a developer who asked for strict FULL gating
+  // into LITE (no gateway) with zero signal, flowing data un-gated. Mode is a
+  // trust boundary; refuse an invalid value loudly. (`options.mode` is typed
+  // as Mode, but JS callers can pass any string.)
+  if (options.mode !== undefined && !MODE_VALUES.has(requestedMode as string)) {
+    throw new AegisValidationError({
+      code: "aegis.shield.mode.invalid",
+      remediation:
+        `Set \`mode\` to one of "lite" | "full" | "auto" (lowercase), or use the Mode enum (e.g. Mode.FULL) to avoid typos. Omit \`mode\` to default to AUTO. Got ${JSON.stringify(options.mode)}.`,
+      docs_url: aegisDocsUrl("aegis.shield.mode.invalid"),
+      message: `shield: invalid mode ${JSON.stringify(options.mode)} — expected "lite" | "full" | "auto"`,
     });
   }
 
@@ -432,6 +452,18 @@ async function gateAndRunFull(
     try {
       await client.ingest([entry]);
     } catch {
+      // S016 failure-UX P0: this is the one fail-closed branch that used to
+      // return empty SILENTLY. A FULL access was authorized and filtered, but
+      // the audit record could not be persisted, so the data is withheld
+      // (AO-003). Signal it — parallel to the deny-path warn — so the caller
+      // does not mistake the empty result for "no data" or "everything filtered".
+      console.warn(
+        `aegis-trust: FULL access authorized but audit ingest FAILED — failing `
+        + `closed (mode=full reason=ingest_failed purpose=${purpose} function=${fnName}). `
+        + `Returning a safe empty; data is withheld until the audit log accepts the `
+        + `record. Check the aegis-core /shield/ingest endpoint. `
+        + `${aegisDocsUrl("aegis.ingest.fail_closed")}`,
+      );
       emitAudit(
         fnName,
         purpose,

@@ -261,6 +261,7 @@ export class HistoryStore {
 
 let _store: HistoryStore | null = null;
 let _checked: boolean = false;
+let _historyWarned: boolean = false;
 
 function getStore(): HistoryStore | null {
   if (_checked) return _store;
@@ -294,8 +295,22 @@ export function recordIfEnabled(args: {
     const store = getStore();
     if (!store) return;
     store.record(args);
-  } catch {
-    // Logging failure must not break the data path.
+  } catch (err) {
+    // Logging failure must not break the data path — but it must not be
+    // SILENT either (S016 failure-UX P0). A developer who set AEGIS_HISTORY=1
+    // specifically to capture audit evidence must know it is not being
+    // written. Warn once (not per-call) so the data path stays unbroken and
+    // the broken-evidence condition is visible.
+    if (!_historyWarned) {
+      _historyWarned = true;
+      const path = process.env.AEGIS_HISTORY_PATH ?? "~/.aegis/history.jsonl";
+      console.warn(
+        `aegis-trust: AEGIS_HISTORY=1 but the local audit log could not be `
+        + `written (path=${path}): ${err instanceof Error ? err.message : String(err)}. `
+        + `Audit evidence is NOT being recorded — fix the path/permissions or unset `
+        + `AEGIS_HISTORY.`,
+      );
+    }
   }
 }
 
@@ -303,4 +318,5 @@ export function resetStore(): void {
   if (_store) _store.close();
   _store = null;
   _checked = false;
+  _historyWarned = false;
 }
