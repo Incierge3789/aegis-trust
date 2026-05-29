@@ -1,6 +1,54 @@
 # Changelog
 
-## [Unreleased]
+## [Unreleased] — fail-open → fail-closed remediation (productization-ops/sprint_015, pending rc8 cut)
+
+`productization-ops/sprint_015` remediation of the S014 distribution-readiness
+NO-GO. Adversarial falsification found data-path edges where the Node SDK
+returned data **fail-open** while the Python SDK fail-closes, contradicting
+both READMEs' fail-closed contract. All are now aligned to Python (Direction
+A). **Behavioral / breaking** for callers that relied on the previous
+fail-open shapes. Verified: 25 adversarial surfaces → 0 leaks; suite 120/120;
+`sdk_public_surface_parity` PASS. Version bump + publish pending explicit
+release authorization.
+
+### Changed — `shield()` / `wrap()` reject an empty spec (minimum disclosure)
+
+- Calling `shield({ purpose })` (or `wrap(value, { purpose })`) with **neither
+  `scope` nor `denyFields`** now throws `AegisValidationError`
+  (`aegis.shield.spec.required` / `aegis.wrap.spec.required`). Previously the
+  wrapped function's data was returned **entirely unfiltered**, leaking every
+  field. Parity with Python `shield.py:761-774`.
+  **Migration:** pass an explicit `scope` (whitelist) or `denyFields`
+  (blacklist). An empty spec was never safe.
+
+### Changed — `denyFields` over a non-record value fails closed
+
+- `denyFields` applied to a **scalar** (e.g. a bare string) or an
+  **array of scalars** now returns a type-shaped empty (`""`, `["", …]`),
+  symmetric with the existing `scope` branch and matching Python
+  `_deny_filter_result` (`shield.py:700`). Previously the raw value was
+  returned. A blacklist cannot prove a bare scalar is not itself the secret,
+  so it fails closed. Objects (incl. class instances, normalized via
+  `toFilterable`) are filtered field-wise as before — only field-less shapes
+  fail closed.
+
+### Changed — a wrapped function that throws now fails closed
+
+- If the protected function throws, all paths (LITE sync/async, AUTO→LITE,
+  FULL `gateAndRunFull`) now catch and return a fail-closed empty rather than
+  letting the exception propagate raw. A thrown error can carry PII in its
+  message/stack; re-raising it leaked that data past the shield. Parity with
+  Python `shield.py:921-929`.
+
+### Changed — FULL-mode audit ingest is fail-closed (AO-003 audit completeness)
+
+- FULL-mode `/shield/ingest` is now **awaited** and part of the trust
+  contract: filtered data is released only after the audit record is durably
+  accepted. On ingest failure the call fails closed to a type-shaped empty,
+  matching Python `shield.py:1017-1035`. Previously ingest was fire-and-forget
+  (fail-open) and the rc7 code documented this as a `python_node_parity`
+  divergence deferred to v1.0 GA — that divergence is now **resolved** in favor
+  of the Python fail-closed contract.
 
 ## [0.9.0-rc7] — 2026-05-26 — Pre-publish substrate gate wire + CHANGELOG artifact cleanup (productization-ops/sprint_S202)
 
