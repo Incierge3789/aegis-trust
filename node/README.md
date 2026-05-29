@@ -2,24 +2,38 @@
 
 > **Data Trust Layer for AI Agents.** One wrapper above the tool; the model never sees what it doesn't need.
 
-`aegis-trust` is the developer-first primitive for purpose-bound data access by AI agents. One `shield()` wrapper declares **what** an agent may read (`scope`) and **why** it may read it (`purpose`). In `LITE` mode the SDK applies client-side field filtering, machine-parseable errors, end-to-end trace propagation, and a local audit log; in `FULL` mode it additionally calls an `aegis-core` gateway. The decorator is fail-closed for the **data path** — a denied `/check-access` authorization, a filter exception, or any other internal error on the data path yields an empty value, never leaked data. **Exception (Node-only, tracked):** in `FULL` mode, a post-authorization audit ingest failure is fail-**open** today (the granted result returns to the caller; the audit gap is logged but the call is not denied). Python parity returns empty in the same path. See root [README §Alpha limitations](../README.md#alpha-limitations-read-before-adopting) and [`docs/VERSIONING.md`](docs/VERSIONING.md) for the reconciliation plan before v1.0 GA. What the `aegis-core` gateway trust boundary does and does **not** guarantee is stated precisely in [Trust-boundary scope](#trust-boundary-scope); read it before relying on `FULL` mode for a security property.
+`aegis-trust` is the developer-first primitive for purpose-bound data access by AI agents. One `shield()` wrapper declares **what** an agent may read (`scope`) and **why** (`purpose`); everything else is filtered out before the agent — or the model logs, or the provider's training pipeline — ever sees it.
+
+```bash
+npm install aegis-trust
+```
+
+## 30-Second Quickstart
 
 ```typescript
 import { shield } from "aegis-trust";
 
-const safeFetch = shield({ purpose: "customer_support", scope: ["name", "issue"] })(db.fetch);
-const u = await safeFetch("C-001"); // agent only ever sees { name, issue }
+const getCustomer = shield({ purpose: "customer_support", scope: ["name", "issue"] })(
+  async (id: string) => ({
+    name:  "Tanaka Taro",
+    email: "tanaka@example.com",   // hidden
+    card:  "4242-****-****-1234",  // hidden
+    issue: "Login problem",
+  }),
+);
+
+await getCustomer("C-001");
+// → { name: "Tanaka Taro", issue: "Login problem" }
 ```
 
-Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffic (LangChain.js, CrewAI, Vercel AI SDK, MCP, Mastra). When procurement asks *"will your AI read our customer data?"*, the answer is in the line above.
+The agent never sees `email` or `card`. No config files. No middleware. One wrapper.
 
-- **30-second understanding**: `shield({ purpose, scope })(fn)` returns `fn` with the same signature; the return value is filtered to `scope` client-side, blocked fields are recorded in the local audit log, and a `trace_id` from `withTraceContext()` is propagated end-to-end.
-- **TypeScript port** of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same `shield()` API surface and `LITE`-mode fail-closed decorator behaviour, same local audit log. `FULL`/`AUTO` behavioural parity with the Python SDK is tracked (see CHANGELOG); the two SDKs are not yet guaranteed identical.
-- **Pre-GA**: v0.9.0-rc7 is a **preview** release (`STABILITY_LEVEL = "preview"`). See [`docs/VERSIONING.md`](docs/VERSIONING.md). SLA: none. Production use: at your own risk. `aegis-trust@0.9.0-rc7` is **live on npm** under the `rc` dist-tag ([registry link](https://www.npmjs.com/package/aegis-trust/v/0.9.0-rc7)) — released via Block C Trusted Publisher OIDC automation (token-free, github-hosted, npm ≥11.5.1) in [`.github/workflows/release-attestation.yml`](../.github/workflows/release-attestation.yml). Install with `npm install aegis-trust@rc` (resolves to rc7) or pin `@0.9.0-rc7`. `--provenance` is intentionally omitted while the source repo is private (npm 422-rejects provenance from private repos); customer-side integrity is verifiable via `cosign verify-blob` against the GitHub Release `v0.9.0-rc7` attached `.tgz`. `dist-tags.latest` was promoted to `0.9.0-rc7` on 2026-05-29, so bare `npm install aegis-trust` resolves to rc7 (the deprecated `0.9.0-rc3` / F-054 is version-scoped and no longer the default).
+Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffic (LangChain.js, CrewAI, Vercel AI SDK, MCP, Mastra). When procurement asks *"will your AI read our customer data?"*, the answer is the line above.
 
-```bash
-npm install aegis-trust@rc
-```
+- **Fail-closed (data path)**: on a denied authorization, a filter exception, or any other internal error on the data path, `shield` returns an empty value — never leaked data, exceptions, or tracebacks.
+- **Whitelist (`scope`)** or **blacklist (`deny_fields`)**: the agent sees only — or all-but — the listed fields; a `trace_id` from `withTraceContext()` propagates end-to-end into a local audit log.
+
+> **Pre-GA preview (`v0.9.0-rc7`).** Preview release — no SLA. The 30-second quickstart above is `LITE` mode and is fail-closed on the data path. Before production use, read [Pre-GA status & known limitations](#pre-ga-status--known-limitations) — it covers `FULL`-mode gateway behaviour, the tracked Python-parity status, and install/integrity.
 
 ## 10-Second Sandbox
 
@@ -55,7 +69,9 @@ Output (excerpt):
 
 ---
 
-## Quickstart
+## Async & database pattern
+
+`shield()` wraps async functions transparently — the wrapped function keeps its signature and the returned promise resolves to the filtered value.
 
 ```typescript
 import { shield } from "aegis-trust";
@@ -130,6 +146,17 @@ export const customerTool = tool({
 ```
 
 `shield()` returns a function with the same signature as the original, so it stacks inside any framework's tool registration. Works identically with `@modelcontextprotocol/sdk`, Mastra `createTool`, AutoGen.js, or any framework that calls a JS function.
+
+---
+
+## Pre-GA status & known limitations
+
+`v0.9.0-rc7` is a **preview** release (`STABILITY_LEVEL = "preview"`). SLA: none. Production use: at your own risk. See [`docs/VERSIONING.md`](docs/VERSIONING.md) and the root [README §Alpha limitations](../README.md#alpha-limitations-read-before-adopting).
+
+- **Modes.** In `LITE` mode the SDK applies client-side field filtering, machine-parseable errors, end-to-end trace propagation, and a local audit log. In `FULL` mode it additionally calls an `aegis-core` gateway — see [Trust-boundary scope](#trust-boundary-scope) for exactly what that boundary does and does **not** guarantee before relying on `FULL` mode for a security property.
+- **Node-only fail-open audit gap (tracked).** In `FULL` mode, a *post-authorization* audit-ingest failure is fail-**open** today: the already-granted result returns to the caller and the audit gap is logged, but the call is not denied. The Python SDK returns empty in the same path. The **data path itself remains fail-closed in both SDKs.** Reconciliation before v1.0 GA is tracked in the CHANGELOG and [`docs/VERSIONING.md`](docs/VERSIONING.md).
+- **TypeScript port / parity.** This is the TypeScript port of the [`aegis-trust`](https://pypi.org/project/aegis-trust/) Python package on PyPI — same `shield()` API surface and `LITE`-mode fail-closed decorator behaviour, same local audit log. `FULL`/`AUTO` behavioural parity with the Python SDK is tracked (see CHANGELOG); the two SDKs are not yet guaranteed identical.
+- **Install / integrity.** `aegis-trust@0.9.0-rc7` is **live on npm**. Use `npm install aegis-trust@rc` (resolves to rc7) or pin `@0.9.0-rc7`. Released via Block C Trusted Publisher OIDC automation (token-free, GitHub-hosted, npm ≥11.5.1) in [`.github/workflows/release-attestation.yml`](../.github/workflows/release-attestation.yml). `--provenance` is intentionally omitted while the source repo is private (npm 422-rejects provenance from private repos); customer-side integrity is verifiable via `cosign verify-blob` against the GitHub Release `v0.9.0-rc7` attached `.tgz`. `dist-tags.latest` was promoted to `0.9.0-rc7` on 2026-05-29, so bare `npm install aegis-trust` resolves to rc7 (the deprecated `0.9.0-rc3` / F-054 is version-scoped and no longer the default).
 
 ---
 
