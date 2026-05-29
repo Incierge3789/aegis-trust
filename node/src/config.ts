@@ -179,6 +179,20 @@ export async function loadConfig(
     });
   }
 
+  // S016 failure-UX P1: an explicit `path` arg bypasses findConfigFile()'s
+  // existsSync guard, so a missing explicit path escaped as a raw Node ENOENT
+  // (instanceof AegisError === false, no remediation) — breaking the
+  // machine-parseable error contract for the explicit-path API. Guard it.
+  if (!existsSync(resolved)) {
+    throw new AegisConfigError({
+      code: "aegis.config.fileNotFound",
+      remediation:
+        "The path passed to loadConfig() does not exist. Pass a path to an existing YAML file, or omit it to auto-discover aegis.yaml in CWD / via AEGIS_CONFIG.",
+      docs_url: aegisDocsUrl("aegis.config.fileNotFound"),
+      message: `aegis config file not found: ${resolved}`,
+    });
+  }
+
   const src = readFileSync(resolved, "utf8");
   let raw: unknown;
   try {

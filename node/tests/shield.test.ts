@@ -202,6 +202,27 @@ describe("deny over a non-record value → fail-closed empty (S015)", () => {
   });
 });
 
+// S016 failure-UX P0: an unrecognized / mis-cased mode string must throw, not
+// silently fall through to AUTO (which would downgrade a developer asking for
+// strict FULL gating into un-gated LITE with no signal).
+describe("invalid mode is rejected (S016)", () => {
+  for (const m of ["FULL", "Lite", "fulll", "full ", "strict"]) {
+    it(`rejects mode=${JSON.stringify(m)}`, () => {
+      expect(() => shield({ purpose: "p", scope: ["x"], mode: m as never })).toThrow(
+        /invalid mode|mode/,
+      );
+    });
+  }
+  it("accepts the Mode enum values", () => {
+    expect(() => shield({ purpose: "p", scope: ["x"], mode: Mode.LITE })).not.toThrow();
+    expect(() => shield({ purpose: "p", scope: ["x"], mode: Mode.FULL })).not.toThrow();
+    expect(() => shield({ purpose: "p", scope: ["x"], mode: Mode.AUTO })).not.toThrow();
+  });
+  it("accepts an omitted mode (defaults to AUTO)", () => {
+    expect(() => shield({ purpose: "p", scope: ["x"] })).not.toThrow();
+  });
+});
+
 // S015 P0 (prototype-name scope bypass): a data field whose name collides
 // with an Object.prototype member (toString / constructor / hasOwnProperty …)
 // must NOT pass the scope whitelist un-granted. `k in pathTree` walked the
