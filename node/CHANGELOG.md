@@ -21,16 +21,38 @@ release authorization.
   **Migration:** pass an explicit `scope` (whitelist) or `denyFields`
   (blacklist). An empty spec was never safe.
 
+### Fixed — prototype-name fields no longer bypass `scope` (fail-closed)
+
+- A returned field whose name collides with an `Object.prototype` member
+  (`toString`, `constructor`, `hasOwnProperty`, `valueOf`, `__proto__`, …) was
+  kept and returned **raw** even when not whitelisted, because the scope check
+  used `key in pathTree` (which walks the prototype chain). Scope is a
+  whitelist, so this was fail-OPEN. Fixed: the path tree is now a
+  null-prototype object and both the scope and deny checks use
+  `hasOwnProperty`. (Pre-existing since rc2; the Python SDK was never affected
+  because it uses a real `dict`.) Surfaced by a multi-reviewer cross-model
+  pass during S015.
+
 ### Changed — `denyFields` over a non-record value fails closed
 
 - `denyFields` applied to a **scalar** (e.g. a bare string) or an
-  **array of scalars** now returns a type-shaped empty (`""`, `["", …]`),
-  symmetric with the existing `scope` branch and matching Python
-  `_deny_filter_result` (`shield.py:700`). Previously the raw value was
-  returned. A blacklist cannot prove a bare scalar is not itself the secret,
-  so it fails closed. Objects (incl. class instances, normalized via
-  `toFilterable`) are filtered field-wise as before — only field-less shapes
-  fail closed.
+  **array of scalars** now returns a type-shaped empty (via `emptyFor`:
+  `""` for a string, `0` for a number, `false` for a boolean, `[]`/`["…"]` for
+  arrays), instead of the raw value. This is the fail-closed direction; a
+  blacklist cannot prove a bare scalar is not itself the secret. (Python
+  `_deny_filter_result` returns `""` for all non-record scalars; Node mirrors
+  the *fail-closed intent* but keeps the value's empty-of-type shape — a
+  documented, benign shape difference, never a leak.) Objects (incl. class
+  instances, normalized via `toFilterable`) are filtered field-wise as before
+  — only field-less shapes fail closed.
+
+### Note — `scope: []` / empty spec is stricter than Python (safe direction)
+
+- Node throws on an explicit empty spec (`scope: []` with no `denyFields`),
+  whereas Python treats `scope=[]` as "disclose nothing" and returns `{}`.
+  Node's filter passes unfiltered data through when `scope.length === 0`, so
+  rejecting the empty spec at construction is the fail-closed choice. This is
+  an intentional, safe-direction divergence, not a parity bug.
 
 ### Changed — a wrapped function that throws now fails closed
 
