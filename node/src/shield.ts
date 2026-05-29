@@ -108,8 +108,8 @@ export function shield(options: ShieldOptions) {
         let out: unknown;
         try {
           out = await fn.apply(thisArg, args);
-        } catch {
-          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite");
+        } catch (err) {
+          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err);
         }
         return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
       }
@@ -134,14 +134,14 @@ export function shield(options: ShieldOptions) {
         let out: unknown;
         try {
           out = fn.apply(this, args);
-        } catch {
-          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite");
+        } catch (err) {
+          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err);
         }
         if (isPromise(out)) {
           return (out as Promise<unknown>).then(
             (resolved) =>
               applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
-            () => failClosedOnThrow(purpose, scope, denyFields, fnName, "lite"),
+            (err) => failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err),
           );
         }
         return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
@@ -170,14 +170,14 @@ export function shield(options: ShieldOptions) {
         let out: unknown;
         try {
           out = fn.apply(this, args);
-        } catch {
-          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite");
+        } catch (err) {
+          return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err);
         }
         if (isPromise(out)) {
           return (out as Promise<unknown>).then(
             (resolved) =>
               applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
-            () => failClosedOnThrow(purpose, scope, denyFields, fnName, "lite"),
+            (err) => failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err),
           );
         }
         return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
@@ -252,7 +252,17 @@ function failClosedOnThrow(
   denyFields: ReadonlyArray<string>,
   fnName: string,
   modeStr: string,
+  err?: unknown,
 ): unknown {
+  // Diagnostic: name the function and the error TYPE so a genuine bug in the
+  // wrapped function is debuggable, WITHOUT echoing the error message/stack
+  // (which can carry the very PII we are failing closed to contain). S015.
+  const errType = err instanceof Error ? err.constructor.name : typeof err;
+  console.warn(
+    `aegis-trust: wrapped function '${fnName}' threw (${errType}) — failing `
+    + `closed (mode=${modeStr}). The error is not propagated; its message is `
+    + `withheld to avoid leaking any data it carries.`,
+  );
   emitAudit(
     fnName,
     purpose,
@@ -385,8 +395,8 @@ async function gateAndRunFull(
   let data: unknown;
   try {
     data = await fn.apply(thisArg, args);
-  } catch {
-    return failClosedOnThrow(purpose, scope, denyFields, fnName, "full");
+  } catch (err) {
+    return failClosedOnThrow(purpose, scope, denyFields, fnName, "full", err);
   }
 
   // Freeze + filter; an internal error anywhere here is fail-closed → a
@@ -398,6 +408,44 @@ async function gateAndRunFull(
     const filtered = runFilter(original, scope, denyFields, scopeTree, denyTree);
     const blockedFields = diffKeys(original, filtered);
     const timestamp = new Date().toISOString();
+
+    // FULL-mode audit ingest is part of the AO-003 audit-completeness
+    // contract, NOT best-effort telemetry. Parity with Python
+    // (shield.py:1017-1043): EVERY authorized FULL access is ingested
+    // (unconditionally, not only when fields were blocked), and the filtered
+    // data is released to the caller ONLY after the audit record is durably
+    // accepted. The `allow` audit is emitted AFTER a successful ingest — never
+    // before — so a withheld (ingest-failed) access is never recorded as
+    // allowed. If ingest fails, fail closed → a type-shaped safe empty
+    // mirroring the filtered shape, and a single `fail_closed`/`ingest_failed`
+    // record. S015 align-audit-ingest (Direction A: Node→Python).
+    const entry: IngestEntry = {
+      function: fnName,
+      purpose,
+      scope,
+      blockedFields,
+      timestamp,
+      count: 1,
+      denyFields,
+      ...(traceId !== undefined ? { trace_id: traceId } : {}),
+    };
+    try {
+      await client.ingest([entry]);
+    } catch {
+      emitAudit(
+        fnName,
+        purpose,
+        scope,
+        denyFields,
+        [],
+        new Date().toISOString(),
+        "full",
+        traceId,
+        "fail_closed",
+        "ingest_failed",
+      );
+      return emptyFor(filtered);
+    }
     emitAudit(
       fnName,
       purpose,
@@ -410,44 +458,6 @@ async function gateAndRunFull(
       "allow",
       "allowed",
     );
-
-    // FULL-mode audit ingest is part of the AO-003 audit-completeness
-    // contract, NOT best-effort telemetry. Parity with Python
-    // (shield.py:1017-1035): the filtered data is released to the caller only
-    // after the audit record is durably accepted by the gateway. If ingest
-    // fails, fail closed — return a type-shaped safe empty mirroring the
-    // filtered shape, never the data. S015 align-audit-ingest (Direction A:
-    // Node→Python, resolving the python_node_parity divergence the rc7 code
-    // previously deferred to v1.0 GA).
-    if (blockedFields.length > 0) {
-      const entry: IngestEntry = {
-        function: fnName,
-        purpose,
-        scope,
-        blockedFields,
-        timestamp,
-        count: 1,
-        denyFields,
-        ...(traceId !== undefined ? { trace_id: traceId } : {}),
-      };
-      try {
-        await client.ingest([entry]);
-      } catch {
-        emitAudit(
-          fnName,
-          purpose,
-          scope,
-          denyFields,
-          [],
-          new Date().toISOString(),
-          "full",
-          traceId,
-          "fail_closed",
-          "ingest_failed",
-        );
-        return emptyFor(filtered);
-      }
-    }
     return filtered;
   } catch {
     emitAudit(

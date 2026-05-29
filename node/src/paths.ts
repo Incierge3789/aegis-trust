@@ -25,7 +25,11 @@ export function parsePaths(
     );
   }
 
-  const tree: PathTree = {};
+  // Null-prototype tree: lookups (`k in tree`, `tree[k]`) must never resolve
+  // to Object.prototype members. A data field named `toString` / `constructor`
+  // / `hasOwnProperty` etc. would otherwise pass a `k in pathTree` whitelist
+  // check it was never granted and leak raw (fail-OPEN scope bypass). S015 P0.
+  const tree: PathTree = Object.create(null) as PathTree;
   for (const field of working) {
     const parts = field.split(".");
     if (broaderWins) {
@@ -42,8 +46,8 @@ export function parsePaths(
     }
     let node: PathTree = tree;
     for (const part of parts) {
-      if (!(part in node)) {
-        node[part] = {};
+      if (!Object.prototype.hasOwnProperty.call(node, part)) {
+        node[part] = Object.create(null) as PathTree;
       }
       node = node[part]!;
     }
