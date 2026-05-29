@@ -1,15 +1,18 @@
 # Changelog
 
-## [Unreleased] — fail-open → fail-closed remediation (internal-ops/sprint_015, pending rc8 cut)
+## [Unreleased]
+
+## [0.9.0-rc8] — 2026-05-30 — fail-open → fail-closed remediation (internal-ops/sprint_015)
 
 `internal-ops/sprint_015` remediation of the S014 distribution-readiness
-NO-GO. Adversarial falsification found data-path edges where the Node SDK
-returned data **fail-open** while the Python SDK fail-closes, contradicting
-both READMEs' fail-closed contract. All are now aligned to Python (Direction
-A). **Behavioral / breaking** for callers that relied on the previous
-fail-open shapes. Verified: 25 adversarial surfaces → 0 leaks; suite 120/120;
-`sdk_public_surface_parity` PASS. Version bump + publish pending explicit
-release authorization.
+NO-GO. Adversarial falsification (single-model + a 3-reviewer cross-model pass)
+found data-path edges where the Node SDK returned data **fail-open** while the
+Python SDK fail-closes, contradicting both READMEs' fail-closed contract — incl.
+a prototype-name `scope` bypass that the first single-model sweep missed. All
+are now aligned to Python (Direction A). **Behavioral / breaking** for callers
+that relied on the previous fail-open shapes. Verified: prototype-name + 25
+adversarial surfaces → 0 leaks; suite 130/130; `sdk_public_surface_parity` PASS.
+Paired with PyPI `aegis-trust==0.9.0rc8` (cross-SDK version-lock).
 
 ### Changed — `shield()` / `wrap()` reject an empty spec (minimum disclosure)
 
