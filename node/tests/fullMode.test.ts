@@ -78,10 +78,14 @@ describe("Mode.FULL — filter + async ingest", () => {
     expect(sent.entries[0].purpose).toBe("support");
   });
 
-  it("never bubbles ingest failures into caller (ingest fails AFTER authorize succeeds)", async () => {
-    // T-SDK-FULL-GATE-01: ingest is post-authorization telemetry, fail-OPEN.
-    // /check-access must still succeed (it is the trust gate); only the
-    // downstream /shield/ingest fails. The caller still gets filtered data.
+  it("fails closed when FULL-mode ingest fails after authorize succeeds (AO-003 audit completeness, parity with Python shield.py:1017-1035)", async () => {
+    // S015 align-audit-ingest (Direction A: Node→Python). FULL-mode ingest is
+    // part of the AO-003 audit-completeness contract, NOT best-effort
+    // telemetry: filtered data is released only after the audit record is
+    // durably accepted. /check-access (the trust gate) still succeeds; only
+    // the downstream /shield/ingest fails — and the caller now gets a
+    // type-shaped safe empty, never the data. (rc7 returned the filtered data
+    // here, fail-OPEN; that python_node_parity divergence is resolved.)
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/check-access")) {
@@ -101,8 +105,11 @@ describe("Mode.FULL — filter + async ingest", () => {
       mode: Mode.FULL,
     })(async (_: unknown) => ({ name: "A", ssn: "X" }));
 
-    // Authorize succeeded → filtered data returned; ingest failure swallowed.
-    await expect(getUser(1)).resolves.toEqual({ name: "A" });
+    // Authorize succeeded, filter ran, but ingest failed → fail-closed empty
+    // mirroring the filtered shape (object → {}). The raw "ssn" must never
+    // surface, and the otherwise-allowed "name" is withheld until the access
+    // is auditable.
+    await expect(getUser(1)).resolves.toEqual({});
   });
 });
 
