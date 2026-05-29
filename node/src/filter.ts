@@ -206,7 +206,11 @@ function denyFilterResult(
   if (Array.isArray(normalized)) {
     return normalized.map((item) => denyFilterResult(item, pathTree, warn));
   }
-  return data;
+  // Scalar where a deny path was expected — fail-closed (parity with Python
+  // `_deny_filter_result`, shield.py:700, which returns ""). A bare scalar
+  // carries no named fields for the blacklist to act on; returning it raw
+  // would leak the value under a deny that "matched nothing". S015 P0-2.
+  return emptyFor(data);
 }
 
 // ── Helpers ───────────────────────────────────────────────
