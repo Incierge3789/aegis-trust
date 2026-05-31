@@ -46,6 +46,9 @@ logger = logging.getLogger("aegis")
 
 _store: HistoryStore | None = None
 _checked: bool = False
+# S018 D3: warn-once latch so a persistently-broken history path does not spam
+# the log on every @shield call (parity with Node history.ts `_historyWarned`).
+_history_warned: bool = False
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS shield_history (
@@ -389,11 +392,21 @@ def record_if_enabled(
     Keeps its original keyword signature: ``schema_version`` is stamped inside
     :meth:`HistoryStore.record`, so no new kwargs cross the caller→store
     boundary (S017 T3 — structurally prevents the silent-failure drift type).
+
+    S018 D3: ``_get_store()`` (which opens the SQLite file, creating parent
+    dirs) runs *inside* the try so a first-call init failure on an unwritable
+    path no longer escapes and breaks the @shield data path (parity with Node
+    history.ts, where getStore() is inside the try). On any failure a
+    developer diagnostic naming the cause and the target path is emitted once
+    (not per-call) so a developer who set ``AEGIS_HISTORY=1`` to capture local
+    audit evidence learns it is NOT being written. This is a local developer
+    diagnostic, not an authoritative-audit guarantee.
     """
-    store = _get_store()
-    if store is None:
-        return
+    global _history_warned
     try:
+        store = _get_store()
+        if store is None:
+            return
         store.record(
             function=function,
             purpose=purpose,
@@ -403,14 +416,30 @@ def record_if_enabled(
             timestamp=timestamp,
             mode=mode,
         )
-    except Exception:
-        logger.error("Failed to record shield history")
+    except Exception as exc:
+        if not _history_warned:
+            _history_warned = True
+            path = os.environ.get(
+                "AEGIS_HISTORY_PATH",
+                str(Path.home() / ".aegis" / "history.db"),
+            )
+            logger.error(
+                "aegis-trust: AEGIS_HISTORY=1 but the local history could not be "
+                "written (path=%s) — %s: %s. Local audit evidence is NOT being "
+                "recorded; fix the path/permissions or unset AEGIS_HISTORY. "
+                "(Local developer diagnostic only — not an authoritative audit record.)",
+                path,
+                type(exc).__name__,
+                exc,
+                exc_info=exc,
+            )
 
 
 def reset_store() -> None:
     """Reset the global store. For testing only."""
-    global _store, _checked
+    global _store, _checked, _history_warned
     if _store is not None:
         _store.close()
     _store = None
     _checked = False
+    _history_warned = False
