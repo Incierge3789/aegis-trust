@@ -54,9 +54,10 @@ __all__ = [
 ]
 __version__ = "0.9.0-rc8"
 
-# Schema version for audit event format (parity with npm aegis-trust
-# AUDIT_SCHEMA_VERSION). Bumped when audit record shape changes.
-AUDIT_SCHEMA_VERSION = 1
+# Schema version for the audit-event shape — single source in `_constants`
+# (S017 T4 / D-A). Re-exported here for the public API surface (parity with
+# npm aegis-trust AUDIT_SCHEMA_VERSION). Bumped when audit record shape changes.
+from aegis_trust._constants import AUDIT_SCHEMA_VERSION
 
 # Stability level — see docs/VERSIONING.md (mirrors npm SDK).
 #   "preview"    → v0.x.y-rc* : public API may change between rc tags.

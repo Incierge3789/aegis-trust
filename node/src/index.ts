@@ -117,7 +117,7 @@ export const VERSION = "0.9.0-rc8";
 // the ingest endpoint payload. Bumped when audit record shape changes.
 // API versioning doctrine §2: SemVer for the package, schema_version for
 // the on-disk / on-wire audit event shape (independent axis).
-export const AUDIT_SCHEMA_VERSION = 1;
+export { AUDIT_SCHEMA_VERSION } from "./constants.js";
 
 // Stability level — see docs/VERSIONING.md.
 //   "preview"  → v0.x.y-rc* : public API may change between rc tags.

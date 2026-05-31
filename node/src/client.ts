@@ -20,6 +20,7 @@ import {
   AegisHttpError,
   AegisIngestError,
 } from "./errors.js";
+import { AUDIT_SCHEMA_VERSION } from "./constants.js";
 import type {
   AuditChainStatus,
   FieldStats,
@@ -369,6 +370,7 @@ export class AegisClient {
         timestamp: e.timestamp,
         count: e.count,
         deny_fields: [...e.denyFields],
+        schema_version: AUDIT_SCHEMA_VERSION,
         // Cross-review round 3 P0-4: trace_id propagation to gateway.
         ...(e.trace_id !== undefined ? { trace_id: e.trace_id } : {}),
       })),
