@@ -2,6 +2,54 @@
 
 ## [Unreleased]
 
+### Changed (productization-ops/sprint_018 — LITE error-parity remediation)
+- **Rich error envelope on the LITE validation/config path (D2).** The Python
+  LITE path now raises the already-public `AegisValidationError` /
+  `AegisConfigError` envelopes — carrying `.code` / `.remediation` /
+  `.docs_url` / `.to_dict()` — where it previously raised raw `ValueError`,
+  `FileNotFoundError`, or `ImportError`. The `code` strings match the Node SDK
+  for the shared concepts (`aegis.shield.spec.required`,
+  `aegis.shield.mode.invalid`, and every `aegis.config.*` code), so a polyglot
+  consumer can switch on the same `code` across SDKs. New Python-side codes:
+  `aegis.shield.spec.conflict`, `aegis.shield.deny_fields.empty`,
+  `aegis.shield.field_path.invalid`. `load_config()` now also wraps YAML parse
+  failures (`aegis.config.yamlParseError`) and missing explicit paths
+  (`aegis.config.fileNotFound`) instead of leaking the raw parser / OS error.
+- **Backward compatibility:** `AegisValidationError` and `AegisConfigError`
+  both subclass `ValueError`, so existing `except ValueError` callers keep
+  working unchanged. The *type-shape* checks (`scope` / `deny_fields` must be a
+  list / of strings) deliberately stay raw `TypeError`. `get_purpose_policy()`
+  still degrades to `None` for "no config available" (missing file / missing
+  `yaml` dep) and still surfaces a malformed `aegis.yaml`.
+- **Breaking for non-`ValueError` catchers (intentional, the audited fix):**
+  `load_config()` previously raised raw `FileNotFoundError` (no config file),
+  `ImportError` (missing `yaml` dep), and an unwrapped `yaml.YAMLError` (parse
+  failure). These now raise `AegisConfigError` (still a `ValueError`). Callers
+  that specifically did `except FileNotFoundError` / `except ImportError` /
+  `except yaml.YAMLError` around `load_config()` must switch to
+  `except AegisConfigError` (or `except ValueError`) and may branch on `.code`
+  (`aegis.config.fileNotFound` / `aegis.config.yamlMissing` /
+  `aegis.config.yamlParseError`). This was the explicit goal: surface the rich,
+  machine-parseable envelope instead of the bare stdlib exception.
+- **Conversion-failure diagnostic (D1).** When a record→dict conversion
+  (`model_dump` / `.dict` / `dataclasses.asdict` / SQLAlchemy `__table__` walk /
+  NamedTuple `_asdict`) *raises*, `@shield` now logs the original cause
+  (type + message + traceback) and the conversion shape that failed, instead of
+  silently degrading to the misleading "cannot filter str" symptom. A
+  *genuinely unsupported* return type (a bare scalar) keeps its existing
+  "cannot filter `<type>`" diagnostic — the two cases stay distinguished.
+  Fail-closed is unchanged: no data is passed through on a conversion failure.
+- **Local-history write-failure visibility (D3).** With `AEGIS_HISTORY=1`, a
+  history store init/write failure no longer (a) escapes and breaks the
+  `@shield` data path — store init now runs inside the guarded block, parity
+  with the Node SDK — or (b) logs a cause-less "Failed to record" line. It now
+  emits a one-shot developer diagnostic naming the cause and the target path,
+  stating that local audit evidence is **not** being recorded. This is a local
+  developer diagnostic only — not an authoritative-audit guarantee.
+- Not a parity item: empty / Unicode `purpose` remains accepted in Python (it
+  is a free-text label, not a validated field — Node validates it). No `Actor` /
+  `Decision` / `resource_*` / proof / tamper-evidence / Core changes.
+
 ### Added (productization-ops/sprint_017 — schema_version contract)
 - `schema_version` is now stamped on every audit event the SDK emits, from a
   single source (`aegis_trust._constants.AUDIT_SCHEMA_VERSION = 1`, re-exported

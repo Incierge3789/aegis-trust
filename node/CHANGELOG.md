@@ -1,6 +1,20 @@
 # Changelog
 
-## [Unreleased] — failure-UX hardening + claim-integrity (productization-ops/sprint_016)
+## [Unreleased]
+
+### Docs (productization-ops/sprint_018 — LITE error-parity remediation)
+- **No Node code change.** The Python SDK reached parity on the LITE
+  validation/config error path (it now raises `AegisValidationError` /
+  `AegisConfigError` with the same `code` strings Node already used). The
+  shared error registry (`node/docs/errors/README.md`) is updated to record,
+  per code, which SDK(s) emit it (`both` / `node` / `python`) so the
+  cross-SDK contract is explicit. Node-only codes
+  (`aegis.shield.purpose.required`, `aegis.shield.mode.sync_full_unsupported`,
+  the `aegis.wrap.*` codes) and Python-only codes (`aegis.shield.spec.conflict`,
+  `aegis.shield.deny_fields.empty`, `aegis.shield.field_path.invalid`) reflect
+  real, intentional API differences, not gaps to close.
+
+### failure-UX hardening + claim-integrity (productization-ops/sprint_016)
 
 `productization-ops/sprint_016` Collison-grade production-readiness review +
 in-scope hardening. No data-path leak was found (fail-closed re-confirmed); the
