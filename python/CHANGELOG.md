@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Added (internal-ops/sprint_017 — schema_version contract)
+- `schema_version` is now stamped on every audit event the SDK emits, from a
+  single source (`aegis_trust._constants.AUDIT_SCHEMA_VERSION = 1`, re-exported
+  by the package root). Wired to both surfaces consistently: local SQLite
+  history (`shield_history.schema_version INTEGER NOT NULL DEFAULT 1`;
+  `HistoryStore.record` / `record_idempotent` stamp it from the constant, so the
+  caller→store keyword signature is unchanged — this structurally prevents a
+  silent-failure drift class) and the `/shield/ingest` wire payload (additive
+  field; the aegis-core gateway ignores unknown fields, backward-compatible —
+  the gateway does not yet persist/use it).
+- Backward compatibility: existing v0.8.x/v0.9.x databases are migrated with an
+  idempotent `ALTER TABLE … ADD COLUMN schema_version INTEGER NOT NULL DEFAULT
+  1`; rows written before the column read back as `1`.
+- `schema_version` is intentionally **excluded** from the idempotency
+  `_payload_hash` — cross-language SHA-256 byte parity with the Node SDK is
+  unchanged.
+- Deferred (not implemented): typed `Actor`, `Decision` enum,
+  `resource_id`/`resource_type` (the latter is the schema_version=2 shape, gated
+  behind a separate decision).
+
 ## [0.9.0-rc8] — 2026-05-30 — cross-SDK version-lock (no Python code change)
 
 `internal-ops/sprint_015`. **No Python API or behavior change.** This SDK

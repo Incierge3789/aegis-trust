@@ -15,6 +15,7 @@ from typing import Any, Callable, Literal
 
 import httpx
 
+from aegis_trust._constants import AUDIT_SCHEMA_VERSION
 from aegis_trust.types import (
     AuditChainStatus,
     FieldStats,
@@ -334,6 +335,7 @@ class AegisClient:
                     "timestamp": e.timestamp,
                     "count": e.count,
                     "deny_fields": list(e.deny_fields),
+                    "schema_version": AUDIT_SCHEMA_VERSION,
                 }
                 for e in entries
             ]
