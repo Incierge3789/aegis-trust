@@ -402,11 +402,14 @@ def record_if_enabled(
     written. This is a local developer diagnostic, not an authoritative-audit
     guarantee.
 
-    S018 P1 hardening: the diagnostic deliberately **withholds** the
-    ``AEGIS_HISTORY_PATH`` value (it may embed tenant / user / secret-bearing
-    path segments) and the raw exception message + traceback (an ``OSError``
-    message echoes the very path). Only the exception *class name* and a fixed
-    remediation are surfaced.
+    S018 P1/P2 hardening: the diagnostic emits **only SDK-controlled fixed
+    strings**. It withholds the ``AEGIS_HISTORY_PATH`` value (may embed
+    tenant / user / secret-bearing path segments), the raw exception message +
+    traceback (an ``OSError`` message echoes the very path), and the exception
+    *class name* (an application-controlled identifier — a dynamically named
+    exception class could otherwise carry a secret, S018 P2-1). A fixed
+    ``history_write_failed`` marker + ``local_evidence_not_recorded=true`` +
+    fixed remediation are surfaced.
     """
     global _history_warned
     try:
@@ -422,17 +425,17 @@ def record_if_enabled(
             timestamp=timestamp,
             mode=mode,
         )
-    except Exception as exc:
+    except Exception:
         if not _history_warned:
             _history_warned = True
             logger.error(
-                "aegis-trust: AEGIS_HISTORY=1 but the local history could not be "
-                "written (%s) — local audit evidence is NOT being recorded. "
+                "aegis-trust: history_write_failed local_evidence_not_recorded=true "
+                "— AEGIS_HISTORY=1 but the local history could not be written. "
                 "Check the path/permissions configured via AEGIS_HISTORY_PATH "
-                "(its value is withheld here to avoid leaking tenant / user / "
-                "secret path segments), or unset AEGIS_HISTORY. (Local developer "
-                "diagnostic only — not an authoritative audit record.)",
-                type(exc).__name__,
+                "(its value, the underlying error, and its type are withheld here "
+                "to avoid leaking tenant / user / secret-bearing strings), or "
+                "unset AEGIS_HISTORY. (Local developer diagnostic only — not an "
+                "authoritative audit record.)"
             )
 
 

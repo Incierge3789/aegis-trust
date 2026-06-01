@@ -50,28 +50,31 @@ class _ConversionFailed:
 _CONVERSION_FAILED = _ConversionFailed()
 
 
-def _record_conversion_failure(
-    shape: str, data: Any, cause: Exception
-) -> _ConversionFailed:
+def _record_conversion_failure(stage: str) -> _ConversionFailed:
     """Non-leaking developer diagnostic for a conversion that raised
-    (S018 D1, P1 secret-leak hardening).
+    (S018 D1, P1/P2 secret-leak hardening).
 
-    The default surface deliberately **withholds** the exception *message*, the
-    traceback (no ``exc_info``), and any view of the unconverted value: only
-    ``type(data).__name__`` is read, which never invokes the instance's
-    ``__repr__`` / ``__str__`` (so a value-bearing or exception-raising repr
-    cannot leak either). A failing record's exception message frequently echoes
-    the very field values being filtered (``customer_ssn=...``,
-    ``stripe_secret_key=...``, PHI, internal prompts); emitting it to the
-    default log surface would violate the minimum-disclosure contract even
-    though the data-*return* path already fails closed.
+    The default surface emits **only SDK-controlled fixed strings**: a fixed
+    ``conversion_failed`` marker, a fixed ``stage=<label>`` enum identifying
+    which converter raised, a fixed remediation, and the active ``trace_id``
+    when one is set (trace_ids are shape-validated to exclude secrets — see
+    ``trace._assert_trace_id``).
 
-    Surfaced — all safe identifiers only: that a conversion failed, the
-    converter ``shape``, the object's *type name*, the exception *class name*,
-    a fixed remediation, and the active ``trace_id`` when one is set (trace_ids
-    are shape-validated to exclude secrets — see ``trace._assert_trace_id``).
-    No opt-in to dump the raw message/traceback is provided: minimum-disclosure
-    is the only mode (safe by construction).
+    It deliberately withholds every **application-controlled** string:
+    - the exception *message* (routinely echoes the filtered field values:
+      ``customer_ssn=...``, ``stripe_secret_key=...``, PHI, internal prompts),
+    - the traceback (no ``exc_info``),
+    - the object's ``repr``/``str`` (its dunders are never invoked), and
+    - the *type/exception class names* (``type(data).__name__`` /
+      ``type(cause).__name__``) — these are application-named identifiers, and
+      a class dynamically named with embedded data would otherwise leak it
+      (S018 P2-1, found by independent re-audit). The caller therefore passes a
+      fixed ``stage`` label chosen by the SDK at the call site, NOT derived
+      from the failing object or exception.
+
+    No opt-in to dump the raw message/traceback/names is provided:
+    minimum-disclosure is the only mode (safe by construction). Fail-closed is
+    preserved by the returned sentinel.
     """
     try:
         from aegis_trust.trace import get_trace_context
@@ -81,15 +84,12 @@ def _record_conversion_failure(
     except Exception:
         trace_id = "-"
     logger.warning(
-        "shield: %s conversion failed (%s) for return value of type %s — "
-        "returning empty (fail-closed); the unconverted value was NOT passed "
-        "through. The exception message and traceback are withheld by default "
-        "to avoid leaking sensitive values (PII / secrets) into logs; "
-        "reproduce in a trusted local environment to inspect the cause. "
-        "trace_id=%s",
-        shape,
-        type(cause).__name__,
-        type(data).__name__,
+        "shield: conversion_failed stage=%s — returning empty (fail-closed); "
+        "the unconverted value was NOT passed through. The exception detail, "
+        "traceback, and type/class names are withheld by default to avoid "
+        "leaking sensitive values (PII / secrets) into logs; reproduce in a "
+        "trusted local environment to inspect the cause. trace_id=%s",
+        stage,
         trace_id,
     )
     return _CONVERSION_FAILED
@@ -614,10 +614,11 @@ def _filter_dict(data: dict[str, Any], path_tree: dict[str, Any]) -> dict[str, A
             # subtree expects nested access but value is scalar:
             # drop the key to prevent data leakage (fail-closed).
             logger.warning(
-                "shield: scope expects nested path under '%s' but value is %s, "
-                "dropping key (fail-closed)",
+                "shield: scope expects a nested path under '%s' but the value "
+                "is a non-traversable scalar; dropping key (fail-closed). The "
+                "value's type name is withheld (application-controlled "
+                "identifier).",
                 k,
-                type(v).__name__,
             )
     return result
 
@@ -664,10 +665,11 @@ def _deny_filter_dict(
             # ``users`` value. Drop the key fail-closed so the contract is
             # symmetric with scope semantics.
             logger.warning(
-                "shield: deny_fields expects nested path under '%s' but value is %s, "
-                "dropping key (fail-closed, S022 R2)",
+                "shield: deny_fields expects a nested path under '%s' but the "
+                "value is a non-traversable scalar; dropping key (fail-closed, "
+                "S022 R2). The value's type name is withheld "
+                "(application-controlled identifier).",
                 k,
-                type(v).__name__,
             )
     return result
 
@@ -704,15 +706,15 @@ def _to_filterable(data: Any) -> Any:
     if _is_namedtuple_instance(data):
         try:
             result = data._asdict()
-        except Exception as exc:
-            return _record_conversion_failure("namedtuple._asdict()", data, exc)
+        except Exception:
+            return _record_conversion_failure("namedtuple_conversion")
         if isinstance(result, dict):
             return result
     if _is_pydantic_v2_like(data):
         try:
             result = data.model_dump()
-        except Exception as exc:
-            return _record_conversion_failure("pydantic-v2 model_dump()", data, exc)
+        except Exception:
+            return _record_conversion_failure("pydantic_model_dump")
         # S022 R9: v2 return-type gate, symmetric with v1 path below. A
         # ``model_dump()`` returning anything other than ``dict`` is a
         # confused-deputy surface; treat as fail-closed.
@@ -731,20 +733,20 @@ def _to_filterable(data: Any) -> Any:
                 for c in data.__table__.columns
                 if not (isinstance(c.name, str) and c.name.startswith("__"))
             }
-        except Exception as exc:
-            return _record_conversion_failure("SQLAlchemy __table__ walk", data, exc)
+        except Exception:
+            return _record_conversion_failure("sqlalchemy_conversion")
     if _is_pydantic_v1_like(data):
         try:
             result = data.dict()
-        except Exception as exc:
-            return _record_conversion_failure("pydantic-v1 .dict()", data, exc)
+        except Exception:
+            return _record_conversion_failure("pydantic_dict")
         if isinstance(result, dict):
             return result
     if _is_dataclass_instance(data):
         try:
             return dataclasses.asdict(data)
-        except Exception as exc:
-            return _record_conversion_failure("dataclasses.asdict()", data, exc)
+        except Exception:
+            return _record_conversion_failure("dataclass_conversion")
     return data
 
 
@@ -767,8 +769,10 @@ def _filter_result(data: Any, path_tree: dict[str, Any]) -> Any:
     if data is None:
         return None
     logger.warning(
-        "shield: cannot filter %s (not dict/list), returning empty (fail-closed)",
-        type(data).__name__,
+        "shield: unsupported_return_shape — cannot field-filter a non-dict / "
+        "non-list return value; returning empty (fail-closed). The return "
+        "type name is withheld by default (it is an application-controlled "
+        "identifier) to avoid leaking sensitive values into logs."
     )
     return ""
 
@@ -792,8 +796,10 @@ def _deny_filter_result(data: Any, path_tree: dict[str, Any]) -> Any:
     if data is None:
         return None
     logger.warning(
-        "shield: cannot filter %s (not dict/list), returning empty (fail-closed)",
-        type(data).__name__,
+        "shield: unsupported_return_shape — cannot field-filter a non-dict / "
+        "non-list return value; returning empty (fail-closed). The return "
+        "type name is withheld by default (it is an application-controlled "
+        "identifier) to avoid leaking sensitive values into logs."
     )
     return ""
 

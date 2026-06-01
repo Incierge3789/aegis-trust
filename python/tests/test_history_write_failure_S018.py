@@ -1,18 +1,17 @@
-"""S018 D3 — Python local-history write-failure visibility (P1 path-leak hardened).
+"""S018 D3 — Python local-history write-failure visibility (P1 + P2 hardened).
 
-When ``AEGIS_HISTORY=1`` but the local history cannot be written (unwritable
-path, permission error, disk problem), a developer who turned on local audit
-evidence must learn it is NOT being recorded — **without** the diagnostic
-echoing the ``AEGIS_HISTORY_PATH`` value (which may embed tenant / user /
-secret-bearing path segments) or the raw exception message + traceback (an
-``OSError`` message echoes the path). These tests lock:
+When ``AEGIS_HISTORY=1`` but the local history cannot be written, the developer
+must learn evidence is NOT being recorded — **without** the diagnostic echoing
+any application-controlled string:
 
-  1. an init failure on a bad path does NOT break the @shield data path
-     (the wrapped call still returns its filtered result),
-  2. the diagnostic clearly states evidence is NOT being recorded, framed as a
-     local developer diagnostic (not authoritative audit),
-  3. the diagnostic fires once, not per-call (spam suppression), and
-  4. the path value, exception message, and traceback are NOT leaked.
+  P1 — no ``AEGIS_HISTORY_PATH`` value, no raw exception message, no traceback.
+  P2 — no exception *class name* either (a dynamically named exception class
+       would otherwise leak its name).
+
+Hardened contract — the diagnostic emits ONLY SDK-controlled fixed strings:
+``history_write_failed local_evidence_not_recorded=true`` + a fixed remediation
++ the "not an authoritative audit record" disclaimer. The @shield data path is
+never broken by a history failure, and the diagnostic fires once.
 """
 
 import logging
@@ -22,6 +21,8 @@ import pytest
 from aegis_trust import shield
 from aegis_trust.history import record_if_enabled, reset_store
 from aegis_trust.shield import reset
+
+MARKER = "history_write_failed"
 
 
 def _messages(caplog) -> str:
@@ -42,7 +43,6 @@ def _clean():
 
 
 def test_history_init_failure_does_not_break_data_path(caplog, monkeypatch):
-    # A path under a regular *file* (not a directory) makes mkdir/connect fail.
     bad_path = "/dev/null/cannot/exist/history.db"
     monkeypatch.setenv("AEGIS_HISTORY", "1")
     monkeypatch.setenv("AEGIS_HISTORY_PATH", bad_path)
@@ -55,13 +55,11 @@ def test_history_init_failure_does_not_break_data_path(caplog, monkeypatch):
         result = get_user()
 
     msgs = _messages(caplog)
-    # Data path unbroken: filtering still happened and returned normally.
-    assert result == {"name": "Aria"}
-    # Broken-evidence state is communicated.
-    assert "NOT being recorded" in msgs
-    # Framed as a local developer diagnostic, not an authoritative audit claim.
+    assert result == {"name": "Aria"}  # data path unbroken
+    assert MARKER in msgs
+    assert "local_evidence_not_recorded=true" in msgs
     assert "not an authoritative audit" in msgs.lower()
-    # The raw path value is NOT leaked.
+    # No raw path value.
     assert bad_path not in msgs
     assert "/dev/null/cannot/exist" not in msgs
 
@@ -79,14 +77,14 @@ def test_adversarial_secret_bearing_history_path_does_not_leak(caplog, monkeypat
         result = get_user()
 
     msgs = _messages(caplog)
-    assert result == {"name": "Aria"}  # fail-closed / data path intact
-    assert "NOT being recorded" in msgs
+    assert result == {"name": "Aria"}
+    assert MARKER in msgs
     for needle in (
         secret_path,
         "tenant_acme_corp",
         "user_alice",
         "sk_live_HISTORYSECRET",
-        "history.db",  # even the basename is withheld (could itself carry a secret)
+        "history.db",
     ):
         assert needle not in msgs, f"LEAKED path segment: {needle!r}"
     assert not _has_traceback(caplog)
@@ -105,15 +103,11 @@ def test_history_write_failure_warns_once(caplog, monkeypatch):
         for _ in range(5):
             assert get_user() == {"name": "Aria"}
 
-    # Spam suppression: the broken-evidence diagnostic is emitted once.
-    occurrences = _messages(caplog).count("NOT being recorded")
+    occurrences = _messages(caplog).count(MARKER)
     assert occurrences == 1, f"expected one warning, got {occurrences}"
 
 
 def test_record_if_enabled_swallows_store_record_failure(caplog, monkeypatch, tmp_path):
-    # Even a write failure *after* a successful store init must not raise out
-    # of record_if_enabled, and must surface the broken-evidence state once —
-    # without echoing the raw exception message (which can carry a path/secret).
     db = tmp_path / "history.db"
     monkeypatch.setenv("AEGIS_HISTORY", "1")
     monkeypatch.setenv("AEGIS_HISTORY_PATH", str(db))
@@ -129,7 +123,47 @@ def test_record_if_enabled_swallows_store_record_failure(caplog, monkeypatch, tm
     monkeypatch.setattr(store, "record", _boom)
 
     with caplog.at_level(logging.ERROR, logger="aegis"):
-        # Must not raise.
+        record_if_enabled(  # must not raise
+            function="f",
+            purpose="p",
+            scope=["name"],
+            deny_fields=[],
+            blocked_fields=[],
+            timestamp="2026-06-01T00:00:00+00:00",
+            mode="lite",
+        )
+
+    msgs = _messages(caplog)
+    assert MARKER in msgs
+    # Raw exception message + class name + secret all withheld.
+    assert "disk full" not in msgs
+    assert "sk_live_DISKSECRET" not in msgs
+    assert "tenant_x" not in msgs
+    assert "OSError" not in msgs  # P2: exception class name withheld
+    assert not _has_traceback(caplog)
+
+
+def test_adversarial_history_exception_class_name_does_not_leak(
+    caplog, monkeypatch, tmp_path
+):
+    """P2-1: a dynamically named history-write exception must not leak its name."""
+    db = tmp_path / "history.db"
+    monkeypatch.setenv("AEGIS_HISTORY", "1")
+    monkeypatch.setenv("AEGIS_HISTORY_PATH", str(db))
+
+    from aegis_trust import history as hist
+
+    store = hist._get_store()
+    assert store is not None
+
+    EvilExc = type("customer_ssn_123_45_6789_sk_live_HISTEXC_Error", (OSError,), {})
+
+    def _boom(**kwargs):
+        raise EvilExc("boom")
+
+    monkeypatch.setattr(store, "record", _boom)
+
+    with caplog.at_level(logging.ERROR, logger="aegis"):
         record_if_enabled(
             function="f",
             purpose="p",
@@ -141,11 +175,8 @@ def test_record_if_enabled_swallows_store_record_failure(caplog, monkeypatch, tm
         )
 
     msgs = _messages(caplog)
-    assert "NOT being recorded" in msgs
-    # Raw exception message (and any secret it carries) is withheld.
-    assert "disk full" not in msgs
-    assert "sk_live_DISKSECRET" not in msgs
-    assert "tenant_x" not in msgs
-    assert not _has_traceback(caplog)
-    # The exception class name IS surfaced (safe identifier).
-    assert "OSError" in msgs
+    assert MARKER in msgs  # fixed marker still present
+    for needle in ("customer_ssn", "123_45_6789", "123-45-6789", "sk_live_HISTEXC"):
+        assert needle not in msgs, (
+            f"LEAKED via history exception class name: {needle!r}"
+        )

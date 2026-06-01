@@ -163,9 +163,11 @@ wrapped function can return objects directly:
 
 Pydantic and SQLAlchemy are **detected by duck typing** — neither is a dependency of
 `aegis-trust`. If the conversion raises, `@shield` returns empty (fail-closed) and
-emits a **minimum-disclosure** developer diagnostic: it names the converter and the
-exception *class*, but withholds the exception message, the traceback, and the failing
-object's values by default — so PII/secrets carried by the record do not reach your
+emits a **minimum-disclosure** developer diagnostic built from **fixed SDK strings
+only** — a `conversion_failed` marker and a fixed `stage=<label>` (e.g.
+`stage=pydantic_model_dump`). It withholds the exception message, the traceback, the
+object's `repr`, and the **type/exception class names** by default — so PII/secrets
+carried by the record (or embedded in a dynamically named class) do not reach your
 logs. Hybrid objects that look like both (Pydantic v2 `+` SQLAlchemy Declarative, such
 as SQLModel) resolve via the Pydantic v2 branch so serializer customization is preserved.
 
