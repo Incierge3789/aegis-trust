@@ -612,11 +612,10 @@ def _filter_dict(data: dict[str, Any], path_tree: dict[str, Any]) -> dict[str, A
             # subtree expects nested access but value is scalar:
             # drop the key to prevent data leakage (fail-closed).
             logger.warning(
-                "shield: scope expects a nested path under '%s' but the value "
-                "is a non-traversable scalar; dropping key (fail-closed). The "
-                "value's type name is withheld (application-controlled "
-                "identifier).",
-                k,
+                "shield: scope_nested_path_on_scalar — a scope path expected a "
+                "nested object but the value was a non-traversable scalar; "
+                "dropping the key (fail-closed). The field key and value type "
+                "are withheld (application-controlled identifiers)."
             )
     return result
 
@@ -663,11 +662,10 @@ def _deny_filter_dict(
             # ``users`` value. Drop the key fail-closed so the contract is
             # symmetric with scope semantics.
             logger.warning(
-                "shield: deny_fields expects a nested path under '%s' but the "
-                "value is a non-traversable scalar; dropping key (fail-closed, "
-                "S022 R2). The value's type name is withheld "
-                "(application-controlled identifier).",
-                k,
+                "shield: deny_fields_nested_path_on_scalar — a deny_fields path "
+                "expected a nested object but the value was a non-traversable "
+                "scalar; dropping the key (fail-closed, S022 R2). The field key "
+                "and value type are withheld (application-controlled identifiers)."
             )
     return result
 

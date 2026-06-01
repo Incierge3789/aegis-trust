@@ -148,8 +148,9 @@ def test_real_sqlalchemy_table_walk_failure(caplog):
 
     msgs = _messages(caplog)
     assert "stage=sqlalchemy_conversion" in msgs  # fixed stage label
-    # Fail-closed + no leak. (Note: this path's exception class is surfaced as a
-    # safe identifier; the stored ssn value must never appear.)
+    # Fail-closed + no leak. The diagnostic surfaces only the fixed
+    # `conversion_failed stage=sqlalchemy_conversion` marker — no exception
+    # class name, no stored value; the stored ssn must never appear.
     assert result == ""
     for needle in _SECRET_NEEDLES:
         assert needle not in msgs, f"LEAKED: {needle!r}"
