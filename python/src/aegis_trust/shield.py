@@ -56,41 +56,39 @@ def _record_conversion_failure(stage: str) -> _ConversionFailed:
 
     The default surface emits **only SDK-controlled fixed strings**: a fixed
     ``conversion_failed`` marker, a fixed ``stage=<label>`` enum identifying
-    which converter raised, a fixed remediation, and the active ``trace_id``
-    when one is set (trace_ids are shape-validated to exclude secrets — see
-    ``trace._assert_trace_id``).
+    which converter raised, and a fixed remediation. **No** application-controlled
+    string is surfaced at all.
 
     It deliberately withholds every **application-controlled** string:
     - the exception *message* (routinely echoes the filtered field values:
       ``customer_ssn=...``, ``stripe_secret_key=...``, PHI, internal prompts),
     - the traceback (no ``exc_info``),
-    - the object's ``repr``/``str`` (its dunders are never invoked), and
+    - the object's ``repr``/``str`` (its dunders are never invoked),
     - the *type/exception class names* (``type(data).__name__`` /
-      ``type(cause).__name__``) — these are application-named identifiers, and
-      a class dynamically named with embedded data would otherwise leak it
-      (S018 P2-1, found by independent re-audit). The caller therefore passes a
-      fixed ``stage`` label chosen by the SDK at the call site, NOT derived
-      from the failing object or exception.
+      ``type(cause).__name__``) — application-named identifiers, and a class
+      dynamically named with embedded data would otherwise leak it
+      (S018 P2-1), and
+    - the ``trace_id`` — even though it is shape-validated, the validator
+      (``^[A-Za-z0-9._:-]{1,128}$``) accepts secret-shaped tokens
+      (e.g. ``sk_live_…``), so a developer who put a secret in their own
+      trace_id would leak it here. It is therefore NOT surfaced on the
+      diagnostic surface (S018 P2-2, independent CAG finding). The trace_id
+      feature and its "never pass secrets as trace_id" contract remain for the
+      audit JSONL; this only removes it from the developer diagnostic.
 
-    No opt-in to dump the raw message/traceback/names is provided:
-    minimum-disclosure is the only mode (safe by construction). Fail-closed is
-    preserved by the returned sentinel.
+    The caller passes a fixed ``stage`` label chosen by the SDK at the call
+    site, NOT derived from the failing object or exception. No opt-in to dump
+    the raw message/traceback/names is provided: minimum-disclosure is the only
+    mode (safe by construction). Fail-closed is preserved by the returned
+    sentinel.
     """
-    try:
-        from aegis_trust.trace import get_trace_context
-
-        _tc = get_trace_context()
-        trace_id = _tc.trace_id if _tc is not None else "-"
-    except Exception:
-        trace_id = "-"
     logger.warning(
         "shield: conversion_failed stage=%s — returning empty (fail-closed); "
         "the unconverted value was NOT passed through. The exception detail, "
         "traceback, and type/class names are withheld by default to avoid "
         "leaking sensitive values (PII / secrets) into logs; reproduce in a "
-        "trusted local environment to inspect the cause. trace_id=%s",
+        "trusted local environment to inspect the cause.",
         stage,
-        trace_id,
     )
     return _CONVERSION_FAILED
 

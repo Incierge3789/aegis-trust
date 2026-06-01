@@ -74,11 +74,13 @@ loader raised raw `ValueError` / `FileNotFoundError` / `ImportError`).
 > conversion-failure and local-history-failure log diagnostics are composed of
 > **only SDK-controlled fixed strings** — a fixed marker
 > (`conversion_failed` / `unsupported_return_shape` / `history_write_failed`), a
-> fixed `stage=<label>` enum, a fixed remediation, and the validated `trace_id`.
+> fixed `stage=<label>` enum, and a fixed remediation.
 > They withhold the raw exception message, traceback, failing-object `repr`, the
-> `AEGIS_HISTORY_PATH` value, **and the type/exception class names** (which are
-> application-controlled identifiers — a dynamically named class would otherwise
-> leak its name, S018 P2-1). This keeps PII/secrets carried by a failing record
+> `AEGIS_HISTORY_PATH` value, **the type/exception class names** (a dynamically
+> named class would otherwise leak its name, S018 P2-1), **and the `trace_id`**
+> (its validator accepts secret-shaped tokens, so it is withheld from the
+> diagnostic surface too — S018 P2-2). No application-controlled string reaches
+> the diagnostic surface. This keeps PII/secrets carried by a failing record
 > or a path out of the default log surface; the data path already fails closed.
 
 | Code | Thrown when | Remediation |

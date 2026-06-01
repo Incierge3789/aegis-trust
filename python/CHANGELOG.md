@@ -43,19 +43,24 @@
   **only SDK-controlled fixed strings**: a fixed `conversion_failed` marker, a
   fixed `stage=<label>` enum (`pydantic_model_dump` / `pydantic_dict` /
   `sqlalchemy_conversion` / `dataclass_conversion` / `namedtuple_conversion`),
-  a fixed remediation, and the validated `trace_id`. It **withholds every
-  application-controlled string**: the exception message, the traceback (no
-  `exc_info`), the object's `repr`/`str` (dunders never invoked), **and the
-  type/exception class names** (`type(data).__name__` / `type(cause).__name__`).
+  and a fixed remediation. It **withholds every application-controlled string**:
+  the exception message, the traceback (no `exc_info`), the object's
+  `repr`/`str` (dunders never invoked), **the type/exception class names**
+  (`type(data).__name__` / `type(cause).__name__`), **and the `trace_id`**.
   Rationale: (P1) a failing record's exception message routinely echoes the
   filtered field values (`customer_ssn=…`, `stripe_secret_key=…`, PHI, internal
-  prompts) — the original build logged that + full traceback; (P2) the first
+  prompts) — the original build logged that + full traceback; (P2-1) the first
   fix still surfaced the type/exception *class names*, and an independent
   re-audit showed a dynamically named class (e.g.
-  `type("customer_ssn_…_Error", …)`) leaks its name. No opt-in to dump the raw
-  detail — minimum-disclosure is the only mode. The genuinely-unsupported
-  return type gets a distinct fixed `unsupported_return_shape` marker (also
-  withholding the type name). Fail-closed unchanged.
+  `type("customer_ssn_…_Error", …)`) leaks its name; (P2-2) a second
+  independent CAG review noted the `trace_id` was still surfaced and its
+  validator (`^[A-Za-z0-9._:-]{1,128}$`) accepts secret-shaped tokens (e.g.
+  `sk_live_…`), so it is now withheld from the diagnostic too (the trace_id
+  feature + "never pass secrets as trace_id" contract remain for the audit
+  JSONL). No opt-in to dump the raw detail — minimum-disclosure is the only
+  mode. The genuinely-unsupported return type gets a distinct fixed
+  `unsupported_return_shape` marker (also withholding the type name).
+  Fail-closed unchanged.
 - **Local-history write-failure visibility — fixed-string diagnostic (D3, P1 +
   P2 hardening).** With `AEGIS_HISTORY=1`, a history store init/write failure no
   longer (a) escapes and breaks the `@shield` data path (store init runs inside

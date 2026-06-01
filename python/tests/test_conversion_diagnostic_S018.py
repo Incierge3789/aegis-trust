@@ -12,10 +12,11 @@ application-controlled string. Two audit rounds shaped this contract:
        class leaks its name (e.g. ``type("customer_ssn_123_..._Error", ...)``).
 
 Hardened contract — the default diagnostic emits ONLY SDK-controlled fixed
-strings: a ``conversion_failed`` marker, a fixed ``stage=<label>`` enum, a fixed
-remediation, and the validated ``trace_id``. It surfaces NO exception message,
-NO traceback, NO ``repr``/``str`` of the object, and NO type/exception class
-name. Fail-closed (return ``""``) is preserved.
+strings: a ``conversion_failed`` marker, a fixed ``stage=<label>`` enum, and a
+fixed remediation. It surfaces NO exception message, NO traceback, NO
+``repr``/``str`` of the object, NO type/exception class name, and NO
+``trace_id`` (P2-2: the trace_id validator accepts secret-shaped tokens, so it
+is withheld from the diagnostic too). Fail-closed (return ``""``) is preserved.
 """
 
 import logging
@@ -111,6 +112,37 @@ def test_adversarial_secrets_in_exception_message_do_not_leak(caplog):
         assert needle not in msgs, f"LEAKED secret needle: {needle!r}"
     assert not _has_traceback(caplog)
     assert "Traceback" not in msgs
+
+
+def test_adversarial_secret_shaped_trace_id_not_surfaced(caplog):
+    """P2-2 (independent CAG finding): a secret-shaped trace_id that passes the
+    shape validator (`^[A-Za-z0-9._:-]{1,128}$` — underscores allowed) must NOT
+    be surfaced on the conversion diagnostic surface."""
+    from aegis_trust.trace import trace_context
+
+    class Broken:
+        model_fields = {}
+
+        def model_dump(self):
+            raise RuntimeError("boom")
+
+    @shield(purpose="support", scope=["name"])
+    def f():
+        return Broken()
+
+    secret_trace = "sk_live_TRACEIDSECRET_abcdef"  # passes the trace_id validator
+    with caplog.at_level(logging.WARNING, logger="aegis"):
+        with trace_context(secret_trace):
+            result = f()
+
+    msgs = _messages(caplog)
+    assert result == ""
+    assert "conversion_failed" in msgs  # fixed marker still emitted
+    assert "sk_live_TRACEIDSECRET" not in msgs, "LEAKED via trace_id"
+    assert secret_trace not in msgs
+    assert (
+        "trace_id" not in msgs
+    )  # trace_id no longer surfaced on the diagnostic at all
 
 
 def test_adversarial_secret_in_exception_class_name_does_not_leak(caplog):
