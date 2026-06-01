@@ -24,6 +24,14 @@
   registry (`node/docs/errors/README.md`) records the catch-compat and
   minimum-disclosure guarantees. Node behaviour is unchanged (Node already
   withheld these); no Node code change.
+- **P2-1 follow-up (Python-side, doc updated here).** A second independent
+  re-audit found the P1 fix still surfaced the type/exception **class names**
+  (`type(data).__name__` / `type(cause).__name__` / `type(exc).__name__`) in the
+  Python diagnostics, so a *dynamically named* class could leak its name. Fixed:
+  the Python conversion / unsupported-shape / history diagnostics now emit only
+  SDK-controlled fixed strings (`conversion_failed` / `unsupported_return_shape`
+  / `history_write_failed` + a fixed `stage=<label>` enum), withholding all
+  application-controlled identifiers. Doc updated accordingly. No Node code change.
 
 ### failure-UX hardening + claim-integrity (internal-ops/sprint_016)
 

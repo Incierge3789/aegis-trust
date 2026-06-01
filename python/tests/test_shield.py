@@ -78,7 +78,7 @@ def test_non_dict_returns_empty(caplog):
         return 42
 
     assert get_number() == ""
-    assert "cannot filter int" in caplog.text
+    assert "unsupported_return_shape" in caplog.text
 
 
 def test_string_returns_empty(caplog):
@@ -87,7 +87,7 @@ def test_string_returns_empty(caplog):
         return "hello"
 
     assert get_message() == ""
-    assert "cannot filter str" in caplog.text
+    assert "unsupported_return_shape" in caplog.text
 
 
 def test_none_passthrough():
@@ -279,7 +279,7 @@ def test_deny_fields_non_dict_returns_empty(caplog):
         return 42
 
     assert get_number() == ""
-    assert "cannot filter int" in caplog.text
+    assert "unsupported_return_shape" in caplog.text
 
 
 def test_deny_fields_none_passthrough():

@@ -1,23 +1,21 @@
-"""S018 D1 — Python conversion-failure diagnostic (P1 secret-leak hardened).
+"""S018 D1 — Python conversion-failure diagnostic (P1 + P2 secret-leak hardened).
 
 When a record→dict conversion (Pydantic ``model_dump`` / ``.dict``,
 ``dataclasses.asdict``, SQLAlchemy ``__table__`` walk, NamedTuple ``_asdict``)
-*raises*, the diagnostic must help a developer **without** leaking the failing
-object's values. The original S018 implementation logged the exception message
-and a full traceback (``exc_info``); an adversarial audit showed that leaked
-``customer_ssn`` / ``stripe_secret_key`` / PHI / internal prompts through the
-default log surface, violating the minimum-disclosure contract even though the
-data-*return* path failed closed.
+*raises*, the diagnostic must help a developer **without** leaking any
+application-controlled string. Two audit rounds shaped this contract:
 
-These tests lock the hardened contract:
+  P1 — the original build logged the exception message + traceback (``exc_info``),
+       leaking ``customer_ssn`` / ``stripe_secret_key`` / PHI / internal prompts.
+  P2 — the P1 fix still surfaced ``type(cause).__name__`` / ``type(data).__name__``;
+       an independent re-audit showed a *dynamically named* exception/object
+       class leaks its name (e.g. ``type("customer_ssn_123_..._Error", ...)``).
 
-  1. SAFE identifiers ARE surfaced — that a conversion failed, the converter
-     shape, the object *type name*, the exception *class name*.
-  2. NO exception message, NO traceback (``exc_info`` / ``exc_text``), NO
-     ``repr(data)`` / ``str(data)`` of the failing object.
-  3. a *genuinely unsupported* return type (bare scalar) keeps its existing
-     "cannot filter <type>" diagnostic (the two cases stay distinguished), and
-  4. fail-closed is preserved — no data is passed through on failure.
+Hardened contract — the default diagnostic emits ONLY SDK-controlled fixed
+strings: a ``conversion_failed`` marker, a fixed ``stage=<label>`` enum, a fixed
+remediation, and the validated ``trace_id``. It surfaces NO exception message,
+NO traceback, NO ``repr``/``str`` of the object, and NO type/exception class
+name. Fail-closed (return ``""``) is preserved.
 """
 
 import logging
@@ -29,13 +27,6 @@ from aegis_trust.shield import reset
 
 
 def _messages(caplog) -> str:
-    """Rendered log-record messages only.
-
-    Deliberately NOT ``caplog.text`` — that includes pytest's own
-    ``module:lineno`` decoration (e.g. ``shield.py:NNN``), which is a capture
-    artifact, not part of the emitted diagnostic. We assert against what the
-    SDK actually puts in the record.
-    """
     return "\n".join(r.getMessage() for r in caplog.records)
 
 
@@ -44,8 +35,6 @@ def _has_traceback(caplog) -> bool:
 
 
 class _Unpicklable:
-    """A leaf value whose deep-copy raises — breaks ``dataclasses.asdict``."""
-
     def __deepcopy__(self, memo):
         raise RuntimeError("simulated asdict deepcopy failure customer_ssn=000-00-0000")
 
@@ -57,7 +46,7 @@ def _clean():
     reset()
 
 
-def test_conversion_failure_surfaces_safe_identifiers_only(caplog):
+def test_conversion_failure_surfaces_only_fixed_stage_label(caplog):
     class Broken:
         model_fields = {}  # pydantic-v2-like
 
@@ -72,19 +61,17 @@ def test_conversion_failure_surfaces_safe_identifiers_only(caplog):
         result = f()
 
     msgs = _messages(caplog)
-    # Fail-closed preserved.
-    assert result == ""
-    # SAFE identifiers ARE surfaced.
-    assert "conversion failed" in msgs
-    assert "model_dump" in msgs  # converter shape
-    assert "RuntimeError" in msgs  # exception class name
-    assert "Broken" in msgs  # object type name (safe; never calls instance repr)
-    # The exception MESSAGE must NOT leak.
+    assert result == ""  # fail-closed
+    # SDK-controlled fixed strings ARE surfaced.
+    assert "conversion_failed" in msgs
+    assert "stage=pydantic_model_dump" in msgs
+    # NO application-controlled identifiers: exception message, exception class
+    # name, or object type name.
     assert "ssn" not in msgs
     assert "encrypted" not in msgs
-    # No traceback / exc_info.
+    assert "RuntimeError" not in msgs  # exception class name withheld
+    assert "Broken" not in msgs  # object type name withheld
     assert not _has_traceback(caplog)
-    # NOT misattributed to the downstream "cannot filter str" symptom.
     assert "cannot filter str" not in msgs
 
 
@@ -108,7 +95,7 @@ def test_adversarial_secrets_in_exception_message_do_not_leak(caplog):
         result = f()
 
     msgs = _messages(caplog)
-    assert result == ""  # fail-closed
+    assert result == ""
     for needle in (
         "customer_ssn",
         "123-45-6789",
@@ -122,15 +109,87 @@ def test_adversarial_secrets_in_exception_message_do_not_leak(caplog):
         "CONFIDENTIAL_SYSTEM_PROMPT",
     ):
         assert needle not in msgs, f"LEAKED secret needle: {needle!r}"
-    # No traceback / internal source path in the emitted record.
     assert not _has_traceback(caplog)
     assert "Traceback" not in msgs
 
 
-def test_adversarial_secret_in_object_repr_does_not_leak(caplog):
-    """The failing object's ``__repr__`` / ``__str__`` must never be invoked —
-    so a value-bearing or exception-raising repr cannot leak either."""
+def test_adversarial_secret_in_exception_class_name_does_not_leak(caplog):
+    """P2-1: a dynamically named exception class must not leak its name."""
+    EvilExc = type(
+        "customer_ssn_123_45_6789_sk_live_TEST_SECRET_Error", (RuntimeError,), {}
+    )
 
+    class Broken:
+        model_fields = {}
+
+        def model_dump(self):
+            raise EvilExc("boom")
+
+    @shield(purpose="support", scope=["name"])
+    def f():
+        return Broken()
+
+    with caplog.at_level(logging.WARNING, logger="aegis"):
+        result = f()
+
+    msgs = _messages(caplog)
+    assert result == ""
+    assert "conversion_failed" in msgs  # fixed marker still emitted
+    for needle in ("customer_ssn", "123_45_6789", "123-45-6789", "sk_live_TEST_SECRET"):
+        assert needle not in msgs, f"LEAKED via exception class name: {needle!r}"
+
+
+def test_adversarial_secret_in_object_type_name_does_not_leak(caplog):
+    """P2-1: a dynamically named return-object class must not leak its name."""
+
+    def _boom(self):
+        raise RuntimeError("boom")
+
+    EvilType = type(
+        "patient_name_Alice_diagnosis_HIV_CONFIDENTIAL_SYSTEM_PROMPT_Model",
+        (object,),
+        {"model_fields": {}, "model_dump": _boom},
+    )
+
+    @shield(purpose="support", scope=["name"])
+    def f():
+        return EvilType()
+
+    with caplog.at_level(logging.WARNING, logger="aegis"):
+        result = f()
+
+    msgs = _messages(caplog)
+    assert result == ""
+    assert "conversion_failed" in msgs
+    for needle in (
+        "patient_name",
+        "Alice",
+        "diagnosis",
+        "HIV",
+        "CONFIDENTIAL_SYSTEM_PROMPT",
+    ):
+        assert needle not in msgs, f"LEAKED via object type name: {needle!r}"
+
+
+def test_adversarial_secret_in_unsupported_object_type_name_does_not_leak(caplog):
+    """P2-1: the unsupported-return-shape path must not leak the type name."""
+    EvilOpaque = type("stripe_secret_key_sk_live_OPAQUE_LEAK_Thing", (object,), {})
+
+    @shield(purpose="info", scope=["x"])
+    def f():
+        return EvilOpaque()  # not convertible, not dict/list → unsupported
+
+    with caplog.at_level(logging.WARNING, logger="aegis"):
+        result = f()
+
+    msgs = _messages(caplog)
+    assert result == ""
+    assert "unsupported_return_shape" in msgs  # fixed marker
+    assert "sk_live_OPAQUE_LEAK" not in msgs
+    assert "stripe_secret_key" not in msgs
+
+
+def test_adversarial_secret_in_object_repr_does_not_leak(caplog):
     class EvilRepr:
         model_fields = {}
 
@@ -157,9 +216,6 @@ def test_adversarial_secret_in_object_repr_does_not_leak(caplog):
 
 
 def test_object_repr_that_raises_does_not_break_diagnostic(caplog):
-    """If the failing object's ``__repr__`` itself raises, the diagnostic must
-    still emit cleanly (because we never call repr on the instance)."""
-
     class ReprBomb:
         model_fields = {}
 
@@ -180,8 +236,8 @@ def test_object_repr_that_raises_does_not_break_diagnostic(caplog):
 
     msgs = _messages(caplog)
     assert result == ""
-    assert "conversion failed" in msgs
-    assert "ReprBomb" in msgs
+    assert "conversion_failed" in msgs
+    assert "ReprBomb" not in msgs  # object type name withheld
     assert "sk_live_BOOM" not in msgs
 
 
@@ -190,9 +246,6 @@ def test_dataclass_conversion_failure_diagnostic(caplog):
 
     @dataclasses.dataclass
     class Weird:
-        # asdict() deep-copies leaf values; a field whose __deepcopy__ raises
-        # breaks the conversion. The deepcopy error message embeds a secret-like
-        # token to prove it is not echoed.
         bad: object = dataclasses.field(default_factory=_Unpicklable)
 
     @shield(purpose="support", scope=["bad"])
@@ -204,16 +257,17 @@ def test_dataclass_conversion_failure_diagnostic(caplog):
 
     msgs = _messages(caplog)
     assert result == ""
-    assert "asdict" in msgs  # converter shape surfaced
+    assert "stage=dataclass_conversion" in msgs  # fixed label surfaced
     assert "000-00-0000" not in msgs  # deepcopy error message NOT echoed
+    assert "Weird" not in msgs  # object type name withheld
     assert not _has_traceback(caplog)
     assert "cannot filter str" not in msgs
 
 
-def test_genuinely_unsupported_type_keeps_its_diagnostic(caplog):
-    # A bare scalar never enters a conversion branch — it is genuinely
-    # unsupported, and must keep the existing "cannot filter int" message,
-    # NOT the conversion-failure diagnostic.
+def test_genuinely_unsupported_type_uses_distinct_fixed_marker(caplog):
+    # A bare scalar is genuinely unsupported → distinct fixed marker
+    # ``unsupported_return_shape``, NOT the conversion-failure marker, and the
+    # type name is withheld.
     @shield(purpose="info", scope=["x"])
     def f():
         return 42
@@ -223,8 +277,11 @@ def test_genuinely_unsupported_type_keeps_its_diagnostic(caplog):
 
     msgs = _messages(caplog)
     assert result == ""
-    assert "cannot filter int" in msgs
-    assert "conversion failed" not in msgs
+    assert "unsupported_return_shape" in msgs
+    assert "conversion_failed" not in msgs  # distinguished from conversion failure
+    assert "cannot filter int" not in msgs  # old type-bearing message gone
+    # (type-name withholding for opaque/dynamic types is covered by
+    # test_adversarial_secret_in_unsupported_object_type_name_does_not_leak)
 
 
 def test_deny_fields_conversion_failure_also_fail_closed(caplog):
@@ -243,6 +300,6 @@ def test_deny_fields_conversion_failure_also_fail_closed(caplog):
 
     msgs = _messages(caplog)
     assert result == ""
-    assert "model_dump" in msgs
+    assert "stage=pydantic_model_dump" in msgs
     assert "555-55-5555" not in msgs
     assert "cannot filter str" not in msgs

@@ -70,11 +70,15 @@ loader raised raw `ValueError` / `FileNotFoundError` / `ImportError`).
 > catchable as `AegisConfigError` / `ValueError` while exposing `.code` /
 > `.remediation` / `.docs_url` / `.to_dict()`.
 >
-> **Diagnostics are minimum-disclosure (S018 P1).** The Python conversion-failure
-> and local-history-failure log diagnostics withhold the raw exception message,
-> traceback, failing-object values, and the `AEGIS_HISTORY_PATH` value by
-> default — they surface only safe identifiers (converter/exception *class*
-> name, a fixed remediation). This keeps PII/secrets carried by a failing record
+> **Diagnostics are minimum-disclosure (S018 P1 + P2).** The Python
+> conversion-failure and local-history-failure log diagnostics are composed of
+> **only SDK-controlled fixed strings** — a fixed marker
+> (`conversion_failed` / `unsupported_return_shape` / `history_write_failed`), a
+> fixed `stage=<label>` enum, a fixed remediation, and the validated `trace_id`.
+> They withhold the raw exception message, traceback, failing-object `repr`, the
+> `AEGIS_HISTORY_PATH` value, **and the type/exception class names** (which are
+> application-controlled identifiers — a dynamically named class would otherwise
+> leak its name, S018 P2-1). This keeps PII/secrets carried by a failing record
 > or a path out of the default log surface; the data path already fails closed.
 
 | Code | Thrown when | Remediation |

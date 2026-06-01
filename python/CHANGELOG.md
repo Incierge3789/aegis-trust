@@ -36,33 +36,37 @@
   `get_purpose_policy()` still degrades to `None` for "no config available"
   (missing file / missing `yaml` dep) and still surfaces a malformed
   `aegis.yaml`.
-- **Conversion-failure diagnostic — minimum-disclosure by default (D1, P1
+- **Conversion-failure diagnostic — minimum-disclosure by default (D1, P1 + P2
   secret-leak hardening).** When a record→dict conversion (`model_dump` /
   `.dict` / `dataclasses.asdict` / SQLAlchemy `__table__` walk / NamedTuple
-  `_asdict`) *raises*, `@shield` emits a developer diagnostic that **withholds
-  the exception message, the traceback (no `exc_info`), and any view of the
-  failing object** (only the object *type name* is read — the instance's
-  `__repr__` / `__str__` is never invoked). It surfaces safe identifiers only:
-  that a conversion failed, the converter shape, the object type name, the
-  exception *class* name, a fixed remediation, and the active `trace_id` if one
-  is set. A failing record's exception message routinely echoes the very field
-  values being filtered (`customer_ssn=…`, `stripe_secret_key=…`, PHI, internal
-  prompts); the earlier S018 build logged that message + full traceback, which
-  an adversarial audit showed leaked PII/secrets through the default log
-  surface even though the data-*return* path failed closed. There is no opt-in
-  to dump the raw message/traceback — minimum-disclosure is the only mode. The
-  genuinely-unsupported return type (a bare scalar) still gets its distinct
-  "cannot filter `<type>`" diagnostic. Fail-closed unchanged.
-- **Local-history write-failure visibility — path/message withheld (D3, P1
-  hardening).** With `AEGIS_HISTORY=1`, a history store init/write failure no
+  `_asdict`) *raises*, `@shield` emits a developer diagnostic composed of
+  **only SDK-controlled fixed strings**: a fixed `conversion_failed` marker, a
+  fixed `stage=<label>` enum (`pydantic_model_dump` / `pydantic_dict` /
+  `sqlalchemy_conversion` / `dataclass_conversion` / `namedtuple_conversion`),
+  a fixed remediation, and the validated `trace_id`. It **withholds every
+  application-controlled string**: the exception message, the traceback (no
+  `exc_info`), the object's `repr`/`str` (dunders never invoked), **and the
+  type/exception class names** (`type(data).__name__` / `type(cause).__name__`).
+  Rationale: (P1) a failing record's exception message routinely echoes the
+  filtered field values (`customer_ssn=…`, `stripe_secret_key=…`, PHI, internal
+  prompts) — the original build logged that + full traceback; (P2) the first
+  fix still surfaced the type/exception *class names*, and an independent
+  re-audit showed a dynamically named class (e.g.
+  `type("customer_ssn_…_Error", …)`) leaks its name. No opt-in to dump the raw
+  detail — minimum-disclosure is the only mode. The genuinely-unsupported
+  return type gets a distinct fixed `unsupported_return_shape` marker (also
+  withholding the type name). Fail-closed unchanged.
+- **Local-history write-failure visibility — fixed-string diagnostic (D3, P1 +
+  P2 hardening).** With `AEGIS_HISTORY=1`, a history store init/write failure no
   longer (a) escapes and breaks the `@shield` data path (store init runs inside
   the guarded block, Node parity), or (b) logs a cause-less line. It emits a
-  one-shot developer diagnostic stating local audit evidence is **not** being
-  recorded and naming the exception *class*, but **withholds the
-  `AEGIS_HISTORY_PATH` value** (it may embed tenant / user / secret path
-  segments) and the raw exception message + traceback (an `OSError` message
-  echoes the path). Local developer diagnostic only — not an authoritative-audit
-  guarantee.
+  one-shot diagnostic composed of **only SDK-controlled fixed strings**
+  (`history_write_failed local_evidence_not_recorded=true` + fixed remediation +
+  the "not an authoritative audit record" disclaimer). It **withholds the
+  `AEGIS_HISTORY_PATH` value** (may embed tenant / user / secret path segments),
+  the raw exception message + traceback (an `OSError` message echoes the path),
+  **and the exception class name** (P2 — an application-controlled identifier).
+  Local developer diagnostic only — not an authoritative-audit guarantee.
 - Real-framework verification: the conversion-failure leak/fail-closed tests
   now run against the genuine Pydantic v2, Pydantic v1, and SQLAlchemy code
   paths (added to the `dev` / `frameworks` extras), not duck-typed simulations.

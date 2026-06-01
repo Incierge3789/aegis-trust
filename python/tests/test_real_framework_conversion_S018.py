@@ -59,7 +59,7 @@ def _assert_no_leak(caplog, result):
         assert needle not in msgs, f"LEAKED: {needle!r}"
     assert not _has_traceback(caplog)
     assert "Traceback" not in msgs
-    assert "conversion failed" in msgs  # safe diagnostic still emitted
+    assert "conversion_failed" in msgs  # safe fixed diagnostic still emitted
 
 
 @pytest.fixture(autouse=True)
@@ -91,7 +91,7 @@ def test_real_pydantic_v2_model_dump_failure(caplog):
     with caplog.at_level(logging.WARNING, logger="aegis"):
         result = fetch()
 
-    assert "model_dump" in _messages(caplog)  # the real v2 converter shape
+    assert "stage=pydantic_model_dump" in _messages(caplog)  # fixed stage label
     _assert_no_leak(caplog, result)
 
 
@@ -116,7 +116,7 @@ def test_real_pydantic_v1_dict_failure(caplog):
     with caplog.at_level(logging.WARNING, logger="aegis"):
         result = fetch()
 
-    assert "v1" in _messages(caplog).lower()  # the real v1 converter shape
+    assert "stage=pydantic_dict" in _messages(caplog)  # fixed stage label
     _assert_no_leak(caplog, result)
 
 
@@ -147,7 +147,7 @@ def test_real_sqlalchemy_table_walk_failure(caplog):
         result = fetch()
 
     msgs = _messages(caplog)
-    assert "SQLAlchemy" in msgs  # the real ORM converter shape
+    assert "stage=sqlalchemy_conversion" in msgs  # fixed stage label
     # Fail-closed + no leak. (Note: this path's exception class is surfaced as a
     # safe identifier; the stored ssn value must never appear.)
     assert result == ""
