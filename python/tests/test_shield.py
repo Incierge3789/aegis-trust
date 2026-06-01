@@ -712,7 +712,7 @@ def test_scope_leaf_over_list_of_dicts_drops_with_warning(caplog):
 
     # users key is dropped entirely; count is also absent (not in scope).
     assert result == {}
-    assert "users.<field>" in caplog.text
+    assert "scope_bare_field_over_record_collection" in caplog.text
     assert "fail-closed" in caplog.text
 
 
@@ -729,7 +729,7 @@ def test_scope_leaf_over_heterogeneous_list_also_drops(caplog):
 
     # First element is int (not dict), but the third is dict — any() catches it.
     assert result == {}
-    assert "items.<field>" in caplog.text
+    assert "scope_bare_field_over_record_collection" in caplog.text
 
 
 def test_scope_leaf_over_empty_list_passes():
@@ -780,7 +780,7 @@ def test_scope_leaf_over_tuple_of_dicts_drops_like_list(caplog):
 
     # Tuple of dicts is the same silent-pass footgun — drop fail-closed.
     assert result == {}
-    assert "pair.<field>" in caplog.text
+    assert "scope_bare_field_over_record_collection" in caplog.text
 
 
 def test_scope_leaf_over_tuple_of_primitives_passes():
@@ -808,7 +808,7 @@ def test_scope_leaf_over_mapping_proxy_list_drops(caplog):
         result = f()
 
     assert result == {}
-    assert "users.<field>" in caplog.text
+    assert "scope_bare_field_over_record_collection" in caplog.text
 
 
 def test_scope_leaf_over_userdict_list_drops(caplog):
@@ -827,7 +827,7 @@ def test_scope_leaf_over_userdict_list_drops(caplog):
         result = f()
 
     assert result == {}
-    assert "users.<field>" in caplog.text
+    assert "scope_bare_field_over_record_collection" in caplog.text
 
 
 def test_scope_leaf_over_simplenamespace_list_drops(caplog):
@@ -849,7 +849,7 @@ def test_scope_leaf_over_simplenamespace_list_drops(caplog):
         result = f()
 
     assert result == {}
-    assert "users.<field>" in caplog.text
+    assert "scope_bare_field_over_record_collection" in caplog.text
 
 
 def test_scope_leaf_over_custom_object_list_drops(caplog):
@@ -869,7 +869,7 @@ def test_scope_leaf_over_custom_object_list_drops(caplog):
         result = f()
 
     assert result == {}
-    assert "users.<field>" in caplog.text
+    assert "scope_bare_field_over_record_collection" in caplog.text
 
 
 def test_deny_fields_at_leaf_over_list_of_dicts_drops_whole_key():

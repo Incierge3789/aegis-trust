@@ -594,11 +594,11 @@ def _filter_dict(data: dict[str, Any], path_tree: dict[str, Any]) -> dict[str, A
                 kept = _iter_preserving(v)
                 if any(_is_record_like(x) for x in kept):
                     logger.warning(
-                        "shield: scope=['%s'] over a collection of record-like "
-                        "elements drops the key (fail-closed). "
-                        "Use '%s.<field>' to filter each element.",
-                        k,
-                        k,
+                        "shield: scope_bare_field_over_record_collection — a bare "
+                        "scope field matched a collection of record-like elements; "
+                        "dropping the key (fail-closed). Use the dot-notation "
+                        "'<field>.<subfield>' form to filter each element. The "
+                        "field key is withheld (application-controlled identifier)."
                     )
                     continue
                 result[k] = kept
