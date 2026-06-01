@@ -36,10 +36,12 @@ class _ConversionFailed:
     Distinct from a *genuinely unsupported* return type (a bare scalar /
     opaque object that was never convertible). Carrying this sentinel out of
     :func:`_to_filterable` lets the filter helpers fail closed **without**
-    re-attributing the failure to ``"cannot filter str"`` — the real cause
-    has already been logged at the conversion site (S018 D1). ``__slots__``
-    keeps it record-like to :func:`_freeze_single_pass` so it passes through
-    the normalize step untouched.
+    re-attributing the failure to ``"cannot filter str"`` — a non-leaking
+    developer diagnostic has already been emitted at the conversion site
+    (S018 D1; the raw cause/traceback are withheld by default — see
+    :func:`_record_conversion_failure`). ``__slots__`` keeps it record-like to
+    :func:`_freeze_single_pass` so it passes through the normalize step
+    untouched.
     """
 
     __slots__ = ()
@@ -51,22 +53,44 @@ _CONVERSION_FAILED = _ConversionFailed()
 def _record_conversion_failure(
     shape: str, data: Any, cause: Exception
 ) -> _ConversionFailed:
-    """Developer diagnostic for a conversion that raised (S018 D1).
+    """Non-leaking developer diagnostic for a conversion that raised
+    (S018 D1, P1 secret-leak hardening).
 
-    Surfaces the *original* cause (type + message + traceback) so a developer
-    can see why e.g. a Pydantic ``model_dump()`` failed, rather than the
-    downstream "cannot filter str" symptom. Fail-closed is preserved: the
-    caller returns empty and the unconverted value is never passed through.
+    The default surface deliberately **withholds** the exception *message*, the
+    traceback (no ``exc_info``), and any view of the unconverted value: only
+    ``type(data).__name__`` is read, which never invokes the instance's
+    ``__repr__`` / ``__str__`` (so a value-bearing or exception-raising repr
+    cannot leak either). A failing record's exception message frequently echoes
+    the very field values being filtered (``customer_ssn=...``,
+    ``stripe_secret_key=...``, PHI, internal prompts); emitting it to the
+    default log surface would violate the minimum-disclosure contract even
+    though the data-*return* path already fails closed.
+
+    Surfaced — all safe identifiers only: that a conversion failed, the
+    converter ``shape``, the object's *type name*, the exception *class name*,
+    a fixed remediation, and the active ``trace_id`` when one is set (trace_ids
+    are shape-validated to exclude secrets — see ``trace._assert_trace_id``).
+    No opt-in to dump the raw message/traceback is provided: minimum-disclosure
+    is the only mode (safe by construction).
     """
+    try:
+        from aegis_trust.trace import get_trace_context
+
+        _tc = get_trace_context()
+        trace_id = _tc.trace_id if _tc is not None else "-"
+    except Exception:
+        trace_id = "-"
     logger.warning(
-        "shield: %s conversion failed for return value of type %r — "
-        "original cause %s: %s. Returning empty (fail-closed); the "
-        "unconverted value was NOT passed through.",
+        "shield: %s conversion failed (%s) for return value of type %s — "
+        "returning empty (fail-closed); the unconverted value was NOT passed "
+        "through. The exception message and traceback are withheld by default "
+        "to avoid leaking sensitive values (PII / secrets) into logs; "
+        "reproduce in a trusted local environment to inspect the cause. "
+        "trace_id=%s",
         shape,
-        type(data).__name__,
         type(cause).__name__,
-        cause,
-        exc_info=cause,
+        type(data).__name__,
+        trace_id,
     )
     return _CONVERSION_FAILED
 

@@ -13,6 +13,17 @@
   the `aegis.wrap.*` codes) and Python-only codes (`aegis.shield.spec.conflict`,
   `aegis.shield.deny_fields.empty`, `aegis.shield.field_path.invalid`) reflect
   real, intentional API differences, not gaps to close.
+- **P1 follow-up (Python-side, doc updated here).** A parallel adversarial audit
+  found that the Python conversion-failure and local-history-failure log
+  *diagnostics* leaked PII/secrets (exception message + traceback; raw
+  `AEGIS_HISTORY_PATH`) on the default surface, and that the interim Python
+  envelope had broken `except FileNotFoundError` / `except OSError` /
+  `except ImportError`. Both are fixed in the Python SDK (diagnostics are now
+  minimum-disclosure; config errors restore the natural builtin catches via
+  `AegisConfigFileNotFoundError` / `AegisConfigImportError`). The shared error
+  registry (`node/docs/errors/README.md`) records the catch-compat and
+  minimum-disclosure guarantees. Node behaviour is unchanged (Node already
+  withheld these); no Node code change.
 
 ### failure-UX hardening + claim-integrity (internal-ops/sprint_016)
 

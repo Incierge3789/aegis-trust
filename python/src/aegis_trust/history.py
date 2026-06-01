@@ -397,10 +397,16 @@ def record_if_enabled(
     dirs) runs *inside* the try so a first-call init failure on an unwritable
     path no longer escapes and breaks the @shield data path (parity with Node
     history.ts, where getStore() is inside the try). On any failure a
-    developer diagnostic naming the cause and the target path is emitted once
-    (not per-call) so a developer who set ``AEGIS_HISTORY=1`` to capture local
-    audit evidence learns it is NOT being written. This is a local developer
-    diagnostic, not an authoritative-audit guarantee.
+    developer diagnostic is emitted once (not per-call) so a developer who set
+    ``AEGIS_HISTORY=1`` to capture local audit evidence learns it is NOT being
+    written. This is a local developer diagnostic, not an authoritative-audit
+    guarantee.
+
+    S018 P1 hardening: the diagnostic deliberately **withholds** the
+    ``AEGIS_HISTORY_PATH`` value (it may embed tenant / user / secret-bearing
+    path segments) and the raw exception message + traceback (an ``OSError``
+    message echoes the very path). Only the exception *class name* and a fixed
+    remediation are surfaced.
     """
     global _history_warned
     try:
@@ -419,19 +425,14 @@ def record_if_enabled(
     except Exception as exc:
         if not _history_warned:
             _history_warned = True
-            path = os.environ.get(
-                "AEGIS_HISTORY_PATH",
-                str(Path.home() / ".aegis" / "history.db"),
-            )
             logger.error(
                 "aegis-trust: AEGIS_HISTORY=1 but the local history could not be "
-                "written (path=%s) — %s: %s. Local audit evidence is NOT being "
-                "recorded; fix the path/permissions or unset AEGIS_HISTORY. "
-                "(Local developer diagnostic only — not an authoritative audit record.)",
-                path,
+                "written (%s) — local audit evidence is NOT being recorded. "
+                "Check the path/permissions configured via AEGIS_HISTORY_PATH "
+                "(its value is withheld here to avoid leaking tenant / user / "
+                "secret path segments), or unset AEGIS_HISTORY. (Local developer "
+                "diagnostic only — not an authoritative audit record.)",
                 type(exc).__name__,
-                exc,
-                exc_info=exc,
             )
 
 
