@@ -11,7 +11,12 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from aegis_trust.errors import AegisConfigError, aegis_docs_url
+from aegis_trust.errors import (
+    AegisConfigError,
+    AegisConfigFileNotFoundError,
+    AegisConfigImportError,
+    aegis_docs_url,
+)
 from aegis_trust.shield import _validate_field_path
 
 # Module-level cache
@@ -43,11 +48,20 @@ def load_config(path: str | None = None) -> dict[str, Any]:
         Parsed config dict.
 
     Raises:
-        AegisConfigError: If pyyaml is missing, the file is not found, the YAML
-            fails to parse, or the config structure is invalid. The envelope
-            carries a machine-parseable ``.code`` matching the Node SDK
-            (S018 D2). ``AegisConfigError`` subclasses :class:`ValueError`, so
-            existing ``except ValueError`` callers keep working.
+        AegisConfigImportError: If the optional ``yaml`` dependency is missing.
+            **Is an** :class:`ImportError` (so ``except ImportError`` keeps
+            working — S018 P1 catch-compat fix) **and** an ``AegisConfigError`` /
+            :class:`ValueError` carrying ``.code == "aegis.config.yamlMissing"``.
+        AegisConfigFileNotFoundError: If no config file is found, or an explicit
+            ``path`` does not exist. **Is a** :class:`FileNotFoundError` (hence
+            also an :class:`OSError`, so ``except FileNotFoundError`` /
+            ``except OSError`` keep working — S018 P1 catch-compat fix) **and**
+            an ``AegisConfigError`` / :class:`ValueError` carrying
+            ``.code == "aegis.config.fileNotFound"``.
+        AegisConfigError: If the YAML fails to parse or the config structure is
+            invalid. Subclasses :class:`ValueError` (``except ValueError`` keeps
+            working). All three carry the machine-parseable ``.code`` /
+            ``.remediation`` / ``.docs_url`` / ``.to_dict()`` envelope (S018 D2).
     """
     global _config, _config_path
 
@@ -57,7 +71,10 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     try:
         import yaml
     except ImportError as exc:
-        raise AegisConfigError(
+        # S018 P1 catch-compat: AegisConfigImportError IS an ImportError, so
+        # pre-S018 `except ImportError` callers keep working — and it still
+        # carries the rich envelope + is catchable as AegisConfigError/ValueError.
+        raise AegisConfigImportError(
             "pyyaml is required to use aegis.yaml config. "
             "Install it with: pip install aegis-trust[yaml]",
             code="aegis.config.yamlMissing",
@@ -68,7 +85,9 @@ def load_config(path: str | None = None) -> dict[str, Any]:
 
     resolved = path or _find_config_file()
     if resolved is None:
-        raise AegisConfigError(
+        # S018 P1 catch-compat: AegisConfigFileNotFoundError IS a
+        # FileNotFoundError (hence OSError), restoring the pre-S018 natural catch.
+        raise AegisConfigFileNotFoundError(
             "No aegis config file found. Create aegis.yaml or set AEGIS_CONFIG env var.",
             code="aegis.config.fileNotFound",
             remediation="Create `aegis.yaml` in CWD or set AEGIS_CONFIG to a YAML file path.",
@@ -78,9 +97,10 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     # S018 D2 (Node config.ts S016 P1 parity): an explicit `path` argument
     # bypasses _find_config_file()'s isfile() guard, so a missing explicit path
     # escaped as a raw FileNotFoundError from open() — breaking the
-    # machine-parseable contract. Guard it with the same envelope.
+    # machine-parseable contract. Guard it with the same envelope (which is
+    # itself still a FileNotFoundError — S018 P1 catch-compat).
     if not os.path.isfile(resolved):
-        raise AegisConfigError(
+        raise AegisConfigFileNotFoundError(
             f"aegis config file not found: {resolved}",
             code="aegis.config.fileNotFound",
             remediation=(

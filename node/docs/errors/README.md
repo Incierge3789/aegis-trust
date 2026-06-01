@@ -61,6 +61,22 @@ All `aegis.config.*` codes below are emitted by **both** SDKs with identical
 `code` strings (Python reached parity in S018 D2; before that the Python
 loader raised raw `ValueError` / `FileNotFoundError` / `ImportError`).
 
+> **Python catch-compatibility (S018 P1).** The Python envelope is layered
+> *onto* the builtin exception each path historically raised, so every natural
+> `except` keeps working: `aegis.config.fileNotFound` is raised as
+> `AegisConfigFileNotFoundError` (**is a** `FileNotFoundError` → `OSError`),
+> `aegis.config.yamlMissing` as `AegisConfigImportError` (**is an**
+> `ImportError`), and both — like the config-structure errors — remain
+> catchable as `AegisConfigError` / `ValueError` while exposing `.code` /
+> `.remediation` / `.docs_url` / `.to_dict()`.
+>
+> **Diagnostics are minimum-disclosure (S018 P1).** The Python conversion-failure
+> and local-history-failure log diagnostics withhold the raw exception message,
+> traceback, failing-object values, and the `AEGIS_HISTORY_PATH` value by
+> default — they surface only safe identifiers (converter/exception *class*
+> name, a fixed remediation). This keeps PII/secrets carried by a failing record
+> or a path out of the default log surface; the data path already fails closed.
+
 | Code | Thrown when | Remediation |
 |---|---|---|
 | `aegis.config.yamlMissing` | `loadConfig()` and the optional `yaml` dep is not installed. | `npm install yaml` |
