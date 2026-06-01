@@ -373,7 +373,13 @@ def _get_store() -> HistoryStore | None:
             str(Path.home() / ".aegis" / "history.db"),
         )
         _store = HistoryStore(db_path)
-        logger.info("aegis history enabled — %s", db_path)
+        # Minimum-disclosure (S018 P2-3c): do not log the AEGIS_HISTORY_PATH
+        # value on the success path either — it may embed tenant / user /
+        # secret-bearing segments. Surface only that history is enabled.
+        logger.info(
+            "aegis history enabled (writing to the path configured via "
+            "AEGIS_HISTORY_PATH; value withheld)"
+        )
     return _store
 
 

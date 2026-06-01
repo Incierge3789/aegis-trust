@@ -689,7 +689,8 @@ def _to_filterable(data: Any) -> Any:
        existing non-dict/non-list fail-closed rule.
 
     A conversion that *raises* returns the :data:`_CONVERSION_FAILED`
-    sentinel (after logging the original cause — S018 D1) so the downstream
+    sentinel (after emitting a fixed-string, non-leaking diagnostic — S018
+    D1/P1/P2; the original cause is NOT logged) so the downstream
     fail-closed path fires without re-attributing the failure to "cannot
     filter str". A conversion that *succeeds but returns the wrong shape*
     (a confused-deputy surface) returns ``""`` as before.
