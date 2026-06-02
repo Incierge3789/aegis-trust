@@ -125,10 +125,9 @@ export { AUDIT_SCHEMA_VERSION } from "./constants.js";
 //   "deprecated" → marked for removal in next major.
 export const STABILITY_LEVEL: "preview" | "stable" | "deprecated" = "preview";
 
-// Aegis-Api-Version dated header (Stripe-model 7-axis API versioning / productization-ops/sprint_003 Phase C).
+// Aegis-Api-Version dated header (Stripe-model dated API versioning).
 // Date-based public contract version. Clients send `Aegis-Api-Version: <YYYY-MM-DD>`;
-// unset → SDK uses this default. Registry + sunset policy:
-// ~/ops-meta/ops/productization-ops/data/api_versioning_policy.yaml
+// unset → SDK uses this default.
 // Sunset: 18-month notice + 6-month deprecation warning.
 export const AEGIS_API_VERSION = "2026-05-18";
 export const AEGIS_API_VERSION_HEADER = "Aegis-Api-Version";

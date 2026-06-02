@@ -46,3 +46,8 @@ aegis-sandbox-audit.jsonl
 .env.local
 .pypirc
 .npmrc
+
+# Internal sprint / audit artifacts — never publish to the public repo.
+# These hold ops-internal review evidence (exposure audits, cross-review logs)
+# that reference private substrate paths. Kept local-only.
+deploy/

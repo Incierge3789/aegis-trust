@@ -171,8 +171,7 @@ export class AegisClient {
   }
 
   private authHeaders(): Record<string, string> {
-    // Always attach the Aegis-Api-Version dated header (productization-ops/sprint_003 Phase C).
-    // Registry + sunset: ~/ops-meta/ops/productization-ops/data/api_versioning_policy.yaml
+    // Always attach the Aegis-Api-Version dated header.
     const headers: Record<string, string> = {
       "Aegis-Api-Version": "2026-05-18",
     };

@@ -92,7 +92,7 @@ markers = [
 ]
 
 [tool.mypy]
-# productization-ops type_safety verifier runs `mypy --strict .` from package
+# Type-safety gate runs `mypy --strict .` from package
 # root. Scope the strict check to hand-written sources (src/aegis_trust). The
 # _generated/ OpenAPI client is auto-generated and exempt from hand-typing
 # standards; examples/, tests/, scripts/, docs/ are not publish artifact.

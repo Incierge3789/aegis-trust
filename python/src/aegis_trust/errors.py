@@ -6,7 +6,7 @@ and follow the docs_url for canonical guidance. Mirror of the Sentry
 archetype error envelope — no free-text guessing required for retry.
 
 Python port of TypeScript :mod:`aegis-trust` ``src/errors.ts``
-(introduced in v0.9.0-rc1 productization-ops/sprint_001).
+(introduced in v0.9.0-rc1).
 """
 
 from __future__ import annotations

@@ -173,7 +173,7 @@ Paired with PyPI `aegis-trust==0.9.0rc8` (cross-SDK version-lock).
 
 ### Changed — release pipeline now runs a fail-closed 9-verifier gate before publish
 
-- `.github/workflows/release-attestation.yml`: new `productization-gate` job (runs-on self-hosted aegis-mac). Invokes `~/ops-meta/ops/productization-ops/_shared/scripts/dogfood_aegis_trust.sh` which exercises the productization-ops 9 verifiers (5 P0 + 4 P1) against the workspace. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. P1 verifiers in `MANUAL_PENDING` (per sprint_005 transitional doctrine) do not block.
+- `.github/workflows/release-attestation.yml`: a `productization-gate` job runs a fail-closed 9-verifier quality gate (5 P0 + 4 P1) against the workspace before any artifact is built. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. Pending P1 verifiers do not block.
 
 ### Changed — `CHANGELOG.md` is now english-first (artifact cleanup, no code change)
 

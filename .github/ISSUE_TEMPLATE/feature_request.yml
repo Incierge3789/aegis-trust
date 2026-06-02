@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest an enhancement for aegis-trust
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. This is a preview-stage, single-maintainer
+        project — please describe the **use case**, not just the feature, so we
+        can evaluate it against the trust-layer scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: The concrete situation that the feature would address.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like aegis-trust to do.
+    validations:
+      required: true
+  - type: dropdown
+    id: sdk
+    attributes:
+      label: Which SDK(s)?
+      multiple: true
+      options:
+        - Python
+        - TypeScript / Node
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
