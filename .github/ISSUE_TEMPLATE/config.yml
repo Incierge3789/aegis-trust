@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Incierge3789/aegis-trust/security/advisories/new
+    about: Report security issues privately — do NOT open a public issue. See SECURITY.md.
+  - name: Question / usage help
+    url: https://github.com/Incierge3789/aegis-trust/discussions
+    about: Ask usage questions in Discussions instead of the issue tracker.
+  - name: Commercial / licensing inquiry
+    url: mailto:contact@aegisagentcontrol.com
+    about: Enterprise, commercial, or licensing questions.

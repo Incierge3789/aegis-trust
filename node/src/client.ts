@@ -20,6 +20,7 @@ import {
   AegisHttpError,
   AegisIngestError,
 } from "./errors.js";
+import { AUDIT_SCHEMA_VERSION } from "./constants.js";
 import type {
   AuditChainStatus,
   FieldStats,
@@ -170,8 +171,7 @@ export class AegisClient {
   }
 
   private authHeaders(): Record<string, string> {
-    // Always attach the Aegis-Api-Version dated header (productization-ops/sprint_003 Phase C).
-    // Registry + sunset: ~/ops-meta/ops/productization-ops/data/api_versioning_policy.yaml
+    // Always attach the Aegis-Api-Version dated header.
     const headers: Record<string, string> = {
       "Aegis-Api-Version": "2026-05-18",
     };
@@ -369,6 +369,7 @@ export class AegisClient {
         timestamp: e.timestamp,
         count: e.count,
         deny_fields: [...e.denyFields],
+        schema_version: AUDIT_SCHEMA_VERSION,
         // Cross-review round 3 P0-4: trace_id propagation to gateway.
         ...(e.trace_id !== undefined ? { trace_id: e.trace_id } : {}),
       })),

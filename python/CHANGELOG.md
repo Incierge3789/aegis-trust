@@ -2,6 +2,103 @@
 
 ## [Unreleased]
 
+### Changed (productization-ops/sprint_018 — LITE error-parity remediation)
+- **Rich error envelope on the LITE validation/config path (D2).** The Python
+  LITE path now raises the already-public `AegisValidationError` /
+  `AegisConfigError` envelopes — carrying `.code` / `.remediation` /
+  `.docs_url` / `.to_dict()`. The `code` strings match the Node SDK for the
+  shared concepts (`aegis.shield.spec.required`, `aegis.shield.mode.invalid`,
+  and every `aegis.config.*` code), so a polyglot consumer can switch on the
+  same `code` across SDKs. New Python-side codes: `aegis.shield.spec.conflict`,
+  `aegis.shield.deny_fields.empty`, `aegis.shield.field_path.invalid`.
+  `load_config()` now also wraps YAML parse failures
+  (`aegis.config.yamlParseError`) and missing explicit paths
+  (`aegis.config.fileNotFound`) with the machine-parseable envelope.
+- **Backward compatibility — every natural `except` contract is preserved
+  (D2, P1 audit fix).** The rich envelope is layered *onto* the builtin
+  exception type each path historically raised, not in place of it:
+  - `except ValueError` — validation + config-structure errors
+    (`AegisValidationError` / `AegisConfigError` subclass `ValueError`).
+  - `except TypeError` — `scope` / `deny_fields` type-shape checks stay raw
+    `TypeError` (deliberately not ValueError-family).
+  - `except FileNotFoundError` / `except OSError` — a missing config file now
+    raises `AegisConfigFileNotFoundError`, which **is a** `FileNotFoundError`
+    (hence an `OSError`) as well as an `AegisConfigError` / `ValueError`.
+  - `except ImportError` — a missing optional `yaml` dependency now raises
+    `AegisConfigImportError`, which **is an** `ImportError` as well as an
+    `AegisConfigError` / `ValueError`.
+
+  All of the above simultaneously expose `.code` / `.remediation` /
+  `.docs_url` / `.to_dict()`. (An interim S018 build briefly broke
+  `except FileNotFoundError` / `except OSError` / `except ImportError` by
+  raising only a `ValueError`-based `AegisConfigError`; the adversarial audit
+  flagged it and this release restores the natural catches.)
+  `get_purpose_policy()` still degrades to `None` for "no config available"
+  (missing file / missing `yaml` dep) and still surfaces a malformed
+  `aegis.yaml`.
+- **Conversion-failure diagnostic — minimum-disclosure by default (D1, P1 + P2
+  secret-leak hardening).** When a record→dict conversion (`model_dump` /
+  `.dict` / `dataclasses.asdict` / SQLAlchemy `__table__` walk / NamedTuple
+  `_asdict`) *raises*, `@shield` emits a developer diagnostic composed of
+  **only SDK-controlled fixed strings**: a fixed `conversion_failed` marker, a
+  fixed `stage=<label>` enum (`pydantic_model_dump` / `pydantic_dict` /
+  `sqlalchemy_conversion` / `dataclass_conversion` / `namedtuple_conversion`),
+  and a fixed remediation. It **withholds every application-controlled string**:
+  the exception message, the traceback (no `exc_info`), the object's
+  `repr`/`str` (dunders never invoked), **the type/exception class names**
+  (`type(data).__name__` / `type(cause).__name__`), **and the `trace_id`**.
+  Rationale: (P1) a failing record's exception message routinely echoes the
+  filtered field values (`customer_ssn=…`, `stripe_secret_key=…`, PHI, internal
+  prompts) — the original build logged that + full traceback; (P2-1) the first
+  fix still surfaced the type/exception *class names*, and an independent
+  re-audit showed a dynamically named class (e.g.
+  `type("customer_ssn_…_Error", …)`) leaks its name; (P2-2) a second
+  independent CAG review noted the `trace_id` was still surfaced and its
+  validator (`^[A-Za-z0-9._:-]{1,128}$`) accepts secret-shaped tokens (e.g.
+  `sk_live_…`), so it is now withheld from the diagnostic too (the trace_id
+  feature + "never pass secrets as trace_id" contract remain for the audit
+  JSONL). No opt-in to dump the raw detail — minimum-disclosure is the only
+  mode. The genuinely-unsupported return type gets a distinct fixed
+  `unsupported_return_shape` marker (also withholding the type name).
+  Fail-closed unchanged.
+- **Local-history write-failure visibility — fixed-string diagnostic (D3, P1 +
+  P2 hardening).** With `AEGIS_HISTORY=1`, a history store init/write failure no
+  longer (a) escapes and breaks the `@shield` data path (store init runs inside
+  the guarded block, Node parity), or (b) logs a cause-less line. It emits a
+  one-shot diagnostic composed of **only SDK-controlled fixed strings**
+  (`history_write_failed local_evidence_not_recorded=true` + fixed remediation +
+  the "not an authoritative audit record" disclaimer). It **withholds the
+  `AEGIS_HISTORY_PATH` value** (may embed tenant / user / secret path segments),
+  the raw exception message + traceback (an `OSError` message echoes the path),
+  **and the exception class name** (P2 — an application-controlled identifier).
+  Local developer diagnostic only — not an authoritative-audit guarantee.
+- Real-framework verification: the conversion-failure leak/fail-closed tests
+  now run against the genuine Pydantic v2, Pydantic v1, and SQLAlchemy code
+  paths (added to the `dev` / `frameworks` extras), not duck-typed simulations.
+- Not a parity item: empty / Unicode `purpose` remains accepted in Python (it
+  is a free-text label, not a validated field — Node validates it). No `Actor` /
+  `Decision` / `resource_*` / proof / tamper-evidence / Core changes.
+
+### Added (productization-ops/sprint_017 — schema_version contract)
+- `schema_version` is now stamped on every audit event the SDK emits, from a
+  single source (`aegis_trust._constants.AUDIT_SCHEMA_VERSION = 1`, re-exported
+  by the package root). Wired to both surfaces consistently: local SQLite
+  history (`shield_history.schema_version INTEGER NOT NULL DEFAULT 1`;
+  `HistoryStore.record` / `record_idempotent` stamp it from the constant, so the
+  caller→store keyword signature is unchanged — this structurally prevents a
+  silent-failure drift class) and the `/shield/ingest` wire payload (additive
+  field; the aegis-core gateway ignores unknown fields, backward-compatible —
+  the gateway does not yet persist/use it).
+- Backward compatibility: existing v0.8.x/v0.9.x databases are migrated with an
+  idempotent `ALTER TABLE … ADD COLUMN schema_version INTEGER NOT NULL DEFAULT
+  1`; rows written before the column read back as `1`.
+- `schema_version` is intentionally **excluded** from the idempotency
+  `_payload_hash` — cross-language SHA-256 byte parity with the Node SDK is
+  unchanged.
+- Deferred (not implemented): typed `Actor`, `Decision` enum,
+  `resource_id`/`resource_type` (the latter is the schema_version=2 shape, gated
+  behind a separate decision).
+
 ## [0.9.0-rc8] — 2026-05-30 — cross-SDK version-lock (no Python code change)
 
 `productization-ops/sprint_015`. **No Python API or behavior change.** This SDK
@@ -17,8 +114,8 @@ bumped to keep the cross-SDK version-lock with npm `aegis-trust@0.9.0-rc8`.
 
 ### Changed — release pipeline now runs a fail-closed 9-verifier gate before publish
 
-- `.github/workflows/release-attestation.yml`: new `productization-gate` job (runs-on self-hosted aegis-mac). Invokes `~/ops-meta/ops/productization-ops/_shared/scripts/dogfood_aegis_trust.sh` which exercises the productization-ops 9 verifiers (5 P0 + 4 P1) against the workspace. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. P1 verifiers in `MANUAL_PENDING` (per sprint_005 transitional doctrine, e.g. `top_1_pct_readability` while the 5-oracle survey is queued, or `agent_callable_surface` for JSDoc-incomplete TS exports) do not block.
-- The gate substrate lives in `~/ops-meta/ops/productization-ops/`; the workflow assumes the self-hosted runner has that path. Different runner / clean machine → gate fails closed (`runner not found` exit 2). This is the productization-ops `pre_release_gate_productization.sh` literal contract, wired into the public release pipeline for the first time.
+- `.github/workflows/release-attestation.yml`: a `productization-gate` job runs a fail-closed 9-verifier quality gate (5 P0 + 4 P1) against the workspace before any artifact is built. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. Pending P1 verifiers (e.g. `top_1_pct_readability` while the 5-oracle survey is queued, or `agent_callable_surface` for JSDoc-incomplete TS exports) do not block.
+- The release runner provisions the quality-gate substrate out of band; on a runner without it the gate fails closed (`runner not found` exit 2). This is the first release where the gate is wired into the publish pipeline.
 
 ### Changed — `CHANGELOG.md` is now english-first (artifact cleanup, no code change)
 
@@ -168,8 +265,8 @@ back-compat shim slated for removal in **v2.0.0**.
 - Migration is a single sed: `sed -i 's/from aegis import/from aegis_trust import/g'`.
   Submodule paths: `aegis.X` → `aegis_trust.X`.
 
-### Added — Aegis-Api-Version dated header registry (productization-ops/data/)
-- `~/ops-meta/ops/productization-ops/data/api_versioning_policy.yaml`: dated
+### Added — Aegis-Api-Version dated header registry
+- Dated
   API version registry (`Aegis-Api-Version: 2026-05-18` initial), sunset policy
   (18-month notice + 6-month deprecation), stability levels, breaking-change
   classification, migration tooling requirements. SDK header install lands in

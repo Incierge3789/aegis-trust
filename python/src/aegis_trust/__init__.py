@@ -10,7 +10,7 @@
 #     from aegis_trust.config import load_config
 #     from aegis_trust.types import Mode  # only if you want to type-annotate the parameter
 #
-# v0.9.0-rc1 additions (productization-ops/sprint_001):
+# v0.9.0-rc1 additions:
 #     from aegis_trust.errors import AegisError, AegisValidationError, AegisConfigError, ...
 #     from aegis_trust.trace import trace_context, new_trace_id, get_trace_context
 #     from aegis_trust.history import HistoryStore  # .record_idempotent(key=..., ...)
@@ -54,9 +54,10 @@ __all__ = [
 ]
 __version__ = "0.9.0-rc8"
 
-# Schema version for audit event format (parity with npm aegis-trust
-# AUDIT_SCHEMA_VERSION). Bumped when audit record shape changes.
-AUDIT_SCHEMA_VERSION = 1
+# Schema version for the audit-event shape — single source in `_constants`
+# (S017 T4 / D-A). Re-exported here for the public API surface (parity with
+# npm aegis-trust AUDIT_SCHEMA_VERSION). Bumped when audit record shape changes.
+from aegis_trust._constants import AUDIT_SCHEMA_VERSION
 
 # Stability level — see docs/VERSIONING.md (mirrors npm SDK).
 #   "preview"    → v0.x.y-rc* : public API may change between rc tags.
@@ -64,9 +65,9 @@ AUDIT_SCHEMA_VERSION = 1
 #   "deprecated" → marked for removal in next major.
 STABILITY_LEVEL = "preview"
 
-# Aegis-Api-Version dated header (Stripe-model 7-axis API versioning / productization-ops/sprint_003 Phase C).
+# Aegis-Api-Version dated header (Stripe-model dated API versioning).
 # Date-based public contract version. Clients send `Aegis-Api-Version: <YYYY-MM-DD>`;
-# unset → SDK uses this default. Registry: ~/ops-meta/ops/productization-ops/data/api_versioning_policy.yaml
+# unset → SDK uses this default.
 # Sunset policy: 18-month notice + 6-month deprecation warning.
 AEGIS_API_VERSION = "2026-05-18"
 AEGIS_API_VERSION_HEADER = "Aegis-Api-Version"

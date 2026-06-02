@@ -25,19 +25,68 @@ can read `remediation`, fix its input, and retry without escalating to a human.
 
 ## Error codes (v0.9.0-rc1)
 
+**Cross-SDK contract (S018).** The `code` strings below are identical across
+the Node and Python SDKs for the shared validation/config concepts, so a
+polyglot consumer can switch on the same `code` regardless of language. The
+**SDK** column records which SDK actually raises each code today:
+
+- `both` — emitted by Node and Python with the same `code` string.
+- `node` / `python` — emitted by one SDK only (a deliberate API difference,
+  noted inline). These are not bugs to "fix to parity"; they reflect real
+  differences in each SDK's surface (e.g. Python treats `purpose` as a free
+  label and never rejects an empty one; Node types `mode` at compile time and
+  has a sync-FULL guard the Python decorator does not need).
+
+In Python every code below is carried by `AegisValidationError` /
+`AegisConfigError`, both of which subclass the built-in `ValueError`, so
+existing `except ValueError` callers keep working (backward-compat, S018 D2).
+
 ### shield / wrap input validation
 
-| Code | Thrown when | Remediation |
-|---|---|---|
-| `aegis.shield.purpose.required` | `shield({ purpose: "" })` or non-string purpose. | Pass a non-empty string to `purpose`. |
-| `aegis.wrap.purpose.required` | `wrap(value, { purpose: "" })` or non-string purpose. | Pass a non-empty string to `purpose`. |
+| Code | SDK | Thrown when | Remediation |
+|---|---|---|---|
+| `aegis.shield.purpose.required` | node | `shield({ purpose: "" })` or non-string purpose. (Python treats `purpose` as a free label — no validation.) | Pass a non-empty string to `purpose`. |
+| `aegis.wrap.purpose.required` | node | `wrap(value, { purpose: "" })` or non-string purpose. | Pass a non-empty string to `purpose`. |
+| `aegis.wrap.spec.required` | node | `wrap(value, { purpose })` with neither `scope` nor `denyFields`. | Pass `scope` or `denyFields`. |
+| `aegis.shield.spec.required` | both | `shield(purpose=...)` with neither `scope` nor `deny_fields` and no matching `aegis.yaml` purpose. | Pass `scope` (whitelist) or `deny_fields` (blacklist), or define the purpose in `aegis.yaml`. |
+| `aegis.shield.spec.conflict` | python | `shield(purpose, scope=[...], deny_fields=[...])` — both supplied. (Node enforces this at the config layer as `aegis.config.purpose.scopeDenyConflict`.) | Use `scope` OR `deny_fields`, never both. |
+| `aegis.shield.deny_fields.empty` | python | `shield(purpose, deny_fields=[])` — an empty deny list hides nothing. | Provide at least one field path, or use `scope`. |
+| `aegis.shield.mode.invalid` | both | A `mode` string that is not `lite` / `full` / `auto`. | Use `lite` / `full` / `auto`, or the `Mode` enum. |
+| `aegis.shield.mode.sync_full_unsupported` | node | `Mode.FULL` on a non-async wrapped function (no pre-execution await point to gate). | Declare the function `async` for FULL, or use LITE. |
+| `aegis.shield.field_path.invalid` | python | A `scope` / `deny_fields` path is empty, has a leading/trailing dot, or consecutive dots. (Node validates field-path shape only inside `aegis.yaml` — see `aegis.config.fieldPath.invalid`.) | Use dot-notation like `profile.age`. |
 
 ### aegis.yaml config
+
+All `aegis.config.*` codes below are emitted by **both** SDKs with identical
+`code` strings (Python reached parity in S018 D2; before that the Python
+loader raised raw `ValueError` / `FileNotFoundError` / `ImportError`).
+
+> **Python catch-compatibility (S018 P1).** The Python envelope is layered
+> *onto* the builtin exception each path historically raised, so every natural
+> `except` keeps working: `aegis.config.fileNotFound` is raised as
+> `AegisConfigFileNotFoundError` (**is a** `FileNotFoundError` → `OSError`),
+> `aegis.config.yamlMissing` as `AegisConfigImportError` (**is an**
+> `ImportError`), and both — like the config-structure errors — remain
+> catchable as `AegisConfigError` / `ValueError` while exposing `.code` /
+> `.remediation` / `.docs_url` / `.to_dict()`.
+>
+> **Diagnostics are minimum-disclosure (S018 P1 + P2).** The Python
+> conversion-failure and local-history-failure log diagnostics are composed of
+> **only SDK-controlled fixed strings** — a fixed marker
+> (`conversion_failed` / `unsupported_return_shape` / `history_write_failed`), a
+> fixed `stage=<label>` enum, and a fixed remediation.
+> They withhold the raw exception message, traceback, failing-object `repr`, the
+> `AEGIS_HISTORY_PATH` value, **the type/exception class names** (a dynamically
+> named class would otherwise leak its name, S018 P2-1), **and the `trace_id`**
+> (its validator accepts secret-shaped tokens, so it is withheld from the
+> diagnostic surface too — S018 P2-2). No application-controlled string reaches
+> the diagnostic surface. This keeps PII/secrets carried by a failing record
+> or a path out of the default log surface; the data path already fails closed.
 
 | Code | Thrown when | Remediation |
 |---|---|---|
 | `aegis.config.yamlMissing` | `loadConfig()` and the optional `yaml` dep is not installed. | `npm install yaml` |
-| `aegis.config.fileNotFound` | No `aegis.yaml` in CWD and `AEGIS_CONFIG` env not set. | Create `aegis.yaml` or set `AEGIS_CONFIG`. |
+| `aegis.config.fileNotFound` | No `aegis.yaml` in CWD and `AEGIS_CONFIG` env not set, **or** an explicit path passed to `load_config(path)` / `loadConfig(path)` does not exist. | Create `aegis.yaml`, set `AEGIS_CONFIG`, or pass a path to an existing file. |
 | `aegis.config.yamlParseError` | `yaml.parse()` failed on `aegis.yaml`. `cause` carries the parser exception. | Fix YAML syntax; run `yq . aegis.yaml` to locate the parse error. |
 | `aegis.config.topLevel.notMapping` | YAML root is not a mapping. | Restructure as `purposes: { ... }`. |
 | `aegis.config.purposes.notMapping` | `purposes` field is not a mapping. | Replace with `purposes: { support: { scope: [...] } }`. |

@@ -22,10 +22,76 @@ from datetime import datetime, timezone
 from typing import Any, Callable, TypeVar
 
 from aegis_trust.client import AegisClient
+from aegis_trust.errors import AegisValidationError, aegis_docs_url
 from aegis_trust.history import record_if_enabled
 from aegis_trust.types import IngestEntry, Mode, PolicySyncEntry
 
 logger = logging.getLogger("aegis")
+
+
+class _ConversionFailed:
+    """Sentinel: a record→dict conversion (model_dump / asdict / .dict /
+    ``__table__`` walk) raised before producing a filterable shape.
+
+    Distinct from a *genuinely unsupported* return type (a bare scalar /
+    opaque object that was never convertible). Carrying this sentinel out of
+    :func:`_to_filterable` lets the filter helpers fail closed **without**
+    re-attributing the failure to ``"cannot filter str"`` — a non-leaking
+    developer diagnostic has already been emitted at the conversion site
+    (S018 D1; the raw cause/traceback are withheld by default — see
+    :func:`_record_conversion_failure`). ``__slots__`` keeps it record-like to
+    :func:`_freeze_single_pass` so it passes through the normalize step
+    untouched.
+    """
+
+    __slots__ = ()
+
+
+_CONVERSION_FAILED = _ConversionFailed()
+
+
+def _record_conversion_failure(stage: str) -> _ConversionFailed:
+    """Non-leaking developer diagnostic for a conversion that raised
+    (S018 D1, P1/P2 secret-leak hardening).
+
+    The default surface emits **only SDK-controlled fixed strings**: a fixed
+    ``conversion_failed`` marker, a fixed ``stage=<label>`` enum identifying
+    which converter raised, and a fixed remediation. **No** application-controlled
+    string is surfaced at all.
+
+    It deliberately withholds every **application-controlled** string:
+    - the exception *message* (routinely echoes the filtered field values:
+      ``customer_ssn=...``, ``stripe_secret_key=...``, PHI, internal prompts),
+    - the traceback (no ``exc_info``),
+    - the object's ``repr``/``str`` (its dunders are never invoked),
+    - the *type/exception class names* (``type(data).__name__`` /
+      ``type(cause).__name__``) — application-named identifiers, and a class
+      dynamically named with embedded data would otherwise leak it
+      (S018 P2-1), and
+    - the ``trace_id`` — even though it is shape-validated, the validator
+      (``^[A-Za-z0-9._:-]{1,128}$``) accepts secret-shaped tokens
+      (e.g. ``sk_live_…``), so a developer who put a secret in their own
+      trace_id would leak it here. It is therefore NOT surfaced on the
+      diagnostic surface (S018 P2-2, independent CAG finding). The trace_id
+      feature and its "never pass secrets as trace_id" contract remain for the
+      audit JSONL; this only removes it from the developer diagnostic.
+
+    The caller passes a fixed ``stage`` label chosen by the SDK at the call
+    site, NOT derived from the failing object or exception. No opt-in to dump
+    the raw message/traceback/names is provided: minimum-disclosure is the only
+    mode (safe by construction). Fail-closed is preserved by the returned
+    sentinel.
+    """
+    logger.warning(
+        "shield: conversion_failed stage=%s — returning empty (fail-closed); "
+        "the unconverted value was NOT passed through. The exception detail, "
+        "traceback, and type/class names are withheld by default to avoid "
+        "leaking sensitive values (PII / secrets) into logs; reproduce in a "
+        "trusted local environment to inspect the cause.",
+        stage,
+    )
+    return _CONVERSION_FAILED
+
 
 # Reusable (non-single-pass) built-in containers. Used by
 # `_freeze_single_pass` and `_iter_preserving` to decide whether iterating
@@ -235,25 +301,44 @@ def _detect_mode() -> Mode:
     return _detected_mode
 
 
-def _validate_field_path(path: str) -> None:
+def _validate_field_path(
+    path: str,
+    *,
+    error_cls: type[AegisValidationError] = AegisValidationError,
+    code: str = "aegis.shield.field_path.invalid",
+) -> None:
     """Validate a dot-notation field path.
 
-    Raises ValueError for empty strings, leading/trailing dots, or consecutive dots.
+    Raises a rich :class:`AegisValidationError` (S018 D2) — which subclasses
+    :class:`ValueError`, so existing ``except ValueError`` callers are
+    unaffected — for empty strings, leading/trailing dots, or consecutive
+    dots. ``error_cls`` / ``code`` let the config loader surface the
+    config-namespaced ``aegis.config.fieldPath.invalid`` code for the same
+    check (Node parity).
     """
     if not path:
-        raise ValueError(
+        raise error_cls(
             "Field path must not be empty. "
-            "Specify a field name, for example scope=['email']."
+            "Specify a field name, for example scope=['email'].",
+            code=code,
+            remediation="Pass a non-empty dot-notation field path, e.g. scope=['email'].",
+            docs_url=aegis_docs_url(code),
         )
     if path.startswith(".") or path.endswith("."):
-        raise ValueError(
+        raise error_cls(
             f"Invalid field path '{path}': leading or trailing dot. "
-            f"Use dot-notation like 'profile.age' (no leading or trailing dot)."
+            f"Use dot-notation like 'profile.age' (no leading or trailing dot).",
+            code=code,
+            remediation="Remove the leading/trailing dot. Use dot-notation like 'profile.age'.",
+            docs_url=aegis_docs_url(code),
         )
     if ".." in path:
-        raise ValueError(
+        raise error_cls(
             f"Invalid field path '{path}': consecutive dots. "
-            f"Use single dots between path segments, like 'profile.age'."
+            f"Use single dots between path segments, like 'profile.age'.",
+            code=code,
+            remediation="Use single dots between path segments, e.g. 'profile.age'.",
+            docs_url=aegis_docs_url(code),
         )
 
 
@@ -509,11 +594,11 @@ def _filter_dict(data: dict[str, Any], path_tree: dict[str, Any]) -> dict[str, A
                 kept = _iter_preserving(v)
                 if any(_is_record_like(x) for x in kept):
                     logger.warning(
-                        "shield: scope=['%s'] over a collection of record-like "
-                        "elements drops the key (fail-closed). "
-                        "Use '%s.<field>' to filter each element.",
-                        k,
-                        k,
+                        "shield: scope_bare_field_over_record_collection — a bare "
+                        "scope field matched a collection of record-like elements; "
+                        "dropping the key (fail-closed). Use the dot-notation "
+                        "'<field>.<subfield>' form to filter each element. The "
+                        "field key is withheld (application-controlled identifier)."
                     )
                     continue
                 result[k] = kept
@@ -527,10 +612,10 @@ def _filter_dict(data: dict[str, Any], path_tree: dict[str, Any]) -> dict[str, A
             # subtree expects nested access but value is scalar:
             # drop the key to prevent data leakage (fail-closed).
             logger.warning(
-                "shield: scope expects nested path under '%s' but value is %s, "
-                "dropping key (fail-closed)",
-                k,
-                type(v).__name__,
+                "shield: scope_nested_path_on_scalar — a scope path expected a "
+                "nested object but the value was a non-traversable scalar; "
+                "dropping the key (fail-closed). The field key and value type "
+                "are withheld (application-controlled identifiers)."
             )
     return result
 
@@ -577,10 +662,10 @@ def _deny_filter_dict(
             # ``users`` value. Drop the key fail-closed so the contract is
             # symmetric with scope semantics.
             logger.warning(
-                "shield: deny_fields expects nested path under '%s' but value is %s, "
-                "dropping key (fail-closed, S022 R2)",
-                k,
-                type(v).__name__,
+                "shield: deny_fields_nested_path_on_scalar — a deny_fields path "
+                "expected a nested object but the value was a non-traversable "
+                "scalar; dropping the key (fail-closed, S022 R2). The field key "
+                "and value type are withheld (application-controlled identifiers)."
             )
     return result
 
@@ -603,8 +688,12 @@ def _to_filterable(data: Any) -> Any:
     6. Unknown — returned unchanged. ``_filter_result`` then applies its
        existing non-dict/non-list fail-closed rule.
 
-    Any conversion exception returns an empty string so the downstream
-    non-dict/non-list path fires, preserving fail-closed semantics.
+    A conversion that *raises* returns the :data:`_CONVERSION_FAILED`
+    sentinel (after emitting a fixed-string, non-leaking diagnostic — S018
+    D1/P1/P2; the original cause is NOT logged) so the downstream
+    fail-closed path fires without re-attributing the failure to "cannot
+    filter str". A conversion that *succeeds but returns the wrong shape*
+    (a confused-deputy surface) returns ``""`` as before.
     """
     if data is None or isinstance(data, (dict, list)):
         return data
@@ -614,15 +703,15 @@ def _to_filterable(data: Any) -> Any:
     if _is_namedtuple_instance(data):
         try:
             result = data._asdict()
-            if isinstance(result, dict):
-                return result
         except Exception:
-            return ""
+            return _record_conversion_failure("namedtuple_conversion")
+        if isinstance(result, dict):
+            return result
     if _is_pydantic_v2_like(data):
         try:
             result = data.model_dump()
         except Exception:
-            return ""
+            return _record_conversion_failure("pydantic_model_dump")
         # S022 R9: v2 return-type gate, symmetric with v1 path below. A
         # ``model_dump()`` returning anything other than ``dict`` is a
         # confused-deputy surface; treat as fail-closed.
@@ -642,19 +731,19 @@ def _to_filterable(data: Any) -> Any:
                 if not (isinstance(c.name, str) and c.name.startswith("__"))
             }
         except Exception:
-            return ""
+            return _record_conversion_failure("sqlalchemy_conversion")
     if _is_pydantic_v1_like(data):
         try:
             result = data.dict()
-            if isinstance(result, dict):
-                return result
         except Exception:
-            return ""
+            return _record_conversion_failure("pydantic_dict")
+        if isinstance(result, dict):
+            return result
     if _is_dataclass_instance(data):
         try:
             return dataclasses.asdict(data)
         except Exception:
-            return ""
+            return _record_conversion_failure("dataclass_conversion")
     return data
 
 
@@ -666,6 +755,10 @@ def _filter_result(data: Any, path_tree: dict[str, Any]) -> Any:
     instead (fail-closed).
     """
     data = _to_filterable(data)
+    if data is _CONVERSION_FAILED:
+        # Conversion already raised and was diagnosed at the conversion site
+        # (S018 D1). Fail closed without the misleading "cannot filter str".
+        return ""
     if isinstance(data, dict):
         return _filter_dict(data, path_tree)
     if isinstance(data, list):
@@ -673,8 +766,10 @@ def _filter_result(data: Any, path_tree: dict[str, Any]) -> Any:
     if data is None:
         return None
     logger.warning(
-        "shield: cannot filter %s (not dict/list), returning empty (fail-closed)",
-        type(data).__name__,
+        "shield: unsupported_return_shape — cannot field-filter a non-dict / "
+        "non-list return value; returning empty (fail-closed). The return "
+        "type name is withheld by default (it is an application-controlled "
+        "identifier) to avoid leaking sensitive values into logs."
     )
     return ""
 
@@ -687,6 +782,10 @@ def _deny_filter_result(data: Any, path_tree: dict[str, Any]) -> Any:
     instead (fail-closed).
     """
     data = _to_filterable(data)
+    if data is _CONVERSION_FAILED:
+        # Conversion already raised and was diagnosed at the conversion site
+        # (S018 D1). Fail closed without the misleading "cannot filter str".
+        return ""
     if isinstance(data, dict):
         return _deny_filter_dict(data, path_tree)
     if isinstance(data, list):
@@ -694,8 +793,10 @@ def _deny_filter_result(data: Any, path_tree: dict[str, Any]) -> Any:
     if data is None:
         return None
     logger.warning(
-        "shield: cannot filter %s (not dict/list), returning empty (fail-closed)",
-        type(data).__name__,
+        "shield: unsupported_return_shape — cannot field-filter a non-dict / "
+        "non-list return value; returning empty (fail-closed). The return "
+        "type name is withheld by default (it is an application-controlled "
+        "identifier) to avoid leaking sensitive values into logs."
     )
     return ""
 
@@ -753,10 +854,21 @@ def shield(
         def get_customer_v2(id):
             return db.get(id)
     """
+    # S018 D2: the spec/value validation failures below raise the rich
+    # AegisValidationError envelope (.code / .remediation / .docs_url /
+    # .to_dict()), reaching parity with the Node SDK's machine-parseable
+    # errors. AegisValidationError subclasses ValueError, so every existing
+    # ``except ValueError`` caller keeps working. The *type-shape* checks
+    # (scope/deny_fields must be a list / of strings) deliberately stay raw
+    # TypeError — they are not ValueError-family and existing
+    # ``except TypeError`` callers must keep catching them.
     if scope is not None and deny_fields is not None:
-        raise ValueError(
+        raise AegisValidationError(
             "scope and deny_fields are mutually exclusive. "
-            "Use scope (whitelist) OR deny_fields (blacklist), not both."
+            "Use scope (whitelist) OR deny_fields (blacklist), not both.",
+            code="aegis.shield.spec.conflict",
+            remediation="Pass either `scope` (whitelist) or `deny_fields` (blacklist), never both.",
+            docs_url=aegis_docs_url("aegis.shield.spec.conflict"),
         )
     if scope is None and deny_fields is None:
         # Fallback: try aegis.yaml config
@@ -767,10 +879,16 @@ def shield(
             scope = policy.get("scope")
             deny_fields = policy.get("deny_fields")
         else:
-            raise ValueError(
+            raise AegisValidationError(
                 "Either scope or deny_fields is required. "
                 "Use scope (whitelist) OR deny_fields (blacklist), "
-                "or define the purpose in aegis.yaml."
+                "or define the purpose in aegis.yaml.",
+                code="aegis.shield.spec.required",
+                remediation=(
+                    "Pass `scope` (whitelist) or `deny_fields` (blacklist), or define "
+                    "the purpose in aegis.yaml. An empty spec returns all data unfiltered."
+                ),
+                docs_url=aegis_docs_url("aegis.shield.spec.required"),
             )
     if scope is not None and not isinstance(scope, list):
         raise TypeError("scope must be a list of strings")
@@ -781,10 +899,13 @@ def shield(
     if deny_fields is not None and not all(isinstance(f, str) for f in deny_fields):
         raise TypeError("deny_fields elements must all be strings")
     if deny_fields is not None and len(deny_fields) == 0:
-        raise ValueError(
+        raise AegisValidationError(
             "deny_fields must not be empty (minimum disclosure). "
             "An empty deny list hides nothing. "
-            "Specify the field names to hide, for example deny_fields=['ssn', 'card']."
+            "Specify the field names to hide, for example deny_fields=['ssn', 'card'].",
+            code="aegis.shield.deny_fields.empty",
+            remediation="Provide at least one field path in `deny_fields`, or use `scope` instead.",
+            docs_url=aegis_docs_url("aegis.shield.deny_fields.empty"),
         )
 
     # Validate field paths (dot-notation)
@@ -796,7 +917,23 @@ def shield(
             _validate_field_path(path)
 
     if isinstance(mode, str):
-        mode = Mode(mode)
+        # S018 D2: an unrecognized mode string raised a bare enum ValueError
+        # ("'xxx' is not a valid Mode") with no machine-parseable code. Surface
+        # the rich envelope with the Node-parity `aegis.shield.mode.invalid`.
+        try:
+            mode = Mode(mode)
+        except ValueError as exc:
+            valid = ", ".join(repr(m.value) for m in Mode)
+            raise AegisValidationError(
+                f"shield: invalid mode {mode!r} — expected one of {valid}.",
+                code="aegis.shield.mode.invalid",
+                remediation=(
+                    f"Set `mode` to one of {valid} (lowercase), or use the Mode enum "
+                    "(e.g. Mode.FULL). Omit `mode` to default to auto."
+                ),
+                docs_url=aegis_docs_url("aegis.shield.mode.invalid"),
+                cause=exc,
+            ) from exc
 
     use_deny = deny_fields is not None
     # Defensive copy + parse into path tree for dot-notation support

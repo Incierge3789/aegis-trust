@@ -6,7 +6,7 @@ and follow the docs_url for canonical guidance. Mirror of the Sentry
 archetype error envelope — no free-text guessing required for retry.
 
 Python port of TypeScript :mod:`aegis-trust` ``src/errors.ts``
-(introduced in v0.9.0-rc1 productization-ops/sprint_001).
+(introduced in v0.9.0-rc1).
 """
 
 from __future__ import annotations
@@ -85,6 +85,41 @@ class AegisConfigError(AegisError, ValueError):
     """aegis.yaml load / parse / shape error.
 
     Inherits from :class:`ValueError` for backward-compat.
+    """
+
+    code: str
+    remediation: str
+    docs_url: str
+
+
+class AegisConfigFileNotFoundError(AegisConfigError, FileNotFoundError):
+    """Config file not found (no aegis.yaml / explicit path missing).
+
+    S018 D2 catch-compatibility fix: before S018 a missing config file raised a
+    raw :class:`FileNotFoundError`, so callers wrote
+    ``except FileNotFoundError`` / ``except OSError``. The S018 rich-envelope
+    work briefly broke those catches by raising only ``AegisConfigError``
+    (a :class:`ValueError`). This subtype restores the natural builtin contract
+    — it **is** a ``FileNotFoundError`` (hence also an :class:`OSError`) — while
+    still carrying the machine-parseable ``.code`` / ``.remediation`` /
+    ``.docs_url`` / ``.to_dict()`` envelope and remaining catchable as
+    ``AegisConfigError`` / ``ValueError`` (additive, for callers who adopted the
+    S018 advice). No layout conflict: see tests/test_error_catch_compat_S018.py.
+    """
+
+    code: str
+    remediation: str
+    docs_url: str
+
+
+class AegisConfigImportError(AegisConfigError, ImportError):
+    """Optional ``yaml`` dependency missing.
+
+    S018 D2 catch-compatibility fix: before S018 a missing ``yaml`` dependency
+    raised a raw :class:`ImportError`, so callers wrote ``except ImportError``.
+    This subtype restores that contract — it **is** an ``ImportError`` — while
+    still carrying the rich envelope and remaining catchable as
+    ``AegisConfigError`` / ``ValueError``.
     """
 
     code: str

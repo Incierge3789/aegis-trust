@@ -1,8 +1,7 @@
 # aegis-trust versioning doctrine (v0.9.0-rc1+)
 
 This document describes the seven independent axes of versioning the SDK
-follows. Mirrors the productization-ops doctrine
-(`~/ops-meta/doctrine/api_versioning.md`).
+follows.
 
 ## 1. SemVer for the npm package
 

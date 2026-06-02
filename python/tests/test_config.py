@@ -60,8 +60,14 @@ def test_load_from_env_var(tmp_path, monkeypatch):
 def test_load_file_not_found(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AEGIS_CONFIG", raising=False)
-    with pytest.raises(FileNotFoundError, match="No aegis config file found"):
+    # S018 D2: upgraded from raw FileNotFoundError to the rich AegisConfigError
+    # envelope. It still subclasses ValueError for backward-compat.
+    from aegis_trust.errors import AegisConfigError
+
+    with pytest.raises(AegisConfigError, match="No aegis config file found") as ei:
         load_config()
+    assert ei.value.code == "aegis.config.fileNotFound"
+    assert isinstance(ei.value, ValueError)
 
 
 def test_load_caches_result(tmp_path):
