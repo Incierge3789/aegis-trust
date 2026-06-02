@@ -114,8 +114,8 @@ bumped to keep the cross-SDK version-lock with npm `aegis-trust@0.9.0-rc8`.
 
 ### Changed — release pipeline now runs a fail-closed 9-verifier gate before publish
 
-- `.github/workflows/release-attestation.yml`: new `productization-gate` job (runs-on self-hosted self-hosted-runner). Invokes `~/internal-ops/ops/internal-ops/_shared/scripts/dogfood_aegis_trust.sh` which exercises the internal-ops 9 verifiers (5 P0 + 4 P1) against the workspace. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. P1 verifiers in `MANUAL_PENDING` (per sprint_005 transitional doctrine, e.g. `top_1_pct_readability` while the 5-oracle survey is queued, or `agent_callable_surface` for JSDoc-incomplete TS exports) do not block.
-- The gate substrate lives in `~/internal-ops/ops/internal-ops/`; the workflow assumes the self-hosted runner has that path. Different runner / clean machine → gate fails closed (`runner not found` exit 2). This is the internal-ops `pre_release_gate_productization.sh` literal contract, wired into the public release pipeline for the first time.
+- `.github/workflows/release-attestation.yml`: a `productization-gate` job runs a fail-closed 9-verifier quality gate (5 P0 + 4 P1) against the workspace before any artifact is built. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. Pending P1 verifiers (e.g. `top_1_pct_readability` while the 5-oracle survey is queued, or `agent_callable_surface` for JSDoc-incomplete TS exports) do not block.
+- The release runner provisions the quality-gate substrate out of band; on a runner without it the gate fails closed (`runner not found` exit 2). This is the first release where the gate is wired into the publish pipeline.
 
 ### Changed — `CHANGELOG.md` is now english-first (artifact cleanup, no code change)
 
@@ -265,8 +265,8 @@ back-compat shim slated for removal in **v2.0.0**.
 - Migration is a single sed: `sed -i 's/from aegis import/from aegis_trust import/g'`.
   Submodule paths: `aegis.X` → `aegis_trust.X`.
 
-### Added — Aegis-Api-Version dated header registry (internal-ops/data/)
-- `~/internal-ops/ops/internal-ops/data/api_versioning_policy.yaml`: dated
+### Added — Aegis-Api-Version dated header registry
+- Dated
   API version registry (`Aegis-Api-Version: 2026-05-18` initial), sunset policy
   (18-month notice + 6-month deprecation), stability levels, breaking-change
   classification, migration tooling requirements. SDK header install lands in

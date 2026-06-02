@@ -151,10 +151,9 @@ class AegisClient:
         return self._async_httpx
 
     def _auth_headers(self) -> dict[str, str]:
-        # Always attach the Aegis-Api-Version dated header (internal-ops/sprint_003 Phase C).
+        # Always attach the Aegis-Api-Version dated header.
         # Client contract: server may opt to respond per legacy semantics if it
-        # supports older dated versions. Registry + sunset policy:
-        # ~/internal-ops/ops/internal-ops/data/api_versioning_policy.yaml.
+        # supports older dated versions.
         from aegis_trust import AEGIS_API_VERSION, AEGIS_API_VERSION_HEADER
 
         headers: dict[str, str] = {AEGIS_API_VERSION_HEADER: AEGIS_API_VERSION}
