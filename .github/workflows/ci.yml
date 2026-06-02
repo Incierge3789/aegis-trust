@@ -266,6 +266,26 @@ jobs:
           print(f"OK (README): pip pin matches pyproject at {Version(readme_v)}")
           PY
 
+      - name: Cross-SDK version-lock (npm package.json == PyPI pyproject, PEP 440 normalized)
+        # Both registries publish from the same tag on every release; if the npm
+        # and PyPI versions drift in the repo, a tag would ship mismatched versions
+        # to the two registries. Fail closed so the version-lock cannot silently break.
+        run: |
+          python3 <<'PY'
+          import json, tomllib
+          from pathlib import Path
+          from packaging.version import Version
+
+          node_v = json.loads(Path("node/package.json").read_text())["version"]
+          py_v = tomllib.loads(Path("python/pyproject.toml").read_text())["project"]["version"]
+          if Version(node_v) != Version(py_v):
+              print(f"DRIFT (cross-SDK version-lock): node={node_v!r}  python={py_v!r}")
+              print(f"  normalized: node={Version(node_v)}  python={Version(py_v)}")
+              print("  npm and PyPI publish the same version per tag — bump both together.")
+              raise SystemExit(1)
+          print(f"OK (cross-SDK): npm and PyPI version-locked at {Version(node_v)}")
+          PY
+
   ci-gate:
     # Aggregator job for branch protection. Single required status check
     # name that propagates upstream matrix / job failures via `needs:`.
