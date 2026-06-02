@@ -11,7 +11,7 @@ contextvars (Python's stdlib) is the asyncio-safe equivalent of Node's
 AsyncLocalStorage. Each async task and thread sees its own trace context.
 
 Python port of TypeScript :mod:`aegis-trust` ``src/trace.ts``
-(introduced in v0.9.0-rc1 internal-ops/sprint_001).
+(introduced in v0.9.0-rc1).
 """
 
 from __future__ import annotations

@@ -162,9 +162,14 @@ wrapped function can return objects directly:
 | Anything else (int, str, opaque obj) | empty value (fail-closed)                               |
 
 Pydantic and SQLAlchemy are **detected by duck typing** — neither is a dependency of
-`aegis-trust`. If the conversion raises, `@shield` returns empty. Hybrid objects that
-look like both (Pydantic v2 `+` SQLAlchemy Declarative, such as SQLModel) resolve via
-the Pydantic v2 branch so serializer customization is preserved.
+`aegis-trust`. If the conversion raises, `@shield` returns empty (fail-closed) and
+emits a **minimum-disclosure** developer diagnostic built from **fixed SDK strings
+only** — a `conversion_failed` marker and a fixed `stage=<label>` (e.g.
+`stage=pydantic_model_dump`). It withholds the exception message, the traceback, the
+object's `repr`, and the **type/exception class names** by default — so PII/secrets
+carried by the record (or embedded in a dynamically named class) do not reach your
+logs. Hybrid objects that look like both (Pydantic v2 `+` SQLAlchemy Declarative, such
+as SQLModel) resolve via the Pydantic v2 branch so serializer customization is preserved.
 
 ```python
 from dataclasses import dataclass
@@ -281,11 +286,11 @@ aegis stats         # aggregate by purpose / blocked field
 |---|---|---|
 | `LITE` | In-process filter only. Deterministic, no I/O. | nothing |
 | `FULL` | Filter + audit chain ingest + central policy sync via aegis-core. | aegis-core running + `AEGIS_TOKEN` |
-| `AUTO` | Probe-first detection. See AUTO behaviour matrix below. | nothing |
+| `AUTO` | Intent-first detection (checks Full-intent *before* any probe). See AUTO behaviour matrix below. | nothing |
 
 ### AUTO behaviour matrix (rc4+)
 
-`AEGIS_MODE=auto` (the default) probes the backend FIRST (re-probe TTL = 60 s) and consults the Full-intent heuristic only when the probe fails. Behaviour:
+`AEGIS_MODE=auto` (the default) is **intent-first**: it checks Full-intent (`AEGIS_TOKEN` set, or a non-dev URL) **before** any network probe. With no Full-intent it resolves to LITE and makes **zero** network calls. Only with Full-intent does it probe the backend (re-probe TTL = 60 s). Behaviour:
 
 - `AEGIS_MODE=lite` → Lite.
 - `AEGIS_MODE=full` → Full (calls fail-closed at the gateway until the backend recovers).
@@ -349,7 +354,7 @@ The package was renamed to `aegis-trust` because `aegis-shield` was already regi
 
 `aegis-trust` is fail-closed by design. On any error inside `@shield` (filtering exception, scope mismatch, internal failure), the decorator returns an empty value rather than leaking unfiltered data, exceptions, or tracebacks.
 
-Release evidence is anchored to the Bitcoin blockchain via OpenTimestamps (OTS) for tamper-evident chronology. As of v0.6.4, attestation hashes use SHA-3-512 (NIST FIPS 202) as a pre-PQC bridging measure. OTS is not a post-quantum cryptography substitute; full PQC migration is on the roadmap.
+Release artifacts (the Python wheel/sdist and the npm tarball) are signed with **Sigstore cosign** (keyless OIDC) and logged to the public **Sigstore Rekor** transparency log; CycloneDX SBOMs are attached to each GitHub Release. Verify with `cosign verify-blob` against the assets on the GitHub Release (see the root README supply-chain section). The local SDK audit log is append-only and is **not** itself hash-chained or tamper-evident — server-side audit integrity (`chain_valid`) is a property of the aegis-core gateway in FULL mode.
 
 Vulnerability reports: `contact@aegisagentcontrol.com`. See `SECURITY.md` for the full policy.
 

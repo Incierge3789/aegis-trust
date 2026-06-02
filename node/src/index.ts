@@ -117,7 +117,7 @@ export const VERSION = "0.9.0-rc8";
 // the ingest endpoint payload. Bumped when audit record shape changes.
 // API versioning doctrine §2: SemVer for the package, schema_version for
 // the on-disk / on-wire audit event shape (independent axis).
-export const AUDIT_SCHEMA_VERSION = 1;
+export { AUDIT_SCHEMA_VERSION } from "./constants.js";
 
 // Stability level — see docs/VERSIONING.md.
 //   "preview"  → v0.x.y-rc* : public API may change between rc tags.
@@ -125,10 +125,9 @@ export const AUDIT_SCHEMA_VERSION = 1;
 //   "deprecated" → marked for removal in next major.
 export const STABILITY_LEVEL: "preview" | "stable" | "deprecated" = "preview";
 
-// Aegis-Api-Version dated header (Stripe-model 7-axis API versioning / internal-ops/sprint_003 Phase C).
+// Aegis-Api-Version dated header (Stripe-model dated API versioning).
 // Date-based public contract version. Clients send `Aegis-Api-Version: <YYYY-MM-DD>`;
-// unset → SDK uses this default. Registry + sunset policy:
-// ~/internal-ops/ops/internal-ops/data/api_versioning_policy.yaml
+// unset → SDK uses this default.
 // Sunset: 18-month notice + 6-month deprecation warning.
 export const AEGIS_API_VERSION = "2026-05-18";
 export const AEGIS_API_VERSION_HEADER = "Aegis-Api-Version";

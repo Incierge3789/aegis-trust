@@ -2,6 +2,98 @@
 
 ## [Unreleased]
 
+### Docs (internal-ops/sprint_018 — LITE error-parity remediation)
+- **No Node code change.** The Python SDK reached parity on the LITE
+  validation/config error path (it now raises `AegisValidationError` /
+  `AegisConfigError` with the same `code` strings Node already used). The
+  shared error registry (`node/docs/errors/README.md`) is updated to record,
+  per code, which SDK(s) emit it (`both` / `node` / `python`) so the
+  cross-SDK contract is explicit. Node-only codes
+  (`aegis.shield.purpose.required`, `aegis.shield.mode.sync_full_unsupported`,
+  the `aegis.wrap.*` codes) and Python-only codes (`aegis.shield.spec.conflict`,
+  `aegis.shield.deny_fields.empty`, `aegis.shield.field_path.invalid`) reflect
+  real, intentional API differences, not gaps to close.
+- **P1 follow-up (Python-side, doc updated here).** A parallel adversarial audit
+  found that the Python conversion-failure and local-history-failure log
+  *diagnostics* leaked PII/secrets (exception message + traceback; raw
+  `AEGIS_HISTORY_PATH`) on the default surface, and that the interim Python
+  envelope had broken `except FileNotFoundError` / `except OSError` /
+  `except ImportError`. Both are fixed in the Python SDK (diagnostics are now
+  minimum-disclosure; config errors restore the natural builtin catches via
+  `AegisConfigFileNotFoundError` / `AegisConfigImportError`). The shared error
+  registry (`node/docs/errors/README.md`) records the catch-compat and
+  minimum-disclosure guarantees. Node behaviour is unchanged (Node already
+  withheld these); no Node code change.
+- **P2-1 follow-up (Python-side, doc updated here).** A second independent
+  re-audit found the P1 fix still surfaced the type/exception **class names**
+  (`type(data).__name__` / `type(cause).__name__` / `type(exc).__name__`) in the
+  Python diagnostics, so a *dynamically named* class could leak its name. Fixed:
+  the Python conversion / unsupported-shape / history diagnostics now emit only
+  SDK-controlled fixed strings (`conversion_failed` / `unsupported_return_shape`
+  / `history_write_failed` + a fixed `stage=<label>` enum), withholding all
+  application-controlled identifiers. Doc updated accordingly. No Node code change.
+
+### failure-UX hardening + claim-integrity (internal-ops/sprint_016)
+
+`internal-ops/sprint_016` Collison-grade production-readiness review +
+in-scope hardening. No data-path leak was found (fail-closed re-confirmed); the
+fixes below close **silent** failure-UX trust gaps and **false documentation
+claims** — the worst defect class for a trust product. Source-committed on branch
+`sprint/S016`; **not yet released** (rc9 publish is gate-blocked, carried forward).
+
+### Added (internal-ops/sprint_017 — schema_version contract)
+- `schema_version` is now stamped on every audit event the SDK emits, from a
+  single source (`src/constants.ts` `AUDIT_SCHEMA_VERSION = 1`, re-exported by
+  `index.ts`). Wired to both surfaces consistently: local JSONL history records
+  (`HistoryStore.record` / `recordIdempotent`) and the `/shield/ingest` wire
+  payload (additive field; the aegis-core gateway ignores unknown fields, so it
+  is backward-compatible — the gateway does not yet persist/use it).
+- Backward compatibility: a history record written before this field reads back
+  as `schemaVersion: 1` (missing → 1).
+- `schema_version` is intentionally **excluded** from the idempotency
+  `payloadHash` — `payloadHash` is unchanged by this sprint, so cross-language
+  SHA-256 byte parity with Python is preserved.
+- Deferred (not implemented): typed `Actor`, `Decision` enum,
+  `resource_id`/`resource_type` (the latter is the schema_version=2 shape, gated
+  behind a separate decision).
+
+### Changed — invalid / mis-cased `mode` now throws (no silent downgrade)
+
+- `shield({ mode })` with an unrecognized or mis-cased string (e.g. `"FULL"`,
+  `"Lite"`, `"fulll"`) now throws `AegisValidationError`
+  (`aegis.shield.mode.invalid`) instead of silently falling through to AUTO —
+  which had downgraded a caller asking for strict FULL gating into un-gated LITE
+  with zero signal. Mode is a trust boundary. (`src/shield.ts`; tests
+  `tests/shield.test.ts` "invalid mode is rejected (S016)".)
+
+### Changed — FULL-mode audit-ingest failure is no longer silent
+
+- A post-authorization `/shield/ingest` failure already failed **closed** (data
+  withheld, AO-003); it now also emits a `console.warn` with remediation + a
+  `fail_closed`/`ingest_failed` audit record, so the caller does not mistake the
+  empty result for "no data". (`src/shield.ts` `gateAndRunFull`.)
+
+### Changed — `AEGIS_HISTORY=1` write failure now warns once
+
+- When the local audit log cannot be written, `recordIfEnabled()` now warns once
+  ("audit evidence is NOT being recorded") instead of silently swallowing the
+  error. The data path stays unbroken; the broken-evidence condition is visible.
+  (`src/history.ts`.)
+
+### Fixed — documentation claim integrity
+
+- Corrected the npm README's forward-pending "PyPI ships rc8" claim (PyPI is on
+  rc7) and removed an over-stated local-audit integrity claim. FULL-mode gateway
+  guarantees remain explicitly scoped with a "Not guaranteed" carve-out.
+  (`README.md`.)
+
+### Review artifact
+
+- `deploy/s016/COLLISON_REVIEW.md` — the 10-dimension production-readiness review.
+  (Regenerated in S017; the S016 run committed the code but did not persist the
+  document.) Execution evidence — `vitest`, `tsc --noEmit`, clean-room install —
+  is pending the S017 execution pass and is **not** asserted as re-run.
+
 ## [0.9.0-rc8] — 2026-05-30 — fail-open → fail-closed remediation (internal-ops/sprint_015)
 
 `internal-ops/sprint_015` remediation of the S014 distribution-readiness
@@ -81,7 +173,7 @@ Paired with PyPI `aegis-trust==0.9.0rc8` (cross-SDK version-lock).
 
 ### Changed — release pipeline now runs a fail-closed 9-verifier gate before publish
 
-- `.github/workflows/release-attestation.yml`: new `productization-gate` job (runs-on self-hosted self-hosted-runner). Invokes `~/internal-ops/ops/internal-ops/_shared/scripts/dogfood_aegis_trust.sh` which exercises the internal-ops 9 verifiers (5 P0 + 4 P1) against the workspace. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. P1 verifiers in `MANUAL_PENDING` (per sprint_005 transitional doctrine) do not block.
+- `.github/workflows/release-attestation.yml`: a `productization-gate` job runs a fail-closed 9-verifier quality gate (5 P0 + 4 P1) against the workspace before any artifact is built. `sbom-node` + `sbom-python` now `needs: [productization-gate]`; `collect-and-sign` / `pack-and-sign-sdk` / `publish-npm-trusted-publisher` are transitively gated. If any P0 verifier fails on a tag push, **no SBOM is generated and nothing is published**. Pending P1 verifiers do not block.
 
 ### Changed — `CHANGELOG.md` is now english-first (artifact cleanup, no code change)
 

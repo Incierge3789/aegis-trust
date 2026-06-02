@@ -178,11 +178,19 @@ purposes:
 
 
 def test_aegis_config_env_nonexistent_file(monkeypatch):
-    """AEGIS_CONFIG pointing to nonexistent file must fail safely."""
+    """AEGIS_CONFIG pointing to nonexistent file must fail safely.
+
+    S018 D2: upgraded from raw FileNotFoundError to the rich AegisConfigError
+    envelope (still fail-closed, still ValueError-compatible).
+    """
+    from aegis_trust.errors import AegisConfigError
+
     monkeypatch.setenv("AEGIS_CONFIG", "/tmp/nonexistent_aegis_config_12345.yaml")
     reset_config()
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(AegisConfigError) as ei:
         load_config()
+    assert ei.value.code == "aegis.config.fileNotFound"
+    assert isinstance(ei.value, ValueError)
 
 
 # ── Attack 5: YAML with dot-notation validation bypass ───────────

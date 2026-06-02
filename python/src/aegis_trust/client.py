@@ -15,6 +15,7 @@ from typing import Any, Callable, Literal
 
 import httpx
 
+from aegis_trust._constants import AUDIT_SCHEMA_VERSION
 from aegis_trust.types import (
     AuditChainStatus,
     FieldStats,
@@ -150,10 +151,9 @@ class AegisClient:
         return self._async_httpx
 
     def _auth_headers(self) -> dict[str, str]:
-        # Always attach the Aegis-Api-Version dated header (internal-ops/sprint_003 Phase C).
+        # Always attach the Aegis-Api-Version dated header.
         # Client contract: server may opt to respond per legacy semantics if it
-        # supports older dated versions. Registry + sunset policy:
-        # ~/internal-ops/ops/internal-ops/data/api_versioning_policy.yaml.
+        # supports older dated versions.
         from aegis_trust import AEGIS_API_VERSION, AEGIS_API_VERSION_HEADER
 
         headers: dict[str, str] = {AEGIS_API_VERSION_HEADER: AEGIS_API_VERSION}
@@ -334,6 +334,7 @@ class AegisClient:
                     "timestamp": e.timestamp,
                     "count": e.count,
                     "deny_fields": list(e.deny_fields),
+                    "schema_version": AUDIT_SCHEMA_VERSION,
                 }
                 for e in entries
             ]

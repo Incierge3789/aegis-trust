@@ -64,12 +64,23 @@ Changelog = "https://github.com/Incierge3789/aegis-trust/blob/main/python/CHANGE
 yaml = [
     "pyyaml>=6.0",
 ]
+# Real ORM/validation frameworks @shield claims to convert (README "Works with"
+# section). Installed in the canonical test env so S018's real-dependency
+# conversion-failure leak tests exercise the genuine library code paths
+# (pydantic v2 model_dump, pydantic.v1 .dict, SQLAlchemy __table__ walk) —
+# not just duck-typed simulations.
+frameworks = [
+    "pydantic>=2",
+    "sqlalchemy>=2",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.4",
     "pyyaml>=6.0",
     "pip-audit>=2.7",
+    "pydantic>=2",
+    "sqlalchemy>=2",
 ]
 
 [project.entry-points."pytest11"]
@@ -81,7 +92,7 @@ markers = [
 ]
 
 [tool.mypy]
-# internal-ops type_safety verifier runs `mypy --strict .` from package
+# Type-safety gate runs `mypy --strict .` from package
 # root. Scope the strict check to hand-written sources (src/aegis_trust). The
 # _generated/ OpenAPI client is auto-generated and exempt from hand-typing
 # standards; examples/, tests/, scripts/, docs/ are not publish artifact.

@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
 import { aegisDocsUrl, AegisAuditError } from "./errors.js";
+import { AUDIT_SCHEMA_VERSION } from "./constants.js";
 
 export interface HistoryRecord {
   readonly id: number;
@@ -38,6 +39,8 @@ export interface HistoryRecord {
   // "internal_error"). Present only for FULL-mode records.
   readonly decision?: string;
   readonly reason?: string;
+  // S017: audit-event shape version. Missing (pre-S017 record) reads back as 1.
+  readonly schemaVersion?: number;
 }
 
 export interface HistoryStats {
@@ -117,6 +120,7 @@ export class HistoryStore {
       blockedFields: args.blockedFields,
       timestamp: args.timestamp,
       mode: args.mode,
+      schemaVersion: AUDIT_SCHEMA_VERSION,
       ...(args.trace_id !== undefined ? { trace_id: args.trace_id } : {}),
       ...(args.decision !== undefined ? { decision: args.decision } : {}),
       ...(args.reason !== undefined ? { reason: args.reason } : {}),
@@ -192,6 +196,7 @@ export class HistoryStore {
       blockedFields: args.blockedFields,
       timestamp: args.timestamp,
       mode: args.mode,
+      schemaVersion: AUDIT_SCHEMA_VERSION,
       idempotencyKey,
       ...(args.trace_id !== undefined ? { trace_id: args.trace_id } : {}),
     };
@@ -208,7 +213,9 @@ export class HistoryStore {
     for (const line of raw.split("\n")) {
       if (line.length === 0) continue;
       try {
-        out.push(JSON.parse(line) as HistoryRecord);
+        const _parsed = JSON.parse(line) as HistoryRecord;
+        // S017 D-C: a record written before the schemaVersion field reads back as 1.
+        out.push({ ..._parsed, schemaVersion: _parsed.schemaVersion ?? 1 });
       } catch {
         // Skip malformed line.
       }
@@ -261,6 +268,7 @@ export class HistoryStore {
 
 let _store: HistoryStore | null = null;
 let _checked: boolean = false;
+let _historyWarned: boolean = false;
 
 function getStore(): HistoryStore | null {
   if (_checked) return _store;
@@ -294,8 +302,22 @@ export function recordIfEnabled(args: {
     const store = getStore();
     if (!store) return;
     store.record(args);
-  } catch {
-    // Logging failure must not break the data path.
+  } catch (err) {
+    // Logging failure must not break the data path — but it must not be
+    // SILENT either (S016 failure-UX P0). A developer who set AEGIS_HISTORY=1
+    // specifically to capture audit evidence must know it is not being
+    // written. Warn once (not per-call) so the data path stays unbroken and
+    // the broken-evidence condition is visible.
+    if (!_historyWarned) {
+      _historyWarned = true;
+      const path = process.env.AEGIS_HISTORY_PATH ?? "~/.aegis/history.jsonl";
+      console.warn(
+        `aegis-trust: AEGIS_HISTORY=1 but the local audit log could not be `
+        + `written (path=${path}): ${err instanceof Error ? err.message : String(err)}. `
+        + `Audit evidence is NOT being recorded — fix the path/permissions or unset `
+        + `AEGIS_HISTORY.`,
+      );
+    }
   }
 }
 
@@ -303,4 +325,5 @@ export function resetStore(): void {
   if (_store) _store.close();
   _store = null;
   _checked = false;
+  _historyWarned = false;
 }
