@@ -1,4 +1,4 @@
-"""Invocation script for productization-ops idempotency_guarantee verifier (Python SDK).
+"""Invocation script for internal-ops idempotency_guarantee verifier (Python SDK).
 
 Mirrors node/tests/idempotency/invocation.py contract: the verifier copies this
 file to <package-dir>/.productization_idempotency_test.tmp and runs it under

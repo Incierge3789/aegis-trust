@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Invocation script for productization-ops idempotency_guarantee verifier.
+"""Invocation script for internal-ops idempotency_guarantee verifier.
 
 The verifier copies this file to <package-dir>/.productization_idempotency_test.tmp
 and runs it under python3 (it routes here because the file does not start with
