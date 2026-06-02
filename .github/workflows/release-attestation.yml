@@ -1,8 +1,8 @@
 # aegis-trust release-attestation workflow (Block B)
 #
-# Sprint: internal-ops/sprint_009 T-009-1
-# PR: internal review Batch 1 P1 `supply_chain_attestation` closure
-# Closes: cso_review (P0 partial_closure) の唯一の dependency
+# Purpose: supply-chain attestation for releases — CycloneDX SBOMs, Sigstore
+# cosign keyless signatures, and SDK-artifact signing attached to the GitHub
+# Release, plus npm Trusted Publisher OIDC publish on tag push.
 #
 # === SAFETY INVARIANTS (must hold) ===
 #
@@ -18,12 +18,13 @@
 #      (本 workflow は触らない)。 outputs = SBOM + attestation + release artifact attach
 #      + npm tag-push-only publish (Block C)。
 #   4. 全 third-party action は 40-char commit SHA pin。 tag pin 禁止 (mutation attack)。
-#   5. Runner = **self-hosted self-hosted-runner mandatory** (Block B = release-class、 supply
-#      chain trust の核心)。 ubuntu-latest = GitHub-hosted は禁止 (= cosign keyless OIDC
-#      identity を GitHub infra に依存させる = supply chain attack surface)。 aegis-core
-#      release.yml (runs-on: [self-hosted, macOS, ARM64, self-hosted-runner]) と同 mandate。
-#      ci.yml の Block A (read-only) のみ ubuntu-latest 例外。
-#      F-060 record: 過去 T-009-1 で本 mandate 違反、 sprint_009 iter 1e で literal 修正。
+#   5. Runner = a designated self-hosted release runner (mandatory; Block B =
+#      release-class, supply-chain trust core). ubuntu-latest = GitHub-hosted is
+#      disallowed for release jobs (it ties the cosign keyless OIDC identity to
+#      GitHub infra = a supply-chain attack surface). The runner labels are
+#      supplied via the `RELEASE_RUNNER_LABELS` repository variable so the
+#      concrete runner identity is not committed to source. Only ci.yml Block A
+#      (read-only) is exempt and may use ubuntu-latest.
 #
 # === OUTPUT (sprint_009 closure 要件) ===
 #
@@ -45,7 +46,20 @@
 #   - https://github.com/CycloneDX/cdxgen
 #   - https://github.com/actions/attest-build-provenance
 #   - https://slsa.dev/spec/v1.0/levels#build-l3
-#   - internal review: family_5_ops_ci_release / supply_chain_attestation
+#   - https://docs.sigstore.dev/cosign/overview/
+#
+# === Required repository configuration (maintainer, one-time) ===
+#
+#   To keep the release infrastructure out of public source, this workflow reads
+#   it from repository-level Actions variables instead of hardcoding it:
+#     - vars.RELEASE_RUNNER_LABELS   — JSON array of the self-hosted release
+#         runner labels, e.g. ["self-hosted","macOS","ARM64","<runner-label>"].
+#         Consumed by `runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}`.
+#     - vars.AEGIS_QUALITY_GATE_PATH — absolute path to the executable
+#         quality-gate script provisioned on the release runner.
+#   Set both under Settings → Secrets and variables → Actions → Variables.
+#   If a variable is unset, the release jobs fail closed (nothing is published)
+#   rather than leaking an internal path or runner identity.
 
 name: release-attestation
 
@@ -72,20 +86,22 @@ concurrency:
 jobs:
   productization-gate:
     name: Productization Gate (9-verifier dogfood, fail-closed)
-    runs-on: [self-hosted, macOS, ARM64, self-hosted-runner]
+    runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0
 
-      - name: Verify internal-ops gate present on self-hosted runner
+      - name: Verify quality gate present on the release runner
+        env:
+          AEGIS_QUALITY_GATE_PATH: ${{ vars.AEGIS_QUALITY_GATE_PATH }}
         run: |
           set -euo pipefail
-          GATE="$HOME/internal-ops/ops/internal-ops/_shared/scripts/dogfood_aegis_trust.sh"
+          GATE="${AEGIS_QUALITY_GATE_PATH:?repository variable AEGIS_QUALITY_GATE_PATH is not set}"
           if [ ! -x "$GATE" ]; then
-            echo "productization gate runner not found at $GATE" >&2
-            echo "expected internal-ops layout: ~/internal-ops/ops/internal-ops/_shared/{hooks,scripts}/ + verifiers/" >&2
+            echo "quality gate runner not found at $GATE" >&2
+            echo "expected: AEGIS_QUALITY_GATE_PATH must point to an executable quality-gate script provisioned on the release runner" >&2
             exit 2
           fi
           echo "[productization-gate] runner OK: $GATE"
@@ -103,17 +119,19 @@ jobs:
           [ -f dist/index.d.ts ] || { echo "node dist/index.d.ts missing after build" >&2; exit 2; }
           echo "[productization-gate] node dist/ built ($(ls dist | wc -l | tr -d ' ') files)"
 
-      - name: Run 9-verifier dogfood (P0 fail-closed; P1 MANUAL_PENDING accepted under sprint_005)
+      - name: Run 9-verifier dogfood (P0 fail-closed; pending P1 accepted)
+        env:
+          AEGIS_QUALITY_GATE_PATH: ${{ vars.AEGIS_QUALITY_GATE_PATH }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
           [ -n "$TAG" ] || TAG="${{ inputs.tag }}"
           [ -n "$TAG" ] || TAG="manual-dispatch"
-          bash "$HOME/internal-ops/ops/internal-ops/_shared/scripts/dogfood_aegis_trust.sh" "$TAG" "$GITHUB_WORKSPACE"
+          bash "${AEGIS_QUALITY_GATE_PATH:?repository variable AEGIS_QUALITY_GATE_PATH is not set}" "$TAG" "$GITHUB_WORKSPACE"
 
   sbom-node:
     name: SBOM (Node — CycloneDX)
-    runs-on: [self-hosted, macOS, ARM64, self-hosted-runner]
+    runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     needs: [productization-gate]
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
@@ -155,7 +173,7 @@ jobs:
 
   sbom-python:
     name: SBOM (Python — CycloneDX)
-    runs-on: [self-hosted, macOS, ARM64, self-hosted-runner]
+    runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     needs: [productization-gate]
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
@@ -170,13 +188,13 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Verify system Python (self-hosted self-hosted-runner runner)
+      - name: Verify system Python (self-hosted runner)
         # actions/setup-python hardcodes the hosted-runner toolcache as the
         # macOS install target (install-python.sh "Creating Python hostedtoolcache
         # folder..." → `mkdir the hosted-runner home` → Permission denied on self-hosted
-        # runner whose home is /home/user). Setting AGENT_TOOLSDIRECTORY /
+        # runner whose home is not the hosted-runner home). Setting AGENT_TOOLSDIRECTORY /
         # RUNNER_TOOL_CACHE in the runner launchd plist did not override the
-        # hardcoded path (verified 2026-05-24 on self-hosted-runner runner).
+        # hardcoded path (verified on the self-hosted runner).
         # SBOM generation only needs python3 in PATH for cdxgen subprocess
         # invocation (Python is not the executor — cdxgen is node-launched);
         # system Python from /opt/homebrew/bin is sufficient and avoids the
@@ -212,7 +230,7 @@ jobs:
   collect-and-sign:
     name: Cosign sign SBOMs + Release attach
     needs: [sbom-node, sbom-python]
-    runs-on: [self-hosted, macOS, ARM64, self-hosted-runner]
+    runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -298,7 +316,7 @@ jobs:
   pack-and-sign-sdk:
     name: Pack + Cosign sign SDK artifacts (npm tarball + PyPI wheel/sdist)
     needs: [sbom-node, sbom-python]
-    runs-on: [self-hosted, macOS, ARM64, self-hosted-runner]
+    runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -310,13 +328,13 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Verify system Python (self-hosted self-hosted-runner runner)
+      - name: Verify system Python (self-hosted runner)
         # actions/setup-python hardcodes the hosted-runner toolcache as the
         # macOS install target (install-python.sh "Creating Python hostedtoolcache
         # folder..." → `mkdir the hosted-runner home` → Permission denied on self-hosted
-        # runner whose home is /home/user). Setting AGENT_TOOLSDIRECTORY /
+        # runner whose home is not the hosted-runner home). Setting AGENT_TOOLSDIRECTORY /
         # RUNNER_TOOL_CACHE in the runner launchd plist did not override the
-        # hardcoded path (verified 2026-05-24 on self-hosted-runner runner).
+        # hardcoded path (verified on the self-hosted runner).
         # SBOM generation only needs python3 in PATH for cdxgen subprocess
         # invocation (Python is not the executor — cdxgen is node-launched);
         # system Python from /opt/homebrew/bin is sufficient and avoids the
@@ -425,11 +443,11 @@ jobs:
       # sigstore provenance bundle: Unsupported GitHub Actions runner
       # environment: "self-hosted". Only "github-hosted" runners are supported
       # when publishing with provenance.` (literal observed on run 26353133043
-      # 2026-05-24 against self-hosted-runner runner).
+      # against the self-hosted runner).
       #
       # Block C is therefore split across two jobs:
       #   - pack-and-sign-sdk (this self-hosted job): build + cosign keyless
-      #     sign-blob + GitHub Release attach. Stays on self-hosted self-hosted-runner
+      #     sign-blob + GitHub Release attach. Stays on the self-hosted runner
       #     so cosign keyless OIDC identity does NOT depend on GitHub-hosted
       #     infra (SAFETY INVARIANT #5 preserved).
       #   - publish-npm-trusted-publisher (github-hosted ubuntu-latest job

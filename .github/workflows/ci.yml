@@ -1,8 +1,7 @@
 # aegis-trust top-level CI workflow
 #
-# Sprint: internal-ops/sprint_006 Tier 0, T-006c-1c block A.
-# PR: #5 (T-S179-006c-1c-block-a-ci).
-# Closes Codex Operational Scenario Review finding #8 (PR CI not operationally useful).
+# Read-only PR/push CI: lint, type-check, and tests (Python + Node version
+# matrices), a gitleaks secret scan, and version/license drift checks.
 #
 # === SAFETY INVARIANTS (do not relax without authorization + cross-review) ===
 #
