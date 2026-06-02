@@ -4,7 +4,7 @@ AI Red Team S018 — analysis of CI/CD attack vectors.
 These tests verify CI configuration properties at the workflow yaml layer,
 not runtime behavior.
 
-Updated 2026-05-21 (productization-ops/sprint_006 Tier 0, T-006c-1c block A,
+Updated 2026-05-21 (internal-ops/sprint_006 Tier 0, T-006c-1c block A,
 PR #5) for modern GitHub Actions threat model + top-level workflow path:
 
   - Path resolution switched from cwd-relative `open(".github/workflows/ci.yml")`

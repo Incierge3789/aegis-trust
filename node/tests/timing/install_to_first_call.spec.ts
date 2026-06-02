@@ -1,6 +1,6 @@
 // In-process timing sanity test (vitest).
 //
-// Production gate is the productization-ops `time_to_first_call` verifier
+// Production gate is the internal-ops `time_to_first_call` verifier
 // (runs the install + first_call_script.js end-to-end on a clean workdir,
 // 60s wall-clock budget). This file is a fast in-process companion check:
 // importing `shield` and making a first call must complete in < 5s once

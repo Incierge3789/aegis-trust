@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-### Docs (productization-ops/sprint_018 — LITE error-parity remediation)
+### Docs (internal-ops/sprint_018 — LITE error-parity remediation)
 - **No Node code change.** The Python SDK reached parity on the LITE
   validation/config error path (it now raises `AegisValidationError` /
   `AegisConfigError` with the same `code` strings Node already used). The
@@ -33,15 +33,15 @@
   / `history_write_failed` + a fixed `stage=<label>` enum), withholding all
   application-controlled identifiers. Doc updated accordingly. No Node code change.
 
-### failure-UX hardening + claim-integrity (productization-ops/sprint_016)
+### failure-UX hardening + claim-integrity (internal-ops/sprint_016)
 
-`productization-ops/sprint_016` Collison-grade production-readiness review +
+`internal-ops/sprint_016` Collison-grade production-readiness review +
 in-scope hardening. No data-path leak was found (fail-closed re-confirmed); the
 fixes below close **silent** failure-UX trust gaps and **false documentation
 claims** — the worst defect class for a trust product. Source-committed on branch
 `sprint/S016`; **not yet released** (rc9 publish is gate-blocked, carried forward).
 
-### Added (productization-ops/sprint_017 — schema_version contract)
+### Added (internal-ops/sprint_017 — schema_version contract)
 - `schema_version` is now stamped on every audit event the SDK emits, from a
   single source (`src/constants.ts` `AUDIT_SCHEMA_VERSION = 1`, re-exported by
   `index.ts`). Wired to both surfaces consistently: local JSONL history records
@@ -94,9 +94,9 @@ claims** — the worst defect class for a trust product. Source-committed on bra
   document.) Execution evidence — `vitest`, `tsc --noEmit`, clean-room install —
   is pending the S017 execution pass and is **not** asserted as re-run.
 
-## [0.9.0-rc8] — 2026-05-30 — fail-open → fail-closed remediation (productization-ops/sprint_015)
+## [0.9.0-rc8] — 2026-05-30 — fail-open → fail-closed remediation (internal-ops/sprint_015)
 
-`productization-ops/sprint_015` remediation of the S014 distribution-readiness
+`internal-ops/sprint_015` remediation of the S014 distribution-readiness
 NO-GO. Adversarial falsification (single-model + a 3-reviewer cross-model pass)
 found data-path edges where the Node SDK returned data **fail-open** while the
 Python SDK fail-closes, contradicting both READMEs' fail-closed contract — incl.
@@ -167,9 +167,9 @@ Paired with PyPI `aegis-trust==0.9.0rc8` (cross-SDK version-lock).
   divergence deferred to v1.0 GA — that divergence is now **resolved** in favor
   of the Python fail-closed contract.
 
-## [0.9.0-rc7] — 2026-05-26 — Pre-publish substrate gate wire + CHANGELOG artifact cleanup (productization-ops/sprint_S202)
+## [0.9.0-rc7] — 2026-05-26 — Pre-publish substrate gate wire + CHANGELOG artifact cleanup (internal-ops/sprint_S202)
 
-`productization-ops/sprint_S202` rc7 cut. **Preview release** (`STABILITY_LEVEL = "preview"`). **No public API change**; this release moves the productization 9-verifier gate into the release pipeline so every future tag push is mechanically audited before any artifact is built or published, and cleans sprint-internal Japanese strings out of the shipped `CHANGELOG.md`. Paired with PyPI `aegis-trust==0.9.0rc7` (cross-SDK version-lock).
+`internal-ops/sprint_S202` rc7 cut. **Preview release** (`STABILITY_LEVEL = "preview"`). **No public API change**; this release moves the productization 9-verifier gate into the release pipeline so every future tag push is mechanically audited before any artifact is built or published, and cleans sprint-internal Japanese strings out of the shipped `CHANGELOG.md`. Paired with PyPI `aegis-trust==0.9.0rc7` (cross-SDK version-lock).
 
 ### Changed — release pipeline now runs a fail-closed 9-verifier gate before publish
 
@@ -177,17 +177,17 @@ Paired with PyPI `aegis-trust==0.9.0rc8` (cross-SDK version-lock).
 
 ### Changed — `CHANGELOG.md` is now english-first (artifact cleanup, no code change)
 
-- `node/CHANGELOG.md` S179 reference line: replace the non-english sprint annotation with "mil-spec test-honesty doctrine". CHANGELOG ships inside the npm tarball, so customer-facing artifact text must be english-first per `productization-ops/9-verifier #2 english_first_artifact`.
+- `node/CHANGELOG.md` S179 reference line: replace the non-english sprint annotation with "mil-spec test-honesty doctrine". CHANGELOG ships inside the npm tarball, so customer-facing artifact text must be english-first per `internal-ops/9-verifier #2 english_first_artifact`.
 - Same fix on the Python side (`python/CHANGELOG.md` S023 + S024 entries). No semantic difference; the dropped strings were sprint-internal annotation that leaked into the shipped artifact.
 
-### Routed scenarios (operational-trust-review)
+### Routed scenarios (internal review)
 
 - `family_5_ops_ci_release / supply_chain_attestation`: incremental — gate is now invoked by the publish pipeline (was only a maintainer-local dogfood through rc6). Still `closure_candidate` until external oracle walk closes the literal residual.
 - `family_5_ops_ci_release / npm_pypi_latest_rc_tag_drift`: unchanged — `dist-tags.latest` intentionally stays on `0.9.0-rc3` per the pre-release-doesn't-promote-to-latest design. `npm install aegis-trust@rc` resolves to rc7.
 
 
 
-`productization-ops/sprint_011` rc6 cut. **Preview release** (`STABILITY_LEVEL = "preview"`). Public API is additive over rc5 with one **behavioral change** on FULL-mode fail-closed return value (see `shield()` FULL mode entry below: shape-preserving empty → `null` for the data-path deny / unreachable cases). Paired with PyPI `aegis-trust==0.9.0rc6` (cross-SDK version-lock).
+`internal-ops/sprint_011` rc6 cut. **Preview release** (`STABILITY_LEVEL = "preview"`). Public API is additive over rc5 with one **behavioral change** on FULL-mode fail-closed return value (see `shield()` FULL mode entry below: shape-preserving empty → `null` for the data-path deny / unreachable cases). Paired with PyPI `aegis-trust==0.9.0rc6` (cross-SDK version-lock).
 
 This is also the **first release cut from the `aegis-trust` monorepo itself** (rc1–rc5 were published from `aegis-shield`, the historical mirror; see `aegis-shield/README.md` L1 `📍 Source moved`). Provenance attestation (SBOM + cosign keyless signatures + GitHub Release artifact attach) is generated by `.github/workflows/release-attestation.yml` (Block B Phase 2) on the `v0.9.0-rc6` tag push.
 
@@ -212,7 +212,7 @@ This is also the **first release cut from the `aegis-trust` monorepo itself** (r
   the now-removed probe-first behaviour. Replaced with the matrix-aligned
   assertion: "AUTO + no token + reachable backend → LITE (no opportunistic
   upgrade without intent)".
-- **Routed scenarios** (operational-trust-review verification batch 1):
+- **Routed scenarios** (internal review verification batch 1):
   `python_node_parity` divergence #2 (AUTO degrade semantics) — resolved.
   `auto_mode_behavior` (P1) — resolved.
 
@@ -306,13 +306,13 @@ This is also the **first release cut from the `aegis-trust` monorepo itself** (r
 
 ### Refs
 
-- T-S179-cli-bin-shim (`productization-ops/sprint_006` Tier 0)
+- T-S179-cli-bin-shim (`internal-ops/sprint_006` Tier 0)
 - Codex Operational Scenario Review finding #2 (2026-05-21)
 - Memory `feedback_test_honesty.md`: fail-silent violates the mil-spec test-honesty doctrine
 
 ## [0.9.0-rc5] — 2026-05-21 — cross-SDK version-lock (PyPI rc5 parity, no functional change)
 
-`productization-ops/sprint_006` Tier 0 follow-up. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). **Functional content identical to v0.9.0-rc4.**
+`internal-ops/sprint_006` Tier 0 follow-up. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). **Functional content identical to v0.9.0-rc4.**
 
 ### Why rc5 (no behaviour change on the npm side)
 
@@ -335,7 +335,7 @@ No source / behavioural changes vs v0.9.0-rc4.
 
 ## [0.9.0-rc4] — 2026-05-21 — pre-GA preview (cross-SDK env-var canonicalisation + AUTO probe-first)
 
-`productization-ops/sprint_004` post-canonical-audit cross-SDK parity closure. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). Public API surface is additive over v0.9.0-rc3 with one **breaking-for-direct-callers** semantic change on an exported helper (see Migration below). Paired with PyPI `aegis-trust@0.9.0-rc4`.
+`internal-ops/sprint_004` post-canonical-audit cross-SDK parity closure. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). Public API surface is additive over v0.9.0-rc3 with one **breaking-for-direct-callers** semantic change on an exported helper (see Migration below). Paired with PyPI `aegis-trust@0.9.0-rc4`.
 
 > **Why rc4 (not rc3)**: npm published `aegis-trust@0.9.0-rc3` from a commit that carried only the `Aegis-Api-Version` dated header + repository-metadata polish. The PyPI parity closure work below missed the rc3 cut and lands as v0.9.0-rc4 on both PyPI and npm in parity.
 
@@ -378,7 +378,7 @@ No source / behavioural changes vs v0.9.0-rc4.
 - T-006c-1 monorepo reconciliation (sprint_006 Tier 0).
 ## [0.9.0-rc1] — 2026-05-17 — pre-GA preview
 
-`productization-ops/sprint_001` rollup. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). Public API surface is additive over v0.8.1; no breaking changes. SLA: none. Production use: at your own risk. See [`docs/VERSIONING.md`](docs/VERSIONING.md).
+`internal-ops/sprint_001` rollup. **Preview release** (`STABILITY_LEVEL = "preview"`, npm `dist-tag=rc`). Public API surface is additive over v0.8.1; no breaking changes. SLA: none. Production use: at your own risk. See [`docs/VERSIONING.md`](docs/VERSIONING.md).
 
 ### Added — machine-parseable error model
 
