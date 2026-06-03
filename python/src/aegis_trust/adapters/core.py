@@ -47,7 +47,15 @@ class ShieldedTool:
 
     def call(self, *args: Any, **kwargs: Any) -> str:
         try:
-            return self._serialize(self._run(*args, **kwargs))
+            result = self._run(*args, **kwargs)
+            if inspect.isawaitable(result):
+                # An async handler reached the synchronous call() path;
+                # serializing the coroutine would emit garbage and leave it
+                # un-awaited. Fail closed to "" — use acall() for async handlers.
+                if hasattr(result, "close"):
+                    result.close()
+                return ""
+            return self._serialize(result)
         except Exception:
             # A serializer error must not propagate past the shield — it could
             # carry the filtered value. Fail closed, symmetric with shield()'s
