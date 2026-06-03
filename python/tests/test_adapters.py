@@ -113,6 +113,39 @@ class TestCore:
         t = _lookup()
         assert t._run.__name__ == "customer_lookup"
 
+    def test_async_handler_via_sync_call_fails_closed(self):
+        # An async handler reached through the synchronous call() path must fail
+        # closed to "" (never serialize the coroutine). Async callers use acall.
+        import warnings
+
+        async def handler(**kw):
+            return RECORD
+
+        t = shielded_tool(
+            name="async_lookup",
+            description="d",
+            purpose="p",
+            scope=["name"],
+            handler=handler,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # "coroutine never awaited" -> error
+            assert t.call(customer_id="C-1") == ""
+
+    @pytest.mark.asyncio
+    async def test_acall_awaits_async_handler(self):
+        async def handler(**kw):
+            return RECORD
+
+        t = shielded_tool(
+            name="async_lookup",
+            description="d",
+            purpose="p",
+            scope=["name", "issue"],
+            handler=handler,
+        )
+        assert json.loads(await t.acall(customer_id="C-1")) == SCOPED
+
 
 class TestLangChain:
     def test_binds_via_injected_factory(self):
