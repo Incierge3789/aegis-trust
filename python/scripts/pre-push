@@ -1,5 +1,5 @@
 #!/bin/bash
-# aegis-shield pre-push quality gate
+# aegis-trust pre-push quality gate
 # Runs local CI-equivalent checks before pushing to protect the remote.
 # Bypass (CI escape hatch only): AEGIS_SKIP_QUALITY_GATE=1 git push
 #
@@ -49,7 +49,7 @@ for tool in "$RUFF" "$PYTEST" "$PIP_AUDIT"; do
     fi
 done
 
-echo "=== aegis-shield quality gate ==="
+echo "=== aegis-trust quality gate ==="
 
 echo "[1/4] ruff check..."
 "$RUFF" check src/ tests/

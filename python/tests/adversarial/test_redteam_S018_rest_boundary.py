@@ -1,7 +1,7 @@
 """T-504: Full mode REST API boundary attack — verify_ssl forced disable (AO-001).
 
 AI Red Team S018 — adversarial attempts to disable SSL verification
-and attack the trust boundary between aegis-shield and aegis-core.
+and attack the trust boundary between aegis-trust and aegis-core.
 """
 
 import os

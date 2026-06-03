@@ -8,6 +8,10 @@ body:
         Thanks for reporting a bug. **Do not use this form for security
         vulnerabilities** — follow [SECURITY.md](../blob/main/SECURITY.md) and
         report privately instead.
+
+        **Do not paste secrets, API keys, tokens, customer or personal data, or
+        logs/prompts containing credentials.** Issues are public — redact your
+        reproduction first.
   - type: dropdown
     id: sdk
     attributes:

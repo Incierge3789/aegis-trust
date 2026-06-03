@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ci-matrix.sh — Local CI matrix runner for aegis-shield
+# ci-matrix.sh — Local CI matrix runner for aegis-trust
 #
 # Runs the same checks GitHub Actions would run, across all supported Python
 # versions, using uv-managed interpreters. Use this when GitHub Actions is
@@ -20,7 +20,7 @@ PYTHON_VERSIONS="${PYTHON_VERSIONS:-3.10 3.11 3.12 3.13}"
 # package root" is python/ (not the git toplevel which is the monorepo
 # root containing python/ + node/). Use script-relative path so the
 # script works regardless of cwd, with fallback to git-toplevel for
-# aegis-shield-flat-layout compat.
+# aegis-trust-flat-layout compat.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 if [[ ! -f "${REPO_ROOT}/pyproject.toml" ]]; then

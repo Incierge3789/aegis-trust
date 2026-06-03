@@ -31,7 +31,7 @@ services:
       # AEGIS_CONFIG_PATH is a DIRECTORY; the gateway loads
       # {purpose_map,policy,rbac}.yaml from it. The production image's
       # `aegis-gateway init` does not yet emit those files, so the
-      # aegis-shield β fixture supplies them via volume mount.
+      # aegis-trust β fixture supplies them via volume mount.
       AEGIS_CONFIG_PATH: /opt/aegis/dev-config
       # TLS: the image's init step generated self-signed certs at
       # /opt/aegis/certs/. Turn TLS on explicitly for β integration.
@@ -39,7 +39,7 @@ services:
       AEGIS_TLS_REQUIRED: "true"
       AEGIS_TLS_CERT: /opt/aegis/certs/server.crt
       AEGIS_TLS_KEY: /opt/aegis/certs/server.key
-      # Dashboard legacy unix socket — aegis-shield never connects to it,
+      # Dashboard legacy unix socket — aegis-trust never connects to it,
       # but aegis-gateway panics on missing AEGIS_SOCKET_PATH during
       # startup. Point it at a scratch file inside the writable run dir.
       AEGIS_SOCKET_PATH: /opt/aegis/run/aegis.sock
