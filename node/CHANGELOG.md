@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Added — framework adapters (`aegis-trust/adapters`)
+- **Dedicated agent-framework adapters**, promoting LangChain.js, CrewAI (Node
+  port), and Vercel AI SDK from *compatible-by-pattern* to *integrated*. New
+  subpath export `aegis-trust/adapters`:
+  - `shieldedTool(spec)` — a framework-neutral primitive that wraps a data
+    accessor in `shield()` (filtering + minimum-disclosure fail-closed) and
+    exposes `run()` (filtered value) / `call()` (filtered value serialized for
+    text-only tool runners).
+  - `toLangChainTool(tool, t)` — binds to a LangChain StructuredTool. The
+    `tool` factory is **dependency-injected**, so aegis-trust takes no
+    dependency on LangChain and is immune to its internal version churn.
+  - `toVercelTool(t, { schemaKey? })` — builds the AI SDK tool object directly.
+    Schema key defaults to `inputSchema` (AI SDK v5+); pass
+    `{ schemaKey: "parameters" }` for v4 and earlier.
+  - `toCrewaiTool(t)` — builds the CrewAI Node port's `{ name, description, run }`
+    tool object directly.
+  - Zero new runtime dependencies (`dependencies` stays `{}`); the binders are
+    unit-tested (`tests/adapters.test.ts`) without any framework installed.
+  - The `langchainExample.ts` / `crewaiExample.ts` examples now use the adapters,
+    and a new `vercelAiExample.ts` is added.
+  - Scope note: **Node only** this release. Python LangChain/CrewAI adapters and
+    a streaming-aware wrapper remain follow-ups. No core `shield()` behaviour
+    change; no version bump (additive surface, cross-SDK version-lock preserved).
+  - Audit identity: the shielded accessor is named from `spec.name`, so audit
+    records (local history, test hook, by-function stats, FULL ingest) carry the
+    tool name instead of `"anonymous"`.
+  - `toLangChainTool` is generic over the factory return type — no `unknown`
+    cast at the call site.
+  - `ShieldedTool.call()` fails closed if a custom `serialize` throws, and warns
+    (naming the tool, withholding the error) so the bug stays diagnosable —
+    symmetric with the handler-throw path. Tests cover audit identity, a
+    `denyFields`-only spec, the AUTO→LITE path, and serializer fail-closed.
+  - **Documented the fail-closed contract** on `ShieldedTool` / README: a
+    handler error, a denied/unreachable FULL gate, or a serializer error
+    resolves to a type-shaped empty value (never a thrown exception), so agent
+    frameworks see an empty result rather than a failure to retry on — by
+    design (an exception can carry withheld data). Also documented the
+    single-argument tool-call contract (`run`/`call` forward exactly one
+    structured argument to the handler).
+
 ### Docs (internal-ops/sprint_018 — LITE error-parity remediation)
 - **No Node code change.** The Python SDK reached parity on the LITE
   validation/config error path (it now raises `AegisValidationError` /

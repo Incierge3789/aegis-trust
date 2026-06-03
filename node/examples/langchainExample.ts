@@ -7,14 +7,15 @@
 //   OPENAI_API_KEY=... npx tsx examples/langchainExample.ts
 //
 // What it shows:
-//   A LangChain agent calls `getCustomer` to handle a support ticket. Without
-//   shield(...), the LLM sees the full customer record — email, SSN, credit
-//   card, everything. With shield(...), the tool returns only what the
-//   declared purpose (customer_support) is allowed to see. SSN and card
+//   A LangChain agent calls a customer-lookup tool to handle a support
+//   ticket. Without the shield, the LLM sees the full customer record —
+//   email, SSN, credit card, everything. With the dedicated LangChain
+//   adapter (`shieldedTool` + `toLangChainTool`), the tool returns only what
+//   the declared purpose (customer_support) is allowed to see. SSN and card
 //   never reach the model context, the model logs, or the provider's
 //   training pipeline.
 
-import { shield } from "../src/index.js";
+import { shieldedTool, toLangChainTool } from "../src/adapters/index.js";
 
 // ── Simulated customer database ───────────────────────────
 
@@ -34,13 +35,18 @@ const CUSTOMERS: Record<string, Record<string, unknown>> = {
 
 // ── The tool the agent will call ──────────────────────────
 //
-// shield(...) is the entire integration. The tool now refuses to return
-// anything outside the support scope.
+// One shieldedTool(...) declaration is the entire integration. It refuses to
+// return anything outside the support scope, and toLangChainTool() binds it to
+// a native LangChain StructuredTool (the `tool` factory is injected so this
+// package takes no dependency on LangChain).
 
-const getCustomer = shield({
+const customerLookup = shieldedTool<{ customer_id: string }>({
+  name: "customer_lookup",
+  description: "Look up a customer record by ID for support purposes.",
   purpose: "customer_support",
   scope: ["name", "plan", "last_login", "issue"],
-})(async (customerId: string) => CUSTOMERS[customerId] ?? {});
+  handler: async ({ customer_id }) => CUSTOMERS[customer_id] ?? {},
+});
 
 // ── LangChain wiring (or fallback if not installed) ─────
 
@@ -66,16 +72,10 @@ async function main() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const langchain: any = await import("langchain/agents");
 
-  const lookupTool = tool(
-    async ({ customer_id }: { customer_id: string }) => {
-      return JSON.stringify(await getCustomer(customer_id));
-    },
-    {
-      name: "customer_lookup",
-      description: "Look up a customer record by ID for support purposes.",
-      // schema can be provided via zod; left out to keep this example minimal.
-    },
-  );
+  // The adapter binds the shielded tool to a native LangChain StructuredTool.
+  // shield filtering + JSON serialization are baked in — the agent only ever
+  // sees the support-scoped fields.
+  const lookupTool = toLangChainTool(tool, customerLookup);
 
   const llm = new ChatOpenAI({ model: "gpt-4o-mini", temperature: 0 });
   const agent = await langchain.createToolCallingAgent({
@@ -109,7 +109,7 @@ async function runWithoutLangchain() {
   console.log("=== Raw record (what the tool would normally return) ===");
   console.log(CUSTOMERS["C-1001"]);
   console.log("\n=== shield-filtered record (what the agent actually sees) ===");
-  console.log(await getCustomer("C-1001"));
+  console.log(await customerLookup.run({ customer_id: "C-1001" }));
   console.log(
     "\nThe LLM never sees email, ssn, credit_card, phone, or internal_notes.",
   );

@@ -57,7 +57,7 @@ console.log(getCustomer("C-001"));
 Honest list of what does NOT work in `0.9.1`. We list these here so a real evaluator does not have to discover them from code:
 
 - **LLM streaming responses are not preserved.** `shield()` buffers the entire return value before filtering. SSE / chunked / generator responses from Anthropic, OpenAI, Vercel AI SDK and similar streaming APIs are not supported in 0.9.1. A streaming-aware wrapper is planned for a later release.
-- **No first-party adapter packages for Anthropic / OpenAI / Vercel AI SDK / Mastra / LlamaIndex / Bedrock / AutoGen.** These SDKs interoperate with the generic `shield()` wrapper at the data-access boundary (see [Drop-in wrapper pattern](#drop-in-wrapper-pattern) below), but there are no dedicated adapter modules or runnable example files for them yet. Treat the SDKs above as **compatible-by-pattern**, not **integrated**.
+- **First-party adapters: Node only, three frameworks.** `0.9.1` ships dedicated Node adapters (`aegis-trust/adapters`) for **LangChain.js**, **CrewAI (Node port)**, and **Vercel AI SDK** (`shieldedTool` + `toLangChainTool` / `toCrewaiTool` / `toVercelTool`), each with a runnable example and unit tests. There are **no** dedicated adapters yet for Anthropic / OpenAI SDKs (no tool-registry abstraction — the drop-in one-liner is the whole integration), Mastra, LlamaIndex, Bedrock, or AutoGen.js, and **no Python adapters yet** (Node shipped first; Python is the next increment). Treat anything not in the [Runnable integrations](#runnable-integrations-today) table as **compatible-by-pattern**, not **integrated** — use the [Drop-in wrapper pattern](#drop-in-wrapper-pattern).
 - **Python and Node ingest-failure semantics are now aligned (fail-closed) as of 0.9.1.** Both SDKs return a type-shaped empty on a gateway ingest exception in FULL mode — the filtered data is released only after the audit record is durably accepted (AO-003 audit completeness). rc7 and earlier Node returned the filtered data anyway (fail-open on audit); that divergence was reconciled in 0.9.1 (see `node/CHANGELOG.md`).
 - **Local audit logs are append-only, NOT hash-chained or tamper-evident in the SDK.** Python writes SQLite (`~/.aegis/history.db`); Node writes JSONL (`~/.aegis/history.jsonl`). These are plain append-only local records (no `prev_hash` chaining); editing or deleting an entry leaves no cryptographic trace. Tamper-evidence is a property of the **aegis-core gateway's** server-side audit log in FULL mode (`/audit/verify` → `chain_valid`), not of these local files. Inspecting the local logs currently requires separate tooling per language.
 - **Install resolves to `0.9.1` on both registries.** `pip install aegis-trust` and `npm install aegis-trust` both fetch `0.9.1` (the two SDKs are version-locked at the same number). The deprecated `0.9.0-rc3` (release-integrity incident F-054) is version-scoped and never the default.
@@ -95,23 +95,26 @@ Honest disclosure for procurement teams, security review, and compliance officer
 
 The table below lists what has a working example file in this repo and what is exercised by the test suite. If an integration is **not** in this table, it does not have a dedicated example or test yet — use the generic [Drop-in wrapper pattern](#drop-in-wrapper-pattern) instead.
 
-| Integration | Language | Example file(s) | Test |
-|---|---|---|---|
-| Model Context Protocol (MCP) | Node | [`node/examples/mcpTool.ts`](node/examples/mcpTool.ts), [`node/examples/mcpEndToEnd.ts`](node/examples/mcpEndToEnd.ts) | [`node/tests/mcp/run_end_to_end.mjs`](node/tests/mcp/run_end_to_end.mjs) |
-| LangChain.js | Node | [`node/examples/langchainExample.ts`](node/examples/langchainExample.ts) | optional dependency; example falls back when `@langchain/openai` is not installed |
-| CrewAI (Node port) | Node | [`node/examples/crewaiExample.ts`](node/examples/crewaiExample.ts) | optional dependency; example falls back when `crewai` is not installed |
-| FastAPI / FastMCP | Python | recipes in [`python/README.md`](python/README.md) | underlying `shield()` covered by `python/tests/`; no dedicated FastAPI / FastMCP integration test yet |
-| Generic async / deny-fields / multi-purpose / dot-notation / sandbox / crypto-wallet | Node | [`node/examples/`](node/examples/) | per-example |
+**Dedicated adapters** (Node, `aegis-trust/adapters` subpath) ship a `shieldedTool()` primitive plus per-framework binders (`toLangChainTool`, `toVercelTool`, `toCrewaiTool`) that produce each framework's native tool shape with shield filtering baked in. The binders take no runtime dependency on the frameworks (factory injection / plain objects), so they are version-tolerant and unit-tested without any framework installed. The shield filters the tool's **return value**, not its arguments — validate and authorize tool-call arguments in your handler or the framework's schema layer.
+
+| Integration | Language | Adapter | Example file(s) | Test |
+|---|---|---|---|---|
+| Model Context Protocol (MCP) | Node | drop-in `shield()` | [`node/examples/mcpTool.ts`](node/examples/mcpTool.ts), [`node/examples/mcpEndToEnd.ts`](node/examples/mcpEndToEnd.ts) | [`node/tests/mcp/run_end_to_end.mjs`](node/tests/mcp/run_end_to_end.mjs) |
+| LangChain.js | Node | `toLangChainTool` | [`node/examples/langchainExample.ts`](node/examples/langchainExample.ts) | [`node/tests/adapters.test.ts`](node/tests/adapters.test.ts) (+ example falls back when `@langchain/openai` is not installed) |
+| Vercel AI SDK | Node | `toVercelTool` | [`node/examples/vercelAiExample.ts`](node/examples/vercelAiExample.ts) | [`node/tests/adapters.test.ts`](node/tests/adapters.test.ts) (+ example falls back when `ai` is not installed) |
+| CrewAI (Node port) | Node | `toCrewaiTool` | [`node/examples/crewaiExample.ts`](node/examples/crewaiExample.ts) | [`node/tests/adapters.test.ts`](node/tests/adapters.test.ts) (+ example falls back when `crewai` is not installed) |
+| FastAPI / FastMCP | Python | drop-in `shield()` | recipes in [`python/README.md`](python/README.md) | underlying `shield()` covered by `python/tests/`; no dedicated FastAPI / FastMCP integration test yet |
+| Generic async / deny-fields / multi-purpose / dot-notation / sandbox / crypto-wallet | Node | drop-in `shield()` | [`node/examples/`](node/examples/) | per-example |
 
 Integrations that are **not yet runnable as dedicated adapters in this repo** (use the drop-in wrapper instead):
 
-- Anthropic SDK (`anthropic`, `@anthropic-ai/sdk`)
-- OpenAI SDK (`openai`)
-- Vercel AI SDK (`ai`)
+- Anthropic SDK (`anthropic`, `@anthropic-ai/sdk`) — no tool-registry abstraction; the [drop-in one-liner](#drop-in-wrapper-pattern) is the whole integration (filter the data you put in the `messages` payload).
+- OpenAI SDK (`openai`) — same: filter the tool-result data fed back to the model.
 - Mastra (`@mastra/core`)
 - LlamaIndex, Bedrock, AutoGen.js
+- Python LangChain / CrewAI dedicated adapters — Node adapters shipped first (this release); Python adapters are the next increment.
 
-These are compatible-by-pattern. Purpose-built example files for them are planned but not present in 0.9.1.
+These are compatible-by-pattern. Purpose-built adapters/example files for them are planned but not present in 0.9.1.
 
 ## Drop-in wrapper pattern
 

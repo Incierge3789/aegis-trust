@@ -15,9 +15,10 @@
 //
 // The shield is at the data layer, not the framework — so this pattern
 // works identically with LangGraph, AutoGen, swarm, or any multi-agent
-// framework.
+// framework. toCrewaiTool() binds a shielded tool to the CrewAI Node port's
+// { name, description, run } tool shape.
 
-import { shield } from "../src/index.js";
+import { shieldedTool, toCrewaiTool } from "../src/adapters/index.js";
 
 const CUSTOMERS: Record<string, Record<string, unknown>> = {
   "C-1001": {
@@ -36,16 +37,25 @@ const CUSTOMERS: Record<string, Record<string, unknown>> = {
 };
 
 // ── Two scoped tools backed by the same data source ──────
+//
+// Same underlying record, two purposes → two different per-agent views. The
+// scope is declared once per tool; cross-context leakage is structural.
 
-const getCustomerForSupport = shield({
+const supportLookup = shieldedTool<{ customer_id: string }>({
+  name: "customer_lookup_support",
+  description: "Look up a customer for support work.",
   purpose: "customer_support",
   scope: ["name", "plan", "last_login", "issue"],
-})(async (customerId: string) => CUSTOMERS[customerId] ?? {});
+  handler: async ({ customer_id }) => CUSTOMERS[customer_id] ?? {},
+});
 
-const getCustomerForBilling = shield({
+const billingLookup = shieldedTool<{ customer_id: string }>({
+  name: "customer_lookup_billing",
+  description: "Look up a customer for billing work.",
   purpose: "billing",
   scope: ["name", "plan", "balance_due", "billing_address"],
-})(async (customerId: string) => CUSTOMERS[customerId] ?? {});
+  handler: async ({ customer_id }) => CUSTOMERS[customer_id] ?? {},
+});
 
 // ── CrewAI wiring (or fallback if not installed) ─────────
 
@@ -75,28 +85,14 @@ async function main() {
     role: "Customer Support Specialist",
     goal: "Resolve customer issues using only support-scoped data",
     backstory: "A senior support engineer with limited data access.",
-    tools: [
-      {
-        name: "customer_lookup_support",
-        description: "Look up a customer for support work.",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        run: async (args: any) => getCustomerForSupport(args.customer_id),
-      },
-    ],
+    tools: [toCrewaiTool(supportLookup)],
   });
 
   const billingAgent = new crew.Agent({
     role: "Billing Analyst",
     goal: "Review billing status using only billing-scoped data",
     backstory: "A billing specialist with limited data access.",
-    tools: [
-      {
-        name: "customer_lookup_billing",
-        description: "Look up a customer for billing work.",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        run: async (args: any) => getCustomerForBilling(args.customer_id),
-      },
-    ],
+    tools: [toCrewaiTool(billingLookup)],
   });
 
   const supportTask = new crew.Task({
@@ -132,10 +128,10 @@ async function runWithoutCrew() {
   console.log(CUSTOMERS["C-1001"]);
 
   console.log("\n=== What the Support agent sees ===");
-  console.log(await getCustomerForSupport("C-1001"));
+  console.log(await supportLookup.run({ customer_id: "C-1001" }));
 
   console.log("\n=== What the Billing agent sees ===");
-  console.log(await getCustomerForBilling("C-1001"));
+  console.log(await billingLookup.run({ customer_id: "C-1001" }));
 }
 
 main();
