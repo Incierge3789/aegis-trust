@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "aegis-trust FULL-mode backend contract (SDK-called subset)",
-    "description": "Minimal reference contract listing ONLY the backend endpoints the aegis-trust SDK calls in FULL mode. It exists in this repo solely so the SDK contract test can verify the client targets declared endpoints. The open-source SDK runs in LITE mode (local field reduction, no backend) by default; the backend service and its full API are NOT part of this package. Request/response schemas are intentionally omitted — this stub documents the SDK's integration surface only, not the backend's complete API.",
+    "description": "Minimal reference contract listing ONLY the backend endpoints the aegis-trust SDK calls in FULL mode. It exists in this repo solely so the SDK contract test can verify the client targets declared endpoints. The open-source SDK runs in LITE mode (local field reduction, no backend) by default; the backend service and its full API are NOT part of this package. Request/response schemas are intentionally omitted \u2014 this stub documents the SDK's integration surface only, not the backend's complete API.",
     "contact": {
       "name": "aegis-trust maintainers",
       "url": "https://github.com/Incierge3789/aegis-trust"
@@ -23,49 +23,111 @@
     "/check-access": {
       "post": {
         "summary": "FULL-mode authorization check before data release",
-        "responses": { "200": { "description": "Authorization decision" } }
+        "responses": {
+          "200": {
+            "description": "Authorization decision"
+          }
+        }
       }
     },
     "/shield/ingest": {
       "post": {
         "summary": "Post-authorization audit ingest",
-        "responses": { "200": { "description": "Audit record accepted" } }
+        "responses": {
+          "200": {
+            "description": "Audit record accepted"
+          }
+        }
       }
     },
     "/shield/policy-sync": {
       "post": {
         "summary": "Policy synchronization",
-        "responses": { "200": { "description": "Policy synced" } }
+        "responses": {
+          "200": {
+            "description": "Policy synced"
+          }
+        }
       }
     },
     "/shield/stats": {
       "get": {
         "summary": "Shield statistics",
-        "responses": { "200": { "description": "Statistics" } }
+        "responses": {
+          "200": {
+            "description": "Statistics"
+          }
+        }
       }
     },
     "/shield/report": {
       "get": {
         "summary": "Shield report",
-        "responses": { "200": { "description": "Report" } }
+        "responses": {
+          "200": {
+            "description": "Report"
+          }
+        }
       }
     },
     "/audit/verify": {
       "post": {
         "summary": "Verify audit chain / inclusion",
-        "responses": { "200": { "description": "Verification result" } }
+        "responses": {
+          "200": {
+            "description": "Verification result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerifyResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/audit-log": {
       "get": {
         "summary": "Read audit log entries",
-        "responses": { "200": { "description": "Audit log" } }
+        "responses": {
+          "200": {
+            "description": "Audit log"
+          }
+        }
       }
     },
     "/health": {
       "get": {
         "summary": "Backend health probe",
-        "responses": { "200": { "description": "Healthy" } }
+        "responses": {
+          "200": {
+            "description": "Healthy"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuditVerifyResponse": {
+        "type": "object",
+        "required": [
+          "chain_valid",
+          "total_entries"
+        ],
+        "properties": {
+          "chain_valid": {
+            "type": "boolean",
+            "description": "Chain integrity status"
+          },
+          "total_entries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total entries verified",
+            "minimum": 0
+          }
+        }
       }
     }
   }
