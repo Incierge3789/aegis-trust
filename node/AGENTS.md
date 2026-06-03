@@ -94,6 +94,8 @@ server.setRequestHandler("tools/call", async (req) => {
 
 `shield(...)` works with any framework — it returns a wrapped function with the same signature, so it stacks inside (closer to the function) any framework decorator or registration call.
 
+> For LangChain.js, CrewAI (Node port), and the Vercel AI SDK there are **dedicated adapters** in the `aegis-trust/adapters` subpath (`shieldedTool` + `toLangChainTool` / `toCrewaiTool` / `toVercelTool`) that build each framework's native tool shape — including the audit-correct tool name — with shield filtering and serialization baked in. The direct `shield(...)` patterns below still work; the adapters are an ergonomic layer over them. See the READMEs for adapter usage.
+
 ### Vercel AI SDK Integration
 
 ```typescript

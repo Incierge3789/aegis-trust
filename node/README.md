@@ -99,21 +99,45 @@ One wrapper declares purpose; the SDK enforces field-level access control. Zero 
 
 ---
 
-## Agent Framework Examples
+## Agent Framework Adapters
+
+Dedicated binders for the major agent frameworks live in the `aegis-trust/adapters`
+subpath. `shieldedTool()` declares a shielded data accessor once (shield filtering +
+serialization baked in); each `to<Framework>Tool` binder maps it onto that framework's
+native tool shape. The binders take **no runtime dependency** on the frameworks — the
+LangChain factory is dependency-injected, and the Vercel / CrewAI tools are plain
+objects — so they are version-tolerant and need nothing installed to import or test.
+
+> **The shield filters the *return value*, not the arguments.** Tool-call
+> arguments reach your `handler` unfiltered — validate and authorize them in the
+> handler (or the framework's schema layer). `scope` / `denyFields` constrain
+> what comes *back*, not what goes *in*.
+>
+> **Failures fail closed, as an empty result — not an exception.** A handler
+> error, a denied/unreachable FULL-mode gate, or a serializer error resolves to
+> a type-shaped empty value (`run()` → empty, `call()` → `""`); the promise
+> never rejects. So the agent framework sees an empty tool result, not a thrown
+> error, and will not auto-retry on a shielded tool failure. This is by design:
+> an exception can carry the very data the shield is withholding. If you need
+> retry/notify on an outage, detect it inside the `handler` before returning.
 
 ### LangChain.js — filter PII out of tool returns
 
 ```typescript
-import { shield } from "aegis-trust";
+import { tool } from "@langchain/core/tools";
+import { shieldedTool, toLangChainTool } from "aegis-trust/adapters";
 
-const getCustomer = shield({
+const customerLookup = shieldedTool<{ id: string }>({
+  name: "customer_lookup",
+  description: "Look up a customer record by ID for support purposes.",
   purpose: "customer_support",
   scope: ["name", "plan", "issue"],
-})(async (id: string) => db.fetch(id));   // db.fetch returns 10+ fields
+  handler: async ({ id }) => db.fetch(id),   // db.fetch returns 10+ fields
+});
 
-// Register `getCustomer` as a LangChain tool. The agent — and the model
-// context, the model logs, and the provider's training pipeline — only
-// ever see { name, plan, issue }.
+// The agent — and the model context, the model logs, and the provider's
+// training pipeline — only ever see { name, plan, issue }.
+const lookupTool = toLangChainTool(tool, customerLookup);
 ```
 
 Runnable end-to-end example: [`examples/langchainExample.ts`](examples/langchainExample.ts).
@@ -121,37 +145,58 @@ Runnable end-to-end example: [`examples/langchainExample.ts`](examples/langchain
 ### CrewAI (Node port) — different agents, different scopes, same data
 
 ```typescript
-const getForSupport = shield({
+import { shieldedTool, toCrewaiTool } from "aegis-trust/adapters";
+
+const supportLookup = shieldedTool<{ id: string }>({
+  name: "customer_lookup_support",
+  description: "Look up a customer for support work.",
   purpose: "customer_support",
   scope: ["name", "plan", "issue"],
-})(async (id: string) => db.fetch(id));
+  handler: async ({ id }) => db.fetch(id),
+});
 
-const getForBilling = shield({
+const billingLookup = shieldedTool<{ id: string }>({
+  name: "customer_lookup_billing",
+  description: "Look up a customer for billing work.",
   purpose: "billing",
   scope: ["name", "plan", "balance_due", "billing_address"],
-})(async (id: string) => db.fetch(id));
+  handler: async ({ id }) => db.fetch(id),
+});
+
+const supportAgent = new crew.Agent({ role: "...", tools: [toCrewaiTool(supportLookup)] });
+const billingAgent = new crew.Agent({ role: "...", tools: [toCrewaiTool(billingLookup)] });
 ```
 
 Support and Billing agents share one `db.fetch()` but never see each other's fields. Runnable example: [`examples/crewaiExample.ts`](examples/crewaiExample.ts).
 
-### Vercel AI SDK / MCP / Mastra
+### Vercel AI SDK
 
 ```typescript
-import { tool } from "ai";
-import { shield } from "aegis-trust";
+import { z } from "zod";
+import { generateText } from "ai";
+import { shieldedTool, toVercelTool } from "aegis-trust/adapters";
 
-const fetchCustomer = shield({
+const customerLookup = shieldedTool<{ id: string }>({
+  name: "customer_lookup",
+  description: "Look up a customer by ID",
   purpose: "support",
   scope: ["name", "issue"],
-})(async (id: string) => db.fetch(id));
+  schema: z.object({ id: z.string() }),
+  handler: async ({ id }) => db.fetch(id),
+});
 
-export const customerTool = tool({
-  description: "Look up a customer by ID",
-  execute: async ({ id }: { id: string }) => fetchCustomer(id),
+await generateText({
+  model,
+  tools: { customer_lookup: toVercelTool(customerLookup) },
+  prompt: "...",
 });
 ```
 
-`shield()` returns a function with the same signature as the original, so it stacks inside any framework's tool registration. Works identically with `@modelcontextprotocol/sdk`, Mastra `createTool`, AutoGen.js, or any framework that calls a JS function.
+The schema key defaults to `inputSchema` (AI SDK v5+); pass `toVercelTool(t, { schemaKey: "parameters" })` for v4 and earlier. Runnable example: [`examples/vercelAiExample.ts`](examples/vercelAiExample.ts).
+
+### Other frameworks (MCP, Mastra, AutoGen.js, LangGraph, …)
+
+Because the shield lives at the data layer, `shieldedTool().run()` / `.call()` slot into any framework that calls a JS function — or use the generic `shield()` wrapper directly and pass the result into the framework's tool registry. Works identically with `@modelcontextprotocol/sdk`, Mastra `createTool`, AutoGen.js, swarm, and LangGraph.
 
 ---
 
