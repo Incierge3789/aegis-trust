@@ -22,9 +22,10 @@
     unit-tested (`tests/adapters.test.ts`) without any framework installed.
   - The `langchainExample.ts` / `crewaiExample.ts` examples now use the adapters,
     and a new `vercelAiExample.ts` is added.
-  - Scope note: **Node only** this release. Python LangChain/CrewAI adapters and
-    a streaming-aware wrapper remain follow-ups. No core `shield()` behaviour
-    change; no version bump (additive surface, cross-SDK version-lock preserved).
+  - Scope note: Python LangChain/CrewAI adapters ship in the same release
+    (see [`python/CHANGELOG.md`](../python/CHANGELOG.md)); a streaming-aware
+    wrapper remains a follow-up. No core `shield()` behaviour change; no version
+    bump (additive surface, cross-SDK version-lock preserved).
   - Audit identity: the shielded accessor is named from `spec.name`, so audit
     records (local history, test hook, by-function stats, FULL ingest) carry the
     tool name instead of `"anonymous"`.
