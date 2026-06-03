@@ -13,6 +13,7 @@ What it shows:
     returns only the support-scoped fields. SSN and card never reach the model
     context, the model logs, or the provider's training pipeline.
 """
+
 from aegis_trust.adapters import shielded_tool, to_langchain_tool
 
 CUSTOMERS = {

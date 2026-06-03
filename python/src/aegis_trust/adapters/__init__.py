@@ -8,6 +8,7 @@ onto a framework's native tool shape. The binders take no runtime dependency on
 the frameworks (the framework factory / base class is injected), so they are
 version-tolerant and need no framework installed to import or test.
 """
+
 from aegis_trust.adapters.core import ShieldedTool, shielded_tool
 from aegis_trust.adapters.langchain import to_langchain_tool
 from aegis_trust.adapters.crewai import to_crewai_tool

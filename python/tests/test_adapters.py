@@ -3,6 +3,7 @@
 Mirror of node/tests/adapters.test.ts. Framework-free: the LangChain factory
 and CrewAI BaseTool are mocked, so no framework needs to be installed.
 """
+
 import json
 
 import pytest

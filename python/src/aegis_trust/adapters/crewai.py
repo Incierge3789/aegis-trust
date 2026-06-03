@@ -4,6 +4,7 @@ The CrewAI ``BaseTool`` class is INJECTED by the caller, so aegis-trust takes
 no dependency on CrewAI and is immune to its internal version churn. A fresh
 BaseTool subclass is built with the shielded ``run`` wired into ``_run``.
 """
+
 from __future__ import annotations
 
 from typing import Any

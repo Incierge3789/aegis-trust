@@ -9,6 +9,7 @@ once and produces a framework-neutral descriptor; the per-framework binders
 tool shape WITHOUT this package depending on — or pinning a version of — any of
 them.
 """
+
 from __future__ import annotations
 
 import functools
@@ -90,13 +91,16 @@ def shielded_tool(
     # FULL-mode ingest. shield() reads ``fn.__name__`` when it wraps. (mirror of
     # the Node spec.name audit-identity fix.)
     if inspect.iscoroutinefunction(handler):
+
         @functools.wraps(handler)
         async def _accessor(*a: Any, **k: Any) -> Any:
             return await handler(*a, **k)
     else:
+
         @functools.wraps(handler)
         def _accessor(*a: Any, **k: Any) -> Any:
             return handler(*a, **k)
+
     _accessor.__name__ = name
     _accessor.__qualname__ = name
 

@@ -4,6 +4,7 @@ The LangChain ``StructuredTool.from_function`` factory is INJECTED by the
 caller, so aegis-trust takes no dependency on LangChain and is immune to its
 internal version churn — only that public factory signature has to hold.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable
@@ -37,6 +38,7 @@ def to_langchain_tool(
         serialized to a string (what a LangChain tool emits to the model).
     :param tool: the shielded tool descriptor.
     """
+
     def _func(**kwargs: Any) -> str:
         return tool.call(**kwargs)
 

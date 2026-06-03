@@ -15,6 +15,7 @@ What it shows:
     The shield is at the data layer, not the framework — so this pattern works
     identically with LangGraph, AutoGen, or any agent that accepts a tool.
 """
+
 from aegis_trust.adapters import shielded_tool, to_crewai_tool
 
 CUSTOMERS = {
@@ -65,8 +66,12 @@ def main() -> None:
     support_tool = to_crewai_tool(BaseTool, support_lookup)
     billing_tool = to_crewai_tool(BaseTool, billing_lookup)
     # Hand support_tool / billing_tool to their respective crewai Agents.
-    print("Support tool:", support_tool.name, "->", support_tool.run(customer_id="C-1001"))
-    print("Billing tool:", billing_tool.name, "->", billing_tool.run(customer_id="C-1001"))
+    print(
+        "Support tool:", support_tool.name, "->", support_tool.run(customer_id="C-1001")
+    )
+    print(
+        "Billing tool:", billing_tool.name, "->", billing_tool.run(customer_id="C-1001")
+    )
 
 
 if __name__ == "__main__":
