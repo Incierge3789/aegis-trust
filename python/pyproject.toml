@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aegis-trust"
-version = "0.9.0"
+version = "0.9.1"
 description = "AI agent data access control — control what agents can see"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "Incierge Inc.", email = "contact@aegisagentcontrol.com" },
+    { name = "Incierge", email = "contact@aegisagentcontrol.com" },
 ]
 keywords = [
     "ai",

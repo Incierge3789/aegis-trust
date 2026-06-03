@@ -99,6 +99,16 @@
   `resource_id`/`resource_type` (the latter is the schema_version=2 shape, gated
   behind a separate decision).
 
+## [0.9.1] — 2026-06-03 — package author/copyright correction (metadata only)
+
+### Changed
+- **Package author/copyright corrected from "Incierge Inc." to "Incierge".**
+  The Aegis IP is held personally and there is no registered "Incierge Inc."
+  entity, so the prior label incorrectly implied a company. Updates the
+  `pyproject.toml` `authors` field and the `LICENSE` copyright line. No code
+  change — functionally identical to `0.9.0`; published only to correct the
+  immutable package metadata on the registry.
+
 ## [0.9.0-rc8] — 2026-05-30 — cross-SDK version-lock (no Python code change)
 
 `internal-ops/sprint_015`. **No Python API or behavior change.** This SDK
@@ -851,7 +861,7 @@ Pure documentation, signature, and namespace cleanup. No runtime behavior change
   - Replaced private-repo relative links (`examples/`, `docs/decisions/`, `SECURITY.md`) with `contact@aegisagentcontrol.com` contact.
 
 ### Added
-- **NOTICE file**: explicit patent reservation. MIT License grants copyright permissions only; patent rights in Aegis platform technologies are expressly reserved by Incierge Inc. Commercial and patent licensing inquiries routed to `contact@aegisagentcontrol.com`.
+- **NOTICE file**: explicit patent reservation. MIT License grants copyright permissions only; patent rights in Aegis platform technologies are expressly reserved by Incierge. Commercial and patent licensing inquiries routed to `contact@aegisagentcontrol.com`.
 
 ## [0.6.5.0] — 2026-04-12
 

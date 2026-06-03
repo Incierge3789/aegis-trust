@@ -94,6 +94,16 @@ claims** — the worst defect class for a trust product. Source-committed on bra
   document.) Execution evidence — `vitest`, `tsc --noEmit`, clean-room install —
   is pending the S017 execution pass and is **not** asserted as re-run.
 
+## [0.9.1] — 2026-06-03 — package author/copyright correction (metadata only)
+
+### Changed
+- **Package author/copyright corrected from "Incierge Inc." to "Incierge".**
+  The Aegis IP is held personally and there is no registered "Incierge Inc."
+  entity, so the prior label incorrectly implied a company. Updates the
+  `package.json` `author` field and the `LICENSE` copyright line. No code
+  change — functionally identical to `0.9.0`; published only to correct the
+  immutable package metadata on the registry.
+
 ## [0.9.0-rc8] — 2026-05-30 — fail-open → fail-closed remediation (internal-ops/sprint_015)
 
 `internal-ops/sprint_015` remediation of the S014 distribution-readiness
