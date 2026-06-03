@@ -255,15 +255,20 @@ jobs:
           import tomllib, re
 
           readme = Path("README.md").read_text()
-          m = re.search(r"pip install\s+'aegis-trust==([^']+)'\s+--pre", readme)
-          assert m, "FATAL: README pip install pin not found in expected format ('aegis-trust==X.Y.ZrcN' --pre)"
-          readme_v = m.group(1)
           pyproject_v = tomllib.loads(Path("python/pyproject.toml").read_text())["project"]["version"]
-          if Version(readme_v) != Version(pyproject_v):
-              print(f"DRIFT: README pip pin={readme_v!r}  pyproject={pyproject_v!r}")
-              print(f"  normalized: README={Version(readme_v)}  pyproject={Version(pyproject_v)}")
-              raise SystemExit(1)
-          print(f"OK (README): pip pin matches pyproject at {Version(readme_v)}")
+          # A pinned install (`pip install 'aegis-trust==X'`, with or without --pre)
+          # is OPTIONAL. Stable releases document bare `pip install aegis-trust`;
+          # if a pin is present anywhere it must still match pyproject.
+          m = re.search(r"pip install\s+'aegis-trust==([^']+)'", readme)
+          if m:
+              readme_v = m.group(1)
+              if Version(readme_v) != Version(pyproject_v):
+                  print(f"DRIFT: README pip pin={readme_v!r}  pyproject={pyproject_v!r}")
+                  print(f"  normalized: README={Version(readme_v)}  pyproject={Version(pyproject_v)}")
+                  raise SystemExit(1)
+              print(f"OK (README): pip pin matches pyproject at {Version(readme_v)}")
+          else:
+              print(f"OK (README): no pinned install; bare `pip install aegis-trust` resolves to {Version(pyproject_v)}")
           PY
 
       - name: Cross-SDK version-lock (npm package.json == PyPI pyproject, PEP 440 normalized)

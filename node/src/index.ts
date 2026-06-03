@@ -111,7 +111,7 @@ export {
   type ShieldHistoryHandle,
 } from "./vitestPlugin.js";
 
-export const VERSION = "0.9.0-rc8";
+export const VERSION = "0.9.0";
 
 // Schema version for the audit event format emitted by HistoryStore and
 // the ingest endpoint payload. Bumped when audit record shape changes.

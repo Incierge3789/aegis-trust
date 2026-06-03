@@ -610,3 +610,116 @@ jobs:
           packages-dir: dist
           skip-existing: true       # version-lock: a tag whose PyPI version already exists is a no-op, not a failure
           attestations: false       # mirror npm --provenance: deferred while repo is private; re-enable on public flip
+
+  # === Site registry-sync notify job (github-hosted) =================================
+  # Runs ONLY on tag push, ONLY after BOTH publish jobs succeed (needs: = all must
+  # pass). On a partial publish (one registry up, the other failed) this job is
+  # SKIPPED — the site is never told to sync a half-published release.
+  #
+  # What it does:
+  #   1. If no cross-repo dispatch token is configured, it is a logged NO-OP and
+  #      the release stays green (the wiring is inert until the maintainer adds the
+  #      secret — see "Required repository configuration" below).
+  #   2. Otherwise it CONFIRMS the released version is actually visible on BOTH
+  #      public registries (bounded retry), then calls the aegisagentcontrol
+  #      `registry-sync-receiver` workflow via the GitHub API (workflow_dispatch).
+  #
+  # Trust boundary: the site receiver does NOT trust the version we pass — it is
+  # audit text only. The site always re-fetches the live registries itself. A
+  # dispatch failure here is a DISTINCT, re-runnable error: the packages are
+  # already published; only the site-sync notification did not land. Re-running
+  # THIS job (Actions UI -> Re-run failed jobs) retries the notify safely.
+  #
+  # === Required repository configuration (maintainer, one-time) — owner only ===
+  #   This is the ONE setup that cannot be delegated to CI/AI. The default
+  #   GITHUB_TOKEN cannot dispatch a workflow in another repo, so provide a
+  #   least-privilege cross-repo credential as a secret on THIS repo:
+  #     secrets.SITE_SYNC_DISPATCH_TOKEN
+  #   Use EITHER:
+  #     (a) a fine-grained PAT scoped to ONLY the site repo with
+  #         Actions: Read and write  +  Metadata: Read-only, or
+  #     (b) a GitHub App installation token (App installed on the site repo with
+  #         Actions: write), minted in a prior step.
+  #   Optional overrides (default to the public site repo / workflow file):
+  #     vars.SITE_SYNC_REPO       (default: Incierge3789/aegisagentcontrol)
+  #     vars.SITE_SYNC_WORKFLOW   (default: registry-sync-receiver.yml)
+  #   Until the secret exists, this job is a green no-op and nothing is dispatched.
+  notify-site-registry-sync:
+    name: Notify aegisagentcontrol site to sync public registry versions
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [publish-npm-trusted-publisher, publish-pypi-trusted-publisher]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # nothing in THIS repo is written; cross-repo auth is the secret
+    env:
+      SITE_DISPATCH_TOKEN: ${{ secrets.SITE_SYNC_DISPATCH_TOKEN }}
+      SITE_REPO: ${{ vars.SITE_SYNC_REPO || 'Incierge3789/aegisagentcontrol' }}
+      SITE_WORKFLOW: ${{ vars.SITE_SYNC_WORKFLOW || 'registry-sync-receiver.yml' }}
+      PACKAGE: aegis-trust
+    steps:
+      - name: Skip cleanly if no cross-repo dispatch token is configured
+        id: tokcheck
+        run: |
+          set -euo pipefail
+          if [ -z "${SITE_DISPATCH_TOKEN:-}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=site-sync skipped::SITE_SYNC_DISPATCH_TOKEN not configured — release unaffected; site was not notified. Add the secret to enable auto-sync."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "[notify] dispatch token present."
+          fi
+
+      - name: Confirm released version is live on BOTH registries (bounded retry)
+        if: steps.tokcheck.outputs.configured == 'true'
+        # npm form (hyphen) comes straight from the tag; PyPI normalizes the
+        # PEP 440 local form (0.9.0-rc9 -> 0.9.0rc9). We accept either spelling on
+        # PyPI. We do NOT compare npm vs PyPI to each other (no parity inference);
+        # each registry is confirmed independently for THIS release's version.
+        run: |
+          set -euo pipefail
+          NPM_VERSION="${GITHUB_REF_NAME#v}"            # e.g. 0.9.0-rc9 or 1.0.0
+          PYPI_VERSION="${NPM_VERSION/-/}"              # e.g. 0.9.0rc9   or 1.0.0
+          echo "[notify] confirming ${PACKAGE} npm=${NPM_VERSION} pypi=${PYPI_VERSION} on public registries"
+
+          ATTEMPTS=30   # 30 * 20s = up to 10 minutes for registry propagation
+          SLEEP=20
+          for i in $(seq 1 "$ATTEMPTS"); do
+            NPM_OK=false; PYPI_OK=false
+            if curl -fsS "https://registry.npmjs.org/${PACKAGE}" \
+                 | jq -e --arg v "$NPM_VERSION" '.versions | has($v)' >/dev/null 2>&1; then
+              NPM_OK=true
+            fi
+            if curl -fsS "https://pypi.org/pypi/${PACKAGE}/json" \
+                 | jq -e --arg a "$PYPI_VERSION" --arg b "$NPM_VERSION" \
+                       '.releases | (has($a) or has($b))' >/dev/null 2>&1; then
+              PYPI_OK=true
+            fi
+            if [ "$NPM_OK" = true ] && [ "$PYPI_OK" = true ]; then
+              echo "[notify] CONFIRMED: npm=${NPM_VERSION} and PyPI=${PYPI_VERSION} both live (attempt $i)."
+              exit 0
+            fi
+            echo "[notify] attempt $i/$ATTEMPTS: npm_ok=$NPM_OK pypi_ok=$PYPI_OK — retrying in ${SLEEP}s"
+            sleep "$SLEEP"
+          done
+          echo "[notify] REGISTRY-CONFIRM TIMEOUT: release tag ${GITHUB_REF_NAME} not yet visible on both" >&2
+          echo "[notify] registries. Packages may still be propagating. Re-run THIS job to retry." >&2
+          exit 1
+
+      - name: Dispatch site registry-sync receiver (workflow_dispatch via API)
+        if: steps.tokcheck.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SITE_SYNC_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          REASON="aegis-trust ${GITHUB_REF_NAME} published (npm+PyPI confirmed live; run ${GITHUB_RUN_ID})"
+          echo "[notify] dispatching ${SITE_WORKFLOW} on ${SITE_REPO}"
+          if gh workflow run "${SITE_WORKFLOW}" -R "${SITE_REPO}" --ref main -f reason="${REASON}"; then
+            echo "[notify] site registry-sync dispatched. The site re-fetches live registries itself;"
+            echo "[notify] the version above is audit text only and is not used as a display source."
+          else
+            echo "[notify] DISPATCH FAILED: packages ARE published, but the site-sync notification" >&2
+            echo "[notify] did not land. This is isolated from the publish jobs (already green)." >&2
+            echo "[notify] Fix: verify SITE_SYNC_DISPATCH_TOKEN scope (Actions:write on ${SITE_REPO})," >&2
+            echo "[notify] then Re-run THIS job. No re-publish is needed." >&2
+            exit 1
+          fi

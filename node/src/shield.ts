@@ -43,23 +43,32 @@ export function _setTestHook(hook: ShieldCallHook | null): void {
   _testHook = hook;
 }
 
-// ── shield() ──────────────────────────────────────────────
-//
-// HOF returning a wrapped function. Sync and async are both supported:
-// the wrapper detects a returned Promise and routes accordingly.
-//
-//   const safe = shield({ purpose: "lookup", scope: ["name", "email"] })(getUser);
-//   const out = safe(123);                        // sync ok
-//   const out = await safe(123);                  // async ok
-//
-// Modes:
-//   - LITE: in-process filter only
-//   - FULL: pre-call /check-access trust gate, THEN filter + ingest. The
-//           gate runs before the wrapped function — a denied / unreachable /
-//           503 authorization never invokes it. FULL requires an `async`
-//           function (it has no pre-execution await point otherwise).
-//   - AUTO: detect — FULL if AEGIS_TOKEN set and backend reachable, else LITE
-
+/**
+ * Create a data-access guard. Returns a higher-order function that wraps your
+ * data accessor so an agent only ever sees the fields you declare.
+ *
+ * Declare a `purpose` plus either `scope` (whitelist) or `denyFields`
+ * (blacklist). The wrapped function keeps the same signature and supports both
+ * sync and async callers (the wrapper detects a returned Promise and routes
+ * accordingly). Fail-closed: an empty spec, an invalid `mode`, or a thrown
+ * error never releases unfiltered data.
+ *
+ * @example
+ * const safe = shield({ purpose: "lookup", scope: ["name", "email"] })(getUser);
+ * const out = safe(123);        // sync
+ * const out = await safe(123);  // async
+ *
+ * @param options - Guard options: `purpose` (required) and `scope` and/or
+ *   `denyFields`, plus optional `mode` (`"lite"` | `"full"` | `"auto"`).
+ * @returns A wrapper `(fn) => fn` producing a same-signature guarded function.
+ *
+ * Modes:
+ *  - `LITE`: in-process field filtering only.
+ *  - `FULL`: pre-call `/check-access` trust gate, then filter + audit ingest.
+ *    The gate runs before the wrapped function, so a denied / unreachable / 503
+ *    authorization never invokes it. `FULL` requires an `async` function.
+ *  - `AUTO`: `FULL` when `AEGIS_TOKEN` is set and the backend is reachable, else `LITE`.
+ */
 export function shield(options: ShieldOptions) {
   const purpose = options.purpose;
   const scope = options.scope ?? [];

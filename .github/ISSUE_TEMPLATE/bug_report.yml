@@ -27,7 +27,7 @@ body:
     attributes:
       label: Version
       description: Output of `pip show aegis-trust` or `npm ls aegis-trust`
-      placeholder: "0.9.0-rc8"
+      placeholder: "0.9.0"
     validations:
       required: true
   - type: textarea
