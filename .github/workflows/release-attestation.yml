@@ -652,13 +652,18 @@ jobs:
     permissions:
       contents: read   # nothing in THIS repo is written; cross-repo auth is the secret
     env:
-      SITE_DISPATCH_TOKEN: ${{ secrets.SITE_SYNC_DISPATCH_TOKEN }}
+      # The cross-repo dispatch token is deliberately NOT job-level env (least
+      # privilege): it is injected ONLY into the token-check and dispatch steps
+      # below, so the registry-confirm step never has it in scope. SITE_REPO /
+      # SITE_WORKFLOW are non-secret overrides with safe public defaults.
       SITE_REPO: ${{ vars.SITE_SYNC_REPO || 'Incierge3789/aegisagentcontrol' }}
       SITE_WORKFLOW: ${{ vars.SITE_SYNC_WORKFLOW || 'registry-sync-receiver.yml' }}
       PACKAGE: aegis-trust
     steps:
       - name: Skip cleanly if no cross-repo dispatch token is configured
         id: tokcheck
+        env:
+          SITE_DISPATCH_TOKEN: ${{ secrets.SITE_SYNC_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${SITE_DISPATCH_TOKEN:-}" ]; then
@@ -671,38 +676,76 @@ jobs:
 
       - name: Confirm released version is live on BOTH registries (bounded retry)
         if: steps.tokcheck.outputs.configured == 'true'
-        # npm form (hyphen) comes straight from the tag; PyPI normalizes the
-        # PEP 440 local form (0.9.0-rc9 -> 0.9.0rc9). We accept either spelling on
-        # PyPI. We do NOT compare npm vs PyPI to each other (no parity inference);
-        # each registry is confirmed independently for THIS release's version.
+        # CONTRACT: this job tells the SITE to mirror PUBLIC REGISTRY VERSION
+        # NUMBERS. The site never mirrors artifact content — only version strings,
+        # which it independently re-fetches. So the correct gate here is "is this
+        # version actually live on both public registries", NOT "did THIS run
+        # freshly upload it". (PyPI's skip-existing:true can succeed without an
+        # upload; that is fine for a version-DISPLAY mirror because the displayed
+        # number is true regardless of which run published it. Artifact / build
+        # integrity is owned by the SBOM + cosign + attestation jobs above, not
+        # here.) We confirm each registry INDEPENDENTLY — no npm-vs-PyPI parity.
+        #
+        # PEP 440: npm uses the hyphenated local form (0.9.0-rc9); PyPI stores the
+        # canonical form (0.9.0rc9, 0.9.0b2, 0.9.0a1, 0.9.0.dev3). We generate the
+        # canonical PyPI candidate set with a dependency-free stdlib normalizer and
+        # accept a match on ANY candidate, so the confirm does not false-timeout on
+        # legal pre-release spellings.
         run: |
           set -euo pipefail
           NPM_VERSION="${GITHUB_REF_NAME#v}"            # e.g. 0.9.0-rc9 or 1.0.0
-          PYPI_VERSION="${NPM_VERSION/-/}"              # e.g. 0.9.0rc9   or 1.0.0
-          echo "[notify] confirming ${PACKAGE} npm=${NPM_VERSION} pypi=${PYPI_VERSION} on public registries"
+          echo "[notify] confirming ${PACKAGE} npm=${NPM_VERSION} on npm + PyPI (canonicalized)"
+
+          # Canonical PyPI spellings for this version (pure bash + sed — no python
+          # heredoc, no external deps). Split release vs pre-release on the first
+          # hyphen, then map the PEP 440 pre-release spelling to its canonical form.
+          REL="${NPM_VERSION%%-*}"                       # 0.9.0  (release portion)
+          PRE="${NPM_VERSION#"$REL"}"; PRE="${PRE#-}"    # rc9 / beta2 / "" for stable
+          if [ -z "$PRE" ]; then
+            # Stable tag: the bare release form is the only valid PyPI spelling.
+            PYPI_CANDS=("$NPM_VERSION" "$REL")
+          else
+            # Pre-release tag: do NOT accept the bare stable "$REL" (that would
+            # green-light on a stable release when THIS pre-release is not live).
+            PRE_NORM="$(printf '%s' "$PRE" | tr 'A-Z' 'a-z' \
+              | sed -E 's/[._-]+//g; s/^alpha/a/; s/^beta/b/; s/^(preview|pre)/rc/; s/^c([0-9])/rc\1/')"
+            # PEP 440 implicit zero: bare a/b/rc/dev -> a0/b0/rc0/dev0.
+            case "$PRE_NORM" in a|b|rc|dev) PRE_NORM="${PRE_NORM}0" ;; esac
+            PYPI_CANDS=("$NPM_VERSION" "${REL}${PRE_NORM}")   # 0.9.0rc9 / 0.9.0b2 / 1.0.0rc0
+            case "$PRE_NORM" in
+              dev*) PYPI_CANDS+=("${REL}.${PRE_NORM}") ;;     # PEP 440 dev form: 0.9.0.dev3
+            esac
+          fi
+          echo "[notify] PyPI candidate spellings: ${PYPI_CANDS[*]}"
 
           ATTEMPTS=30   # 30 * 20s = up to 10 minutes for registry propagation
           SLEEP=20
           for i in $(seq 1 "$ATTEMPTS"); do
             NPM_OK=false; PYPI_OK=false
-            if curl -fsS "https://registry.npmjs.org/${PACKAGE}" \
-                 | jq -e --arg v "$NPM_VERSION" '.versions | has($v)' >/dev/null 2>&1; then
+            NPM_JSON="$(curl -fsS "https://registry.npmjs.org/${PACKAGE}" || true)"
+            if [ -n "$NPM_JSON" ] && printf '%s' "$NPM_JSON" | jq -e --arg v "$NPM_VERSION" '.versions | has($v)' >/dev/null 2>&1; then
               NPM_OK=true
             fi
-            if curl -fsS "https://pypi.org/pypi/${PACKAGE}/json" \
-                 | jq -e --arg a "$PYPI_VERSION" --arg b "$NPM_VERSION" \
-                       '.releases | (has($a) or has($b))' >/dev/null 2>&1; then
-              PYPI_OK=true
+            PYPI_JSON="$(curl -fsS "https://pypi.org/pypi/${PACKAGE}/json" || true)"
+            if [ -n "$PYPI_JSON" ]; then
+              for c in "${PYPI_CANDS[@]}"; do
+                if printf '%s' "$PYPI_JSON" | jq -e --arg v "$c" '.releases | has($v)' >/dev/null 2>&1; then
+                  PYPI_OK=true; break
+                fi
+              done
             fi
             if [ "$NPM_OK" = true ] && [ "$PYPI_OK" = true ]; then
-              echo "[notify] CONFIRMED: npm=${NPM_VERSION} and PyPI=${PYPI_VERSION} both live (attempt $i)."
+              echo "[notify] CONFIRMED: ${PACKAGE} ${NPM_VERSION} live on npm and PyPI (attempt $i)."
               exit 0
             fi
             echo "[notify] attempt $i/$ATTEMPTS: npm_ok=$NPM_OK pypi_ok=$PYPI_OK — retrying in ${SLEEP}s"
             sleep "$SLEEP"
           done
-          echo "[notify] REGISTRY-CONFIRM TIMEOUT: release tag ${GITHUB_REF_NAME} not yet visible on both" >&2
-          echo "[notify] registries. Packages may still be propagating. Re-run THIS job to retry." >&2
+          # Final-attempt diagnostics: which registry is unreachable vs simply not-yet-present.
+          NPM_CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${PACKAGE}" || echo 000)"
+          PYPI_CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/${PACKAGE}/json" || echo 000)"
+          echo "[notify] REGISTRY-CONFIRM TIMEOUT for ${GITHUB_REF_NAME}: npm_ok=$NPM_OK (http $NPM_CODE) pypi_ok=$PYPI_OK (http $PYPI_CODE)." >&2
+          echo "[notify] Packages may still be propagating, or a registry is degraded. Re-run THIS job to retry." >&2
           exit 1
 
       - name: Dispatch site registry-sync receiver (workflow_dispatch via API)
