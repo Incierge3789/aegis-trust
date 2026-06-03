@@ -1,0 +1,39 @@
+name: version-parity
+
+# Daily auto-gate: cross-checks the aegis-trust version across local
+# node/package.json, node/VERSION, node/src/index.ts, python/pyproject.toml, the
+# latest git tag, and the LIVE npm + PyPI registries (PEP 440 normalized).
+#
+# Why a SEPARATE, SCHEDULED workflow (not part of ci.yml): the live-registry +
+# tag checks would false-fail on ordinary dev pushes (local intentionally ahead
+# of the published registry / not yet tagged). On a schedule it instead surfaces
+# real drift — e.g. "the repo/registry moved but the two disagree" — and a failed
+# scheduled run notifies the maintainers automatically. No human polling needed.
+#
+# Read-only: this workflow never writes to the repo or any registry.
+
+on:
+  schedule:
+    - cron: '23 4 * * *'   # daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: npm / PyPI / local / tag version parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0   # tags needed for the git-tag axis
+
+      - name: Setup Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: '20'
+
+      - name: Version parity check (exit !=0 on drift)
+        run: node scripts/version-parity.mjs
