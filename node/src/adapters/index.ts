@@ -12,6 +12,9 @@
 export { shieldedTool } from "./core.js";
 export type { ShieldedTool, ShieldedToolSpec } from "./core.js";
 
+export { shieldedStreamTool } from "./stream.js";
+export type { ShieldedStreamTool, ShieldedStreamToolSpec } from "./stream.js";
+
 export { toLangChainTool } from "./langchain.js";
 export type { LangChainToolFactory } from "./langchain.js";
 

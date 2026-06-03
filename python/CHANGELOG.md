@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Added — streaming framework adapter (`aegis_trust.adapters`)
+- **`shielded_stream_tool(...)`** — streaming sibling of `shielded_tool()` for a
+  data accessor that yields a *sequence* of records. `stream(...)` is an async
+  generator that filters each record to the declared `scope` / `deny_fields`
+  **at its boundary, as it arrives** — without buffering the whole result first
+  (the limitation `shielded_tool()` has today). The streaming unit is one
+  fully-formed record, not a token: field-level minimum disclosure needs a
+  complete object, so partial-chunk filtering is intentionally out of scope.
+  - Reuses the **same `shield()`** per record (pinned LITE) — one trust
+    boundary, one fail-closed contract; no second filter implementation. LITE is
+    a local, network-free field filter, so per-record cost is negligible.
+  - **LITE-only (v1), FULL refused fail-closed.** FULL's `/check-access` gate
+    must run *before* the accessor executes; a per-record gate would run the
+    accessor first and, on deny, emit one placeholder per matching row —
+    leaking result cardinality and breaking the pre-execution guarantee
+    `shielded_tool()` gives (and FULL's audit-completeness contract). So
+    `mode="full"` raises `aegis.shield.stream.full_unsupported` at construction,
+    and `mode="auto"` that resolves to FULL at run time refuses fail-closed
+    (empty stream, accessor **never called**) rather than silently downgrade the
+    gate. For FULL today, use `shielded_tool()`. FULL streaming
+    (open-gate-then-stream + batched audit) is a tracked follow-up.
+  - **Fail-closed (stream form):** a handler that raises before producing yields
+    an empty stream; an iterator that raises mid-stream stops cleanly (no
+    re-raise, the in-flight raw record is never emitted, already-filtered records
+    stand). A framework never sees an exception that could carry withheld data.
+  - Accepts sync or async iterables/generators (and a coroutine resolving to
+    one). Audit records the tool name via `name`, symmetric with
+    `shielded_tool()`. Mirror of Node `shieldedStreamTool` (cross-SDK parity).
+  - Zero new runtime dependencies; unit-tested in `tests/test_adapters_stream.py`
+    without any framework installed.
+
 ### Added — framework adapters (`aegis_trust.adapters`)
 - **Dedicated agent-framework adapters for LangChain and CrewAI (Python)**,
   matching the Node adapter surface. New module `aegis_trust.adapters`:

@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Added — streaming framework adapter (`aegis-trust/adapters`)
+- **`shieldedStreamTool(spec)`** — streaming sibling of `shieldedTool()` for a
+  data accessor that yields a *sequence* of records. `stream(args)` returns an
+  async iterable that filters each record to the declared `scope` / `denyFields`
+  **at its boundary, as it arrives** — without buffering the whole result first
+  (the limitation `shieldedTool()` has today). The streaming unit is one
+  fully-formed record, not a token: field-level minimum disclosure needs a
+  complete object, so partial-chunk filtering is intentionally out of scope.
+  - Reuses the **same `shield()`** per record (pinned LITE) — one trust
+    boundary, one fail-closed contract; no second filter implementation. LITE is
+    a local, network-free field filter, so per-record cost is negligible.
+  - **LITE-only (v1), FULL refused fail-closed.** FULL's `/check-access` gate
+    must run *before* the accessor executes; a per-record gate would run the
+    accessor first and, on deny, emit one placeholder per matching row —
+    leaking result cardinality and breaking the pre-execution guarantee
+    `shieldedTool()` gives (and FULL's audit-completeness contract). So
+    `mode: "full"` throws `aegis.shield.stream.full_unsupported` at
+    construction, and `mode: "auto"` that resolves to FULL at run time refuses
+    fail-closed (empty stream, accessor **never called**) rather than silently
+    downgrade the gate. For FULL today, use `shieldedTool()`. FULL streaming
+    (open-gate-then-stream + batched audit) is a tracked follow-up.
+  - **Fail-closed (stream form):** a handler that throws before producing yields
+    an empty stream; an iterator that throws mid-stream stops cleanly (no
+    re-throw, the in-flight raw record is never emitted, already-filtered records
+    stand). A framework never sees an exception that could carry withheld data.
+  - Accepts sync or async iterables/generators (and a promise resolving to one).
+    Audit records the tool name via `spec.name`, symmetric with `shieldedTool()`.
+  - Zero new runtime dependencies; unit-tested in `tests/adaptersStream.test.ts`
+    with no framework installed. Python parity ships in the same release
+    (`shielded_stream_tool`, see [`python/CHANGELOG.md`](../python/CHANGELOG.md)).
+
 ### Added — framework adapters (`aegis-trust/adapters`)
 - **Dedicated agent-framework adapters**, promoting LangChain.js, CrewAI (Node
   port), and Vercel AI SDK from *compatible-by-pattern* to *integrated*. New
@@ -23,9 +54,9 @@
   - The `langchainExample.ts` / `crewaiExample.ts` examples now use the adapters,
     and a new `vercelAiExample.ts` is added.
   - Scope note: Python LangChain/CrewAI adapters ship in the same release
-    (see [`python/CHANGELOG.md`](../python/CHANGELOG.md)); a streaming-aware
-    wrapper remains a follow-up. No core `shield()` behaviour change; no version
-    bump (additive surface, cross-SDK version-lock preserved).
+    (see [`python/CHANGELOG.md`](../python/CHANGELOG.md)). No core `shield()`
+    behaviour change; no version bump (additive surface, cross-SDK version-lock
+    preserved).
   - Audit identity: the shielded accessor is named from `spec.name`, so audit
     records (local history, test hook, by-function stats, FULL ingest) carry the
     tool name instead of `"anonymous"`.
