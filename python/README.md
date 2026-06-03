@@ -103,7 +103,7 @@ def get_customer(customer_id: str) -> dict:
     return db.get(customer_id)
 ```
 
-Every MCP tool call now respects purpose-based access control.
+Every MCP tool call now returns only the fields within the declared `scope` for its `purpose` — fields outside the scope are removed before the tool result reaches the agent (LITE-mode field reduction; `purpose` is a declared context label, not a local authorization decision).
 
 ### aegis.yaml (centralized policies)
 
@@ -360,7 +360,7 @@ Vulnerability reports: `contact@aegisagentcontrol.com`. See `SECURITY.md` for th
 
 ## Beyond local filtering
 
-`aegis-trust` is the open-source entry point to a broader trust platform. For production deployments with enterprise controls and platform-managed policy orchestration, email `contact@aegisagentcontrol.com`.
+`aegis-trust` is a local-first, open-source SDK (LITE mode by default). For production deployments that need a managed gateway with enforced, server-side policy, email `contact@aegisagentcontrol.com`.
 
 ## License
 

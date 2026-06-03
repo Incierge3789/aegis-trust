@@ -89,7 +89,7 @@ echo "=== Step 5: git commit + tag + push ==="
 cd ..
 git add node/{package.json,VERSION,src/index.ts}
 git commit -m "[GA] ${AEGIS_PKG} v0.9.0 GA promotion — 5 oracle PASS + D-952 + 30d monitoring complete"
-git tag -a "v0.9.0" -m "${AEGIS_PKG} v0.9.0 GA — productization-ops sprint_002 close + 30d monitoring"
+git tag -a "v0.9.0" -m "${AEGIS_PKG} v0.9.0 GA — internal-ops sprint_002 close + 30d monitoring"
 git push origin "$(git branch --show-current)"
 git push origin v0.9.0
 echo ""

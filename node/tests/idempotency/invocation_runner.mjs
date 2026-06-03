@@ -1,7 +1,7 @@
 // Idempotency invocation runner (.mjs = always ESM regardless of package.json).
 //
 // Called by tests/idempotency/invocation.py, which is the script handed to
-// the productization-ops idempotency_guarantee verifier. The verifier writes
+// the internal-ops idempotency_guarantee verifier. The verifier writes
 // the .py file to <package-dir>/.productization_idempotency_test.tmp and runs
 // it under python3. The .py wrapper spawns this .mjs runner to exercise the
 // real HistoryStore.recordIdempotent() primitive — keeping the actual TS

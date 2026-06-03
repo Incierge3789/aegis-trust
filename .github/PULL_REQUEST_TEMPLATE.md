@@ -27,6 +27,7 @@ Closes #
 - [ ] `CHANGELOG.md` updated under `[Unreleased]` for any behavior change
 - [ ] Customer-facing text (README/CHANGELOG/errors) is English-first
 - [ ] Commits signed off (`git commit -s`, per [DCO](https://developercertificate.org/))
+- [ ] No secrets, tokens, or customer/personal data in the diff or description
 
 ## Notes for reviewers
 

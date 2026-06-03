@@ -13,10 +13,10 @@
 #      Block A の ci.yml と完全分離 (ci.yml は read-only contract)。
 #   3. Secrets (NPM_TOKEN / PYPI_TOKEN) は本 workflow は **使わない**。 npm publish は
 #      **Block C で npm Trusted Publisher OIDC** 経由 (token なし、 id-token: write OIDC、
-#      npm ≥11.5.1 で literal supported)。 PyPI publish は **将来 Trusted Publisher**
-#      経由 (本 file line 245 follow-up)、 現状 PyPI 側は manual twine + ~/.pypirc 経由
-#      (本 workflow は触らない)。 outputs = SBOM + attestation + release artifact attach
-#      + npm tag-push-only publish (Block C)。
+#      npm ≥11.5.1 で literal supported)。 PyPI publish も **PyPI Trusted Publisher
+#      OIDC** 経由 (token なし、 publish-pypi-trusted-publisher job、 tag push 時)。
+#      outputs = SBOM + attestation + release artifact attach + npm/PyPI
+#      tag-push-only publish。
 #   4. 全 third-party action は 40-char commit SHA pin。 tag pin 禁止 (mutation attack)。
 #   5. Runner = a designated self-hosted release runner (mandatory; Block B =
 #      release-class, supply-chain trust core). ubuntu-latest = GitHub-hosted is
@@ -39,7 +39,7 @@
 #   - Block B Phase 2 (SDK 本体 artifact pack + cosign sign + Release attach): ✅ wired (sprint_010)
 #   - Block C (npm Trusted Publisher OIDC publish + provenance + dist-tag): ✅ wired
 #     (T-011-11, line 363+, `if: tag push only` gated, requires npm ≥11.5.1)
-#   - PyPI Trusted Publisher attestation: pending (follow-up, line 245 stub)
+#   - PyPI Trusted Publisher OIDC publish: ✅ wired (publish-pypi-trusted-publisher job, tag-push-only); PEP 740 attestations deferred until repo public
 #   - Reproducible build verification: deferred (audit/integrity 系)
 #
 # References:
@@ -552,11 +552,12 @@ jobs:
           npm publish "$TGZ" --tag "$DIST_TAG" --access public
 
       - name: npm dist-tag verify (pre-release leaves latest alone)
-        # Pre-release versions (-rc, -beta, -alpha) intentionally do NOT
-        # promote latest, so a bare `npm install aegis-trust` does not
-        # regress to a preview. The bare-install -> rc redirect waits for
-        # the v1.0 GA cut (mirrors the PyPI semver semantics in README
-        # alpha-limitation 6).
+        # Pre-release versions (-rc, -beta, -alpha) are NOT promoted to latest
+        # by THIS job. (Note: dist-tags.latest currently points at the preview
+        # rc because it was promoted manually out-of-band — so bare
+        # `npm install aegis-trust` resolves to the clean current rc instead of
+        # an older/deprecated release. This job does not change dist-tags.)
+        # The bare-install -> stable transition lands at the v1.0 GA cut.
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"

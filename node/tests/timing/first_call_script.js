@@ -1,4 +1,4 @@
-// First-call script for the productization-ops time_to_first_call verifier.
+// First-call script for the internal-ops time_to_first_call verifier.
 //
 // The verifier writes this file to <workdir>/first_call.script and executes it
 // with `node`. Node refuses ESM `import` syntax on the unknown extension, so

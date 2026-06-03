@@ -1,15 +1,15 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Aegis Gateway REST API",
-    "description": "Security gateway for AI agent data access with minimum disclosure controls.\n\n## Authentication\nTwo methods supported (use either as `Authorization: Bearer <token>`):\n1. **API Key** (recommended for Dify/n8n): Use the API key directly as Bearer token\n2. **JWT**: Exchange API key via `POST /auth/token` for a short-lived JWT\n\n## Core Principles (Absolute Order)\n- **AO-001**: All data access passes through this gateway\n- **AO-002**: Minimum disclosure \u2014 only requested scope is returned\n- **AO-003**: Every access is recorded in a tamper-evident audit chain\n- **AO-004**: Capsule integrity is preserved across lifecycle\n- **AO-005**: Host binding prevents unauthorized environments\n- **AO-006**: No secrets in code \u2014 all via capsules/env",
+    "title": "aegis-trust FULL-mode backend contract (reference)",
+    "description": "Reference contract for the optional FULL-mode backend that the aegis-trust SDK may call. It exists in this repo only so the SDK contract test can verify the client targets declared endpoints. The open-source SDK runs in LITE mode (local field reduction, no backend) by default; the backend service is not part of this package.",
     "contact": {
-      "name": "Aegis Nemotek",
-      "url": "https://aegis.nemotek.io"
+      "name": "aegis-trust maintainers",
+      "url": "https://github.com/Incierge3789/aegis-trust"
     },
     "license": {
-      "name": "Proprietary",
-      "url": "https://aegis.nemotek.io"
+      "name": "MIT",
+      "url": "https://github.com/Incierge3789/aegis-trust/blob/main/LICENSE"
     },
     "version": "1.0.0"
   },
