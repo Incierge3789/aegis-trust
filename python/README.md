@@ -105,6 +105,60 @@ def get_customer(customer_id: str) -> dict:
 
 Every MCP tool call now returns only the fields within the declared `scope` for its `purpose` — fields outside the scope are removed before the tool result reaches the agent (LITE-mode field reduction; `purpose` is a declared context label, not a local authorization decision).
 
+### LangChain / CrewAI adapters (`aegis_trust.adapters`)
+
+Dedicated binders for the major agent frameworks. `shielded_tool()` declares a
+shielded data accessor once (shield filtering + serialization baked in); each
+`to_<framework>_tool` binder maps it onto that framework's native tool shape.
+The binders take **no runtime dependency** on the frameworks — the framework
+factory / base class is injected — so they are version-tolerant and unit-tested
+without any framework installed.
+
+```python
+from langchain_core.tools import StructuredTool
+from aegis_trust.adapters import shielded_tool, to_langchain_tool
+
+customer_lookup = shielded_tool(
+    name="customer_lookup",
+    description="Look up a customer record by ID for support purposes.",
+    purpose="customer_support",
+    scope=["name", "plan", "issue"],
+    handler=lambda customer_id: db.get(customer_id),  # returns 10+ fields
+)
+
+# The agent — and the model context, logs, and the provider's training
+# pipeline — only ever see {name, plan, issue}.
+lc_tool = to_langchain_tool(StructuredTool.from_function, customer_lookup)
+```
+
+CrewAI — different agents, different scopes, same data source:
+
+```python
+from crewai.tools import BaseTool
+from aegis_trust.adapters import shielded_tool, to_crewai_tool
+
+support_lookup = shielded_tool(
+    name="customer_lookup_support", description="Support lookup.",
+    purpose="customer_support", scope=["name", "plan", "issue"],
+    handler=lambda customer_id: db.get(customer_id),
+)
+billing_lookup = shielded_tool(
+    name="customer_lookup_billing", description="Billing lookup.",
+    purpose="billing", scope=["name", "plan", "balance_due"],
+    handler=lambda customer_id: db.get(customer_id),
+)
+
+support_agent = Agent(role="...", tools=[to_crewai_tool(BaseTool, support_lookup)])
+billing_agent = Agent(role="...", tools=[to_crewai_tool(BaseTool, billing_lookup)])
+```
+
+The shield filters the **return value**, not the arguments — validate and
+authorize tool-call arguments in the handler. Failures fail closed as an empty
+result (`run()` → empty, `call()` → `""`), never a raised exception. Async
+handlers use `await tool.arun(...)` / `await tool.acall(...)`. Runnable examples:
+[`examples/langchain_example.py`](examples/langchain_example.py),
+[`examples/crewai_example.py`](examples/crewai_example.py).
+
 ### aegis.yaml (centralized policies)
 
 For multi-purpose deployments, define policies once in `aegis.yaml`:

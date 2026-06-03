@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Added — framework adapters (`aegis_trust.adapters`)
+- **Dedicated agent-framework adapters for LangChain and CrewAI (Python)**,
+  matching the Node adapter surface. New module `aegis_trust.adapters`:
+  - `shielded_tool(...)` — a framework-neutral primitive that wraps a data
+    accessor in `shield()` (filtering + minimum-disclosure fail-closed) and
+    exposes `run()` / `call()` (and `arun()` / `acall()` for async handlers).
+    The accessor is named from the tool `name`, so the audit log records the
+    tool name rather than the handler's incidental `__name__` (e.g. `<lambda>`).
+  - `to_langchain_tool(StructuredTool.from_function, tool)` — the factory is
+    dependency-injected, so aegis-trust takes no dependency on LangChain.
+  - `to_crewai_tool(BaseTool, tool)` — builds a CrewAI `BaseTool` subclass; the
+    base class is injected (no dependency on CrewAI).
+  - Zero new runtime dependencies; binders unit-tested (`tests/test_adapters.py`)
+    without any framework installed. Runnable examples under `examples/`.
+  - The shield filters the return value, not the arguments; failures fail closed
+    as an empty result (never a raised exception). No core `shield()` change.
+
 ### Changed (LITE error-parity remediation)
 - **Rich error envelope on the LITE validation/config path (D2).** The Python
   LITE path now raises the already-public `AegisValidationError` /
