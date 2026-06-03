@@ -185,6 +185,26 @@ jobs:
       - name: gitleaks scan
         run: gitleaks detect --redact --no-banner --config .gitleaks.toml
 
+      - name: No private site-repo identity in source (kept in vars/secrets only)
+        # Setup-once guard (THIS repo is public). The cross-repo site identity
+        # lives ONLY in vars.SITE_SYNC_REPO (an Actions variable), never in source.
+        # This fails the build if that value ever appears in a tracked file, so it
+        # can never be re-committed here. The value is read from the variable and
+        # is NEVER printed (only file names), so it does not leak into CI logs.
+        env:
+          FORBIDDEN_SITE_REPO: ${{ vars.SITE_SYNC_REPO }}
+        run: |
+          if [ -z "${FORBIDDEN_SITE_REPO:-}" ]; then
+            echo "OK: vars.SITE_SYNC_REPO not configured; nothing to guard."
+            exit 0
+          fi
+          if git grep -lF -- "${FORBIDDEN_SITE_REPO}" >/dev/null 2>&1; then
+            echo "::error::Private site-repo identity found in tracked source — keep it in vars/secrets only. Offending files:" >&2
+            git grep -lF -- "${FORBIDDEN_SITE_REPO}" >&2   # file NAMES only — never the value/matching lines
+            exit 1
+          fi
+          echo "OK: private site-repo identity is not present in tracked source."
+
   drift-check:
     runs-on: ubuntu-latest
     defaults:
