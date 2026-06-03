@@ -28,7 +28,8 @@
     "build": "tsc",
     "test": "vitest run",
     "lint": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "parity": "node ../scripts/version-parity.mjs"
   },
   "keywords": [
     "ai",
