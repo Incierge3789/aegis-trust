@@ -5,14 +5,14 @@ Enabled via AEGIS_HISTORY=1 environment variable (default: off).
 
 No external dependencies — uses Python stdlib sqlite3.
 
-v0.9.0-rc1 additions (internal-ops/sprint_001):
+v0.9.0-rc1 additions:
 - ``trace_id`` column for end-to-end trace propagation (links agent reasoning →
   shield call → audit chain via :mod:`aegis.trace` contextvars).
 - ``idempotency_key`` column + :meth:`HistoryStore.record_idempotent` method
   (Stripe Idempotency-Key model: same key + same payload = single append; same
   key + different payload = :class:`aegis.errors.AegisAuditError`).
 
-internal-ops/sprint_017 additions:
+schema_version additions:
 - ``schema_version`` column — the audit-event shape version, stamped on every
   row from the single-source :data:`aegis_trust._constants.AUDIT_SCHEMA_VERSION`
   (S017 T5). Existing pre-S017 databases are migrated with an idempotent
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS shield_history (
 """
 
 # v0.9.0-rc1: ALTER TABLE for existing v0.8.x databases (idempotent).
-# internal-ops/sprint_017: schema_version migration (S017 T6 / H-3).
+# schema_version migration (S017 T6 / H-3).
 _MIGRATE_ADD_TRACE_ID = "ALTER TABLE shield_history ADD COLUMN trace_id TEXT"
 _MIGRATE_ADD_IDEMPOTENCY_KEY = (
     "ALTER TABLE shield_history ADD COLUMN idempotency_key TEXT"
