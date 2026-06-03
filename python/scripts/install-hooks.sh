@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install git hooks for aegis-shield quality gate.
+# Install git hooks for aegis-trust quality gate.
 # Idempotent reinstall — safe to run any time the canonical hook in scripts/
 # has changed. Warns if the installed hook differs from the canonical copy.
 #

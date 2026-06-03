@@ -183,6 +183,6 @@ aegis-trust/
 
 ## Origin
 
-This repository consolidates the Python SDK (previously hosted in `Incierge3789/aegis-shield`) and the TypeScript SDK (previously hosted in `internal-sdk-source-path/`) into a single `aegis-trust` SDK home.
-
-The old locations now carry "source moved" notices. Git history of pre-migration commits remains in those source repos.
+This repository is the single home for both the Python and TypeScript `aegis-trust`
+SDKs, consolidated from earlier separate codebases. Pre-consolidation development
+history remains in the original repositories.

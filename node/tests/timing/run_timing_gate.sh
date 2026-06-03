@@ -12,7 +12,9 @@
 set -euo pipefail
 
 SDK_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
-OPS_ROOT="${OPS_ROOT:-${HOME}/internal-ops/ops/internal-ops}"
+# OPS_ROOT must point at the maintainer's local quality-gate root (not committed
+# to this repo). No internal default is hardcoded here.
+OPS_ROOT="${OPS_ROOT:?set OPS_ROOT to the local quality-gate root containing verifiers/}"
 VERIFIER="${OPS_ROOT}/verifiers/time_to_first_call.py"
 
 if [ ! -f "$VERIFIER" ]; then

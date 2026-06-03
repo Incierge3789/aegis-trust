@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ci-attest.sh — Manual CI Attestation generator for aegis-shield
+# ci-attest.sh — Manual CI Attestation generator for aegis-trust
 #
 # Aegis AO-004 (audit completeness): when automated CI (GitHub Actions, etc.)
 # is unavailable, this script generates a tamper-evident attestation that
@@ -28,7 +28,7 @@ IFS=$'\n\t'
 # T-006c-1b 2026-05-21: in the canonical aegis-trust monorepo, "Python
 # package root" is python/ (not the git toplevel = monorepo root
 # containing python/ + node/). Use script-relative path with fallback to
-# git toplevel for aegis-shield-flat-layout compat.
+# git toplevel for aegis-trust-flat-layout compat.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 if [[ ! -f "${REPO_ROOT}/pyproject.toml" ]]; then
@@ -83,7 +83,7 @@ ATTEST="$OUT_DIR/${SPRINT}-v${VERSION}.txt"
 
 cat > "$ATTEST" <<EOF
 ═══════════════════════════════════════════════════════════════
-LOCAL CI ATTESTATION — aegis-shield ${SPRINT} / v${VERSION}
+LOCAL CI ATTESTATION — aegis-trust ${SPRINT} / v${VERSION}
 ═══════════════════════════════════════════════════════════════
 
 Reason:    Manual attestation per Aegis philosophy AO-004 (audit completeness).

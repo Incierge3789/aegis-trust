@@ -15,7 +15,7 @@ description = "Verified false positives (Red Team test fixtures + similar)"
 # Test fixture used by tests/adversarial/test_redteam_S018_exception_leak.py
 # to verify shield() does not leak embedded API keys in exception messages.
 # Placeholder string `abc123xyz789` is textbook fixture content (3 syllable
-# repeat); identical fixture exists in aegis-shield/tests/adversarial/
+# repeat); identical fixture exists in aegis-trust/tests/adversarial/
 # (S018 origin, 2026-04-12). The test asserts the literal is FILTERED OUT,
 # not surfaced.
 regexes = [
