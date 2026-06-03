@@ -617,12 +617,17 @@ jobs:
   # SKIPPED — the site is never told to sync a half-published release.
   #
   # What it does:
-  #   1. If no cross-repo dispatch token is configured, it is a logged NO-OP and
-  #      the release stays green (the wiring is inert until the maintainer adds the
-  #      secret — see "Required repository configuration" below).
+  #   1. If the cross-repo dispatch target/token is not configured, it is a logged
+  #      NO-OP and the release stays green (the wiring is inert until the
+  #      maintainer adds the config — see "Required repository configuration").
   #   2. Otherwise it CONFIRMS the released version is actually visible on BOTH
-  #      public registries (bounded retry), then calls the aegisagentcontrol
-  #      `registry-sync-receiver` workflow via the GitHub API (workflow_dispatch).
+  #      public registries (bounded retry), then calls the site repo's
+  #      registry-sync-receiver workflow via the GitHub API (workflow_dispatch).
+  #
+  # NOTE: THIS repo is PUBLIC. The site repo identity is deliberately NOT
+  # hardcoded here — it is supplied at runtime via repository Actions variables
+  # (vars.*, not committed to source), so the private site repo's name never
+  # appears in public source or git history.
   #
   # Trust boundary: the site receiver does NOT trust the version we pass — it is
   # audit text only. The site always re-fetches the live registries itself. A
@@ -631,47 +636,45 @@ jobs:
   # THIS job (Actions UI -> Re-run failed jobs) retries the notify safely.
   #
   # === Required repository configuration (maintainer, one-time) — owner only ===
-  #   This is the ONE setup that cannot be delegated to CI/AI. The default
-  #   GITHUB_TOKEN cannot dispatch a workflow in another repo, so provide a
-  #   least-privilege cross-repo credential as a secret on THIS repo:
-  #     secrets.SITE_SYNC_DISPATCH_TOKEN
-  #   Use EITHER:
-  #     (a) a fine-grained PAT scoped to ONLY the site repo with
-  #         Actions: Read and write  +  Metadata: Read-only, or
-  #     (b) a GitHub App installation token (App installed on the site repo with
-  #         Actions: write), minted in a prior step.
-  #   Optional overrides (default to the public site repo / workflow file):
-  #     vars.SITE_SYNC_REPO       (default: Incierge3789/aegisagentcontrol)
-  #     vars.SITE_SYNC_WORKFLOW   (default: registry-sync-receiver.yml)
-  #   Until the secret exists, this job is a green no-op and nothing is dispatched.
+  #   The default GITHUB_TOKEN cannot dispatch a workflow in another repo, so
+  #   provide BOTH of the following on THIS repo (Settings -> Secrets and
+  #   variables -> Actions):
+  #     secrets.SITE_SYNC_DISPATCH_TOKEN  — least-privilege cross-repo credential:
+  #        (a) a fine-grained PAT scoped to ONLY the site repo with
+  #            Actions: Read and write + Metadata: Read-only, or
+  #        (b) a GitHub App installation token (App on the site repo, Actions:write).
+  #     vars.SITE_SYNC_REPO               — the site repo (owner/name). A VARIABLE,
+  #        not a secret and not in source, so the private repo name stays private.
+  #     vars.SITE_SYNC_WORKFLOW           — receiver workflow file name
+  #                                         (defaults to registry-sync-receiver.yml).
+  #   Until BOTH the token AND the repo variable exist, this job is a green no-op.
   notify-site-registry-sync:
-    name: Notify aegisagentcontrol site to sync public registry versions
+    name: Notify the marketing-site repo to sync public registry versions
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [publish-npm-trusted-publisher, publish-pypi-trusted-publisher]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # nothing in THIS repo is written; cross-repo auth is the secret
     env:
-      # The cross-repo dispatch token is deliberately NOT job-level env (least
-      # privilege): it is injected ONLY into the token-check and dispatch steps
-      # below, so the registry-confirm step never has it in scope. SITE_REPO /
-      # SITE_WORKFLOW are non-secret overrides with safe public defaults.
-      SITE_REPO: ${{ vars.SITE_SYNC_REPO || 'Incierge3789/aegisagentcontrol' }}
+      # The site repo identity comes ONLY from a repository variable — never a
+      # literal here — so this PUBLIC workflow does not name the private site repo.
+      # The cross-repo dispatch token is injected per-step (not job-level env).
+      SITE_REPO: ${{ vars.SITE_SYNC_REPO }}
       SITE_WORKFLOW: ${{ vars.SITE_SYNC_WORKFLOW || 'registry-sync-receiver.yml' }}
       PACKAGE: aegis-trust
     steps:
-      - name: Skip cleanly if no cross-repo dispatch token is configured
+      - name: Skip cleanly if dispatch target/token is not configured
         id: tokcheck
         env:
           SITE_DISPATCH_TOKEN: ${{ secrets.SITE_SYNC_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${SITE_DISPATCH_TOKEN:-}" ]; then
+          if [ -z "${SITE_DISPATCH_TOKEN:-}" ] || [ -z "${SITE_REPO:-}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=site-sync skipped::SITE_SYNC_DISPATCH_TOKEN not configured — release unaffected; site was not notified. Add the secret to enable auto-sync."
+            echo "::notice title=site-sync skipped::SITE_SYNC_DISPATCH_TOKEN (secret) and/or SITE_SYNC_REPO (variable) not configured — release unaffected; site was not notified."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
-            echo "[notify] dispatch token present."
+            echo "[notify] dispatch target + token present."
           fi
 
       - name: Confirm released version is live on BOTH registries (bounded retry)
