@@ -27,7 +27,20 @@ now closed by construction (1:1 with the Python SDK):
   the empty shape) instead of throwing — matching Python and letting a fully
   reduced verdict drive `shield` cleanly. A truly absent spec (no scope, no
   deny) is still refused.
-- **Malformed field paths fail closed at the gate** (`MALFORMED_FIELD_PATH`).
+- **Malformed field paths fail closed at the gate** (`MALFORMED_FIELD_PATH`);
+  this also rejects `..`-bearing (path-traversal) field paths.
+- **`shield` drops a bare leaf over a `Map`** (a key→value container its
+  dot-notation cannot traverse) — found by cross-model (codex) review.
+- **Prototype-name purposes fail closed** (`check`): an attacker-supplied
+  `purpose` / `actionType` of `"__proto__"` / `"constructor"` / `"toString"` no
+  longer resolves an inherited `Object.prototype` member and dodge the
+  unknown-purpose guard — `check` now uses own-property lookup (parity with the
+  `shield` scope/deny prototype fix in 0.9.0-rc8). Python's `dict.get` was
+  already immune. Found by the post-fix red-team re-run.
+- **Examples + threat-model:** the `doctor` examples now drive `shield` from
+  `scopeForShield(decision)` (not `allowedData` raw), and the README "Not
+  guaranteed" section calls out `doctor.check()` as a local, in-process,
+  bypassable diagnostic — fail-closed for an honest caller, not a sandbox.
 - New `LocalPolicy` fields: `internalDestinations`, `strictUnknownPurpose`.
 
 ### Added — Doctor: pre-action boundary diagnosis (`aegis-trust/doctor`)

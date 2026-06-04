@@ -29,7 +29,19 @@ All are now closed by construction:
   returns `[]`. Use it (not `allowed_data`) to drive `shield` so nothing flows
   before a required approval. `allowed_data` remains the diagnostic field.
 - **Malformed field paths fail closed at the gate** (`MALFORMED_FIELD_PATH`)
-  instead of deferring an exception to `shield` construction.
+  instead of deferring an exception to `shield` construction; this also rejects
+  `..`-bearing (path-traversal) field paths.
+- **`shield` drops a bare leaf over a `Mapping` / record-like value** (incl. the
+  Node `Map` case found by cross-model review) — no whole-subtree disclosure.
+- **Prototype-name purposes fail closed** (parity contract): a `purpose` of
+  `"__proto__"` / `"constructor"` cannot be treated as a known rule-less purpose.
+  Python's `dict.get` is immune by construction; the Node SDK was fixed to use
+  own-property lookup (found by the post-fix red-team re-run) and a regression
+  test locks the behaviour as a cross-SDK contract.
+- **Examples + threat-model:** the `doctor` example now drives `shield` from
+  `decision.scope_for_shield()` (not `allowed_data` raw), and the README "Scope
+  of these guarantees" section calls out `doctor.check()` as a local, in-process,
+  bypassable diagnostic — fail-closed for an honest caller, not a sandbox.
 - New `LocalPolicy` fields: `internal_destinations`, `strict_unknown_purpose`.
 
 ### Added — Doctor: pre-action boundary diagnosis (`aegis_trust.doctor`)
