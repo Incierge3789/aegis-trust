@@ -88,13 +88,22 @@ function coveredBy(path: string, guards: ReadonlyArray<string>): boolean {
  * A path is permitted by an allow-whitelist only when it *is* an allowed field
  * or *descends from* one. Requesting a parent of an allowed leaf is NOT granted
  * (that would over-disclose the whole container via shield).
+ *
+ * Matching is **exact** (NOT normalized), unlike the never/sensitive/deny
+ * guards. Normalization is one-directional on purpose: a *guard* normalizes so
+ * it blocks more (`SSN` is caught by `ssn` — fail-closed); the *allow* list must
+ * not, because the matched token is emitted into `allowedData` and handed to
+ * shield, which resolves the **literal** data key. If `allow:["name"]` loosely
+ * matched a request for `"NAME"`, doctor would authorize and shield would
+ * disclose the *distinct* `NAME` field the operator never allowed — a
+ * normalization confused-deputy. Exact match keeps authorization aligned with
+ * the operator's literal intent (fail-closed). Whitespace-bearing requests are
+ * already rejected by `isValidPath` at the gate.
  */
 function allowedByWhitelist(path: string, allow: ReadonlyArray<string>): boolean {
-  const np = norm(path);
   for (const a of allow) {
-    const na = norm(a);
-    if (!na) continue;
-    if (np === na || np.startsWith(na + ".")) return true;
+    if (!a) continue;
+    if (path === a || path.startsWith(a + ".")) return true;
   }
   return false;
 }

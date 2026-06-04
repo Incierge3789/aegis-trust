@@ -41,6 +41,12 @@ now closed by construction (1:1 with the Python SDK):
   `scopeForShield(decision)` (not `allowedData` raw), and the README "Not
   guaranteed" section calls out `doctor.check()` as a local, in-process,
   bypassable diagnostic — fail-closed for an honest caller, not a sandbox.
+- **Allow-list matches exactly — no normalization confused-deputy.** Normalization
+  is one-directional: the never/sensitive/deny *guards* normalize (block more,
+  fail-closed), but the `allow` whitelist matches the **literal** token. Loosely
+  matching a request for `"NAME"` against `allow:["name"]` would emit the
+  attacker's token to `shield` and disclose a *distinct* `NAME` field the
+  operator never allowed. Found by the post-fix red-team (F-1).
 - New `LocalPolicy` fields: `internalDestinations`, `strictUnknownPurpose`.
 
 ### Added — Doctor: pre-action boundary diagnosis (`aegis-trust/doctor`)

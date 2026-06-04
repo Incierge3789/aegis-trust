@@ -89,13 +89,23 @@ def _covered_by(path: str, guards: list[str]) -> bool:
 def _allowed_by_whitelist(path: str, allow: list[str]) -> bool:
     """A path is permitted by an allow-whitelist only when it *is* an allowed
     field or *descends from* one. Requesting a parent of an allowed leaf is
-    **not** granted (that would over-disclose the whole container via shield)."""
-    np = _norm(path)
+    **not** granted (that would over-disclose the whole container via shield).
+
+    Matching is **exact** (NOT normalized), unlike the never/sensitive/deny
+    guards. Normalization is deliberately one-directional: a *guard* normalizes
+    so it blocks more (``SSN`` is caught by ``ssn`` — fail-closed); the *allow*
+    list must NOT, because the matched token is emitted into ``allowed_data`` and
+    handed to shield, which resolves the **literal** data key. If ``allow=["name"]``
+    loosely matched a request for ``"NAME"``, doctor would authorize and shield
+    would disclose the *distinct* ``NAME`` field the operator never allowed — a
+    normalization confused-deputy. Exact match keeps authorization aligned with
+    the operator's literal intent (fail-closed). Leading/trailing-whitespace
+    requests are already rejected by ``_is_valid_path`` at the gate.
+    """
     for a in allow:
-        na = _norm(a)
-        if not na:
+        if not a:
             continue
-        if np == na or np.startswith(na + "."):
+        if path == a or path.startswith(a + "."):
             return True
     return False
 

@@ -211,4 +211,24 @@ describe("doctor.check — trust-boundary hardening (S-redteam regressions)", ()
       expect(scopeForShield(d)).toEqual([]);
     }
   });
+
+  it("F1: the allow-list matches exactly (no normalization confused-deputy)", () => {
+    // Red-team F-1: allow=["name"] must not loosely authorize "NAME" / "Name" —
+    // that would emit the attacker's token and disclose a distinct field.
+    const pol: LocalPolicy = { purposes: { p: { allow: ["name"] } } };
+    for (const variant of ["NAME", "Name", "ＮＡＭＥ"]) {
+      const d = check(p({ dataRequested: [variant] }), pol);
+      expect(scopeForShield(d)).toEqual([]);
+      const out = shield({ purpose: "p", scope: scopeForShield(d) })(() => ({
+        name: "ok",
+        [variant]: "SECRET",
+      }))();
+      expect(out).toEqual({});
+    }
+    // legitimate exact + descendant still authorized
+    const ok = check(p({ dataRequested: ["name"] }), pol);
+    expect(scopeForShield(ok)).toEqual(["name"]);
+    const desc = check(p({ dataRequested: ["name.first"] }), pol);
+    expect(scopeForShield(desc)).toEqual(["name.first"]);
+  });
 });

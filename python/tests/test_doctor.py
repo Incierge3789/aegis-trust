@@ -296,3 +296,32 @@ class TestTrustBoundaryHardening:
         out = get()
         assert "ssn" not in out and "evil" not in out
         assert out == {}  # name shape-shifted to a container → fail-closed drop
+
+    def test_f1_allow_list_normalization_confused_deputy(self):
+        # Red-team F-1: the allow-list must match EXACTLY. allow=["name"] must not
+        # loosely authorize a request for "NAME" / full-width / "Name" — that
+        # would emit the attacker's token to shield and disclose a *distinct*
+        # field the operator never allowed (normalization confused-deputy).
+        pol = LocalPolicy(purposes={"p": PurposeRule(allow=["name"])})
+        for variant in ("NAME", "ＮＡＭＥ", "Name"):
+            d = check(
+                ActionPlan(purpose="p", action_type="read", data_requested=[variant]),
+                pol,
+            )
+            assert d.scope_for_shield() == []
+            assert (
+                self._emit(d.scope_for_shield(), {"name": "ok", variant: "SECRET"})
+                == {}
+            )
+        # legitimate exact + descendant requests still work
+        d_ok = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["name"]), pol
+        )
+        assert d_ok.scope_for_shield() == ["name"]
+        d_desc = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["name.first"]),
+            pol,
+        )
+        assert self._emit(
+            d_desc.scope_for_shield(), {"name": {"first": "A", "ssn": "S"}}
+        ) == {"name": {"first": "A"}}
