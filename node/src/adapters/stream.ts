@@ -195,8 +195,11 @@ export function shieldedStreamTool<A = unknown>(
 
   const guarded = shield({
     purpose: spec.purpose,
-    scope: spec.scope ?? [],
-    denyFields: spec.denyFields ?? [],
+    // Pass spec fields through verbatim (do NOT default to []) so shield()
+    // distinguishes an explicit empty scope (discloses nothing) from an absent
+    // spec (refused). See aegis adapters/core.ts for the rationale.
+    ...(spec.scope !== undefined ? { scope: spec.scope } : {}),
+    ...(spec.denyFields !== undefined ? { denyFields: spec.denyFields } : {}),
     mode: Mode.LITE,
   })(filterRecord as (...args: unknown[]) => unknown);
 

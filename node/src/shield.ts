@@ -73,6 +73,7 @@ export function shield(options: ShieldOptions) {
   const purpose = options.purpose;
   const scope = options.scope ?? [];
   const denyFields = options.denyFields ?? [];
+  const scopeProvided = options.scope !== undefined;
   const requestedMode = options.mode ?? Mode.AUTO;
 
   if (!purpose || typeof purpose !== "string") {
@@ -88,11 +89,17 @@ export function shield(options: ShieldOptions) {
   // — neither scope (whitelist) nor denyFields (blacklist) — would return the
   // wrapped function's data entirely unfiltered, leaking every field. Refuse
   // it loudly rather than fail open. S015 P0-1 / H5 / H9.
+  // An *explicitly provided* empty `scope: []` is NOT an empty spec — it is a
+  // maximally-restrictive whitelist that discloses nothing (parity with Python
+  // `shield(scope=[])` → `{}`), so a fully-reduced doctor verdict
+  // (`scopeForShield()` → []) drives shield cleanly instead of throwing. Only
+  // refuse when no scope was provided AND there is no (non-empty) deny list —
+  // an explicit empty deny list still "hides nothing" and is refused.
   // (Python additionally falls back to an aegis.yaml purpose policy here; that
   // lookup is async in Node and cannot run in this sync factory — Node
   // requires an explicit call-site spec instead. Safe-direction divergence,
   // tracked as a follow-up, not a leak.)
-  if (scope.length === 0 && denyFields.length === 0) {
+  if (!scopeProvided && denyFields.length === 0) {
     throw new AegisValidationError({
       code: "aegis.shield.spec.required",
       remediation:
@@ -140,7 +147,7 @@ export function shield(options: ShieldOptions) {
         } catch (err) {
           return failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err);
         }
-        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
+        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName, scopeProvided);
       }
       return gateAndRunFull(
         fn as (...a: unknown[]) => unknown,
@@ -152,6 +159,7 @@ export function shield(options: ShieldOptions) {
         denyTree,
         purpose,
         fnName,
+        scopeProvided,
       );
     }
 
@@ -169,11 +177,11 @@ export function shield(options: ShieldOptions) {
         if (isPromise(out)) {
           return (out as Promise<unknown>).then(
             (resolved) =>
-              applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
+              applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName, scopeProvided),
             (err) => failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err),
           );
         }
-        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
+        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName, scopeProvided);
       }
 
       // ── explicit FULL on a non-async function ─────────────
@@ -205,11 +213,11 @@ export function shield(options: ShieldOptions) {
         if (isPromise(out)) {
           return (out as Promise<unknown>).then(
             (resolved) =>
-              applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName),
+              applyAndAuditLite(resolved, scope, denyFields, scopeTree, denyTree, purpose, fnName, scopeProvided),
             (err) => failClosedOnThrow(purpose, scope, denyFields, fnName, "lite", err),
           );
         }
-        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName);
+        return applyAndAuditLite(out, scope, denyFields, scopeTree, denyTree, purpose, fnName, scopeProvided);
       }
 
       // ── FULL / AUTO on an async function ──────────────────
@@ -319,11 +327,12 @@ function applyAndAuditLite(
   denyTree: ReturnType<typeof parsePaths>,
   purpose: string,
   fnName: string,
+  scopeProvided: boolean,
 ): unknown {
   const traceId = getTraceContext()?.traceId;
   try {
     const original = freezeSinglePass(data);
-    const filtered = runFilter(original, scope, denyFields, scopeTree, denyTree);
+    const filtered = runFilter(original, scope, denyFields, scopeTree, denyTree, scopeProvided);
     const blockedFields = diffKeys(original, filtered);
     emitAudit(
       fnName,
@@ -372,6 +381,7 @@ async function gateAndRunFull(
   denyTree: ReturnType<typeof parsePaths>,
   purpose: string,
   fnName: string,
+  scopeProvided: boolean,
 ): Promise<unknown> {
   const client = getModuleClient();
   const traceId = getTraceContext()?.traceId;
@@ -434,7 +444,7 @@ async function gateAndRunFull(
   // even with a throwing getter on `data`).
   try {
     const original = freezeSinglePass(data);
-    const filtered = runFilter(original, scope, denyFields, scopeTree, denyTree);
+    const filtered = runFilter(original, scope, denyFields, scopeTree, denyTree, scopeProvided);
     const blockedFields = diffKeys(original, filtered);
     const timestamp = new Date().toISOString();
 
@@ -523,17 +533,27 @@ function runFilter(
   denyFields: ReadonlyArray<string>,
   scopeTree: ReturnType<typeof parsePaths>,
   denyTree: ReturnType<typeof parsePaths>,
+  scopeProvided: boolean,
 ): unknown {
   const normalized = toFilterable(data);
 
   let filtered: unknown = normalized;
-  if (scope.length > 0) {
+  // An explicitly-provided scope is an allow-whitelist even when empty: an
+  // empty whitelist discloses nothing (parity with Python `shield(scope=[])`
+  // → `{}`). Keying on `scopeProvided`, not `scope.length`, lets a fully
+  // reduced doctor verdict (`scopeForShield()` → []) drive shield safely on
+  // the Node path instead of throwing.
+  if (scopeProvided) {
     if (isPlainObject(normalized)) {
       filtered = filterDict(normalized, scopeTree, defaultWarn);
     } else if (Array.isArray(normalized)) {
       filtered = normalized.map((item) => {
         const it = toFilterable(item);
-        return isPlainObject(it) ? filterDict(it, scopeTree, defaultWarn) : it;
+        // A scalar element under an active scope carries no named field for the
+        // whitelist to grant — emit empty (fail-closed), parity with Python's
+        // `_filter_result` which returns an empty shape for a scalar under a
+        // scope. Passing it raw would leak the value the scope never granted.
+        return isPlainObject(it) ? filterDict(it, scopeTree, defaultWarn) : emptyFor(it);
       });
     } else {
       // Non-dict/non-list with scope: fail-closed empty.
@@ -593,6 +613,7 @@ export function wrap<T>(value: T, options: ShieldOptions): ShieldResult<T> {
   const purpose = options.purpose;
   const scope = options.scope ?? [];
   const denyFields = options.denyFields ?? [];
+  const scopeProvided = options.scope !== undefined;
   if (!purpose || typeof purpose !== "string") {
     throw new AegisValidationError({
       code: "aegis.wrap.purpose.required",
@@ -602,8 +623,11 @@ export function wrap<T>(value: T, options: ShieldOptions): ShieldResult<T> {
     });
   }
   // Minimum disclosure (parity with shield()/Python). An empty spec would
-  // return `value` entirely unfiltered. S015 P0-1 / H5.
-  if (scope.length === 0 && denyFields.length === 0) {
+  // return `value` entirely unfiltered. S015 P0-1 / H5. An explicitly provided
+  // empty `scope: []` is a maximally-restrictive whitelist (discloses nothing),
+  // not an empty spec — refuse only when no scope was provided and the deny
+  // list is empty.
+  if (!scopeProvided && denyFields.length === 0) {
     throw new AegisValidationError({
       code: "aegis.wrap.spec.required",
       remediation:
@@ -615,7 +639,7 @@ export function wrap<T>(value: T, options: ShieldOptions): ShieldResult<T> {
   const scopeTree = parsePaths(scope);
   const denyTree = parsePaths(denyFields, { broaderWins: true });
   const original = freezeSinglePass(value);
-  const filtered = runFilter(value, scope, denyFields, scopeTree, denyTree) as T;
+  const filtered = runFilter(value, scope, denyFields, scopeTree, denyTree, scopeProvided) as T;
   return {
     data: filtered,
     mode: Mode.LITE,

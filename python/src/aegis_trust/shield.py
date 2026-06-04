@@ -585,23 +585,34 @@ def _filter_dict(data: dict[str, Any], path_tree: dict[str, Any]) -> dict[str, A
             continue
         subtree = path_tree[k]
         if not subtree:
-            # Leaf: drop fail-closed if any element is record-like (see
-            # ``_is_record_like`` for the full taxonomy). ANY-match, not
-            # first-element, so heterogeneous ``[1, {"ssn":"x"}]`` also drops.
-            # S022 R1/R11: cover non-str/non-bytes/non-Mapping iterables
-            # (list, tuple, deque, set, frozenset, generator, ...).
+            # Leaf: keep scalars and collections-of-scalars as-is, but drop
+            # fail-closed whenever the value carries named fields a bare leaf
+            # cannot filter — i.e. a record-like value itself (dict / mapping /
+            # object-with-fields) OR a collection containing record-like
+            # elements. A bare ``scope=["config"]`` over ``{"api_key": ...}``
+            # would otherwise disclose the *entire* subtree the caller never
+            # enumerated (the doctor→shield fail-open class: doctor only saw the
+            # parent name, shield expands the whole object). Minimum disclosure
+            # requires the explicit ``'<field>.<subfield>'`` form for any nested
+            # value. ANY-match on collections, so heterogeneous ``[1, {"ssn":"x"}]``
+            # also drops. See ``_is_record_like`` for the full taxonomy.
+            # S022 R1/R11 covered the collection case; the bare-Mapping/record
+            # case is the doctor-v0 trust-boundary hardening.
+            if _is_record_like(v) or (
+                _is_traversable(v)
+                and any(_is_record_like(x) for x in _iter_preserving(v))
+            ):
+                logger.warning(
+                    "shield: scope_bare_field_over_record_collection — a bare "
+                    "scope field matched a record-like value (a mapping/object) "
+                    "or a collection of record-like elements; dropping the key "
+                    "(fail-closed). Use the dot-notation '<field>.<subfield>' "
+                    "form to enumerate the permitted nested fields. The field "
+                    "key is withheld (application-controlled identifier)."
+                )
+                continue
             if _is_traversable(v):
-                kept = _iter_preserving(v)
-                if any(_is_record_like(x) for x in kept):
-                    logger.warning(
-                        "shield: scope_bare_field_over_record_collection — a bare "
-                        "scope field matched a collection of record-like elements; "
-                        "dropping the key (fail-closed). Use the dot-notation "
-                        "'<field>.<subfield>' form to filter each element. The "
-                        "field key is withheld (application-controlled identifier)."
-                    )
-                    continue
-                result[k] = kept
+                result[k] = _iter_preserving(v)
             else:
                 result[k] = v
         elif isinstance(v, dict):

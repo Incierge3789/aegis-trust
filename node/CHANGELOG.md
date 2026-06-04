@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+### Security — Doctor↔shield trust-boundary hardening (fail-closed by default)
+An independent red-team + synthetic-market sweep found that the (unreleased)
+`check()`→`shield({ scope })` path failed **open** along several axes. All are
+now closed by construction (1:1 with the Python SDK):
+- **Path-aware, normalized field matching.** `neverFields` / `sensitiveFields` /
+  per-purpose `deny` now match any path that **is**, **descends from**, or
+  **encloses** a guarded field — `neverFields:["ssn"]` blocks `profile.ssn`;
+  `["config"]` blocks `config.api_key`. Comparison is Unicode-NFKC + lowercase +
+  trimmed, so `SSN` can no longer dodge `ssn`. `allow` grants a field and its
+  descendants only (never a parent).
+- **`shield` drops a bare leaf over a record-like value (fail-closed).** A bare
+  `scope:["config"]` over a nested object no longer discloses the whole subtree;
+  enumerate `'config.<field>'`. **Behaviour change** to `shield`.
+- **Unknown destinations are treated as external (fail-closed)** — see the new
+  `internalDestinations` policy field.
+- **Unknown purpose fails closed by default** (`strictUnknownPurpose` defaults
+  to `true`): an unknown purpose against a non-empty `purposes` map yields an
+  empty allow set. Set `strictUnknownPurpose: false` for prior behaviour.
+- **Enforcement coupling:** new `scopeForShield(decision)` returns the scope only
+  for `ALLOW` / `REDUCE_SCOPE`; `[]` for `REQUIRE_APPROVAL` / `BLOCK`. Use it,
+  not `allowedData`, to drive `shield`.
+- **Empty-scope parity:** `shield({ scope: [] })` now discloses nothing (returns
+  the empty shape) instead of throwing — matching Python and letting a fully
+  reduced verdict drive `shield` cleanly. A truly absent spec (no scope, no
+  deny) is still refused.
+- **Malformed field paths fail closed at the gate** (`MALFORMED_FIELD_PATH`);
+  this also rejects `..`-bearing (path-traversal) field paths.
+- **`shield` drops a bare leaf over a `Map`** (a key→value container its
+  dot-notation cannot traverse) — found by cross-model (codex) review.
+- **Prototype-name purposes fail closed** (`check`): an attacker-supplied
+  `purpose` / `actionType` of `"__proto__"` / `"constructor"` / `"toString"` no
+  longer resolves an inherited `Object.prototype` member and dodge the
+  unknown-purpose guard — `check` now uses own-property lookup (parity with the
+  `shield` scope/deny prototype fix in 0.9.0-rc8). Python's `dict.get` was
+  already immune. Found by the post-fix red-team re-run.
+- **Examples + threat-model:** the `doctor` examples now drive `shield` from
+  `scopeForShield(decision)` (not `allowedData` raw), and the README "Not
+  guaranteed" section calls out `doctor.check()` as a local, in-process,
+  bypassable diagnostic — fail-closed for an honest caller, not a sandbox.
+- **Open-direction matches are exact — no normalization confused-deputy.**
+  Normalization is one-directional: the never/sensitive/deny *guards* normalize
+  (block more, fail-closed), but the two *permissive* matches — the `allow`
+  whitelist and `internalDestinations` — match the **literal** token. Loosely
+  matching `"NAME"` against `allow:["name"]` (F-1), or `"INTERNAL_SINK"` against
+  `internalDestinations:["internal_sink"]` (F-2), would authorize the attacker's
+  token and disclose a *distinct* field / skip the sensitive strip for a
+  *different* endpoint. Found by post-fix red-team passes.
+- New `LocalPolicy` fields: `internalDestinations`, `strictUnknownPurpose`.
+
 ### Added — Doctor: pre-action boundary diagnosis (`aegis-trust/doctor`)
 - **`check(plan, policy)`** — a new local Trust Boundary primitive that diagnoses
   an Actor's **action plan before it executes** and returns a deterministic

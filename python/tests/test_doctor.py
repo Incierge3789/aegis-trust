@@ -61,7 +61,17 @@ class TestDoctor:
         assert "DATA_NOT_REQUIRED_FOR_PURPOSE" in d.reason_codes
 
     def test_external_destination_strips_sensitive_even_without_purpose_rule(self):
-        # purpose with no allow rule; sensitive fields still stripped for external
+        # purpose with no allow rule; sensitive fields still stripped for external.
+        # strict_unknown_purpose=False opts into the permissive-unknown path so
+        # this exercises the sensitive-strip seam (see the strict variant below).
+        permissive = LocalPolicy(
+            purposes={"customer_support": PurposeRule(allow=["name", "issue"])},
+            sensitive_fields=["email", "card_number"],
+            never_fields=["password", "ssn", ".env"],
+            external_destinations=["external_llm"],
+            actions={"send": ActionRule(requires_approval=True)},
+            strict_unknown_purpose=False,
+        )
         d = check(
             ActionPlan(
                 purpose="unlisted",
@@ -69,12 +79,23 @@ class TestDoctor:
                 data_requested=["name", "email", "card_number"],
                 destinations=["external_llm"],
             ),
-            POLICY,
+            permissive,
         )
         assert d.outcome is BoundaryOutcome.REDUCE_SCOPE
         assert d.allowed_data == ["name"]
         assert set(d.blocked_data) == {"email", "card_number"}
         assert "EXTERNAL_DESTINATION_MINIMUM_DISCLOSURE" in d.reason_codes
+
+    def test_unknown_purpose_fails_closed_by_default(self):
+        # Trust-boundary hardening: an unknown purpose against a non-empty policy
+        # must NOT allow everything requested (the attacker cannot disable the
+        # whitelist by inventing a purpose string).
+        d = check(
+            _plan(purpose="support_v2", data_requested=["name", "ssn_alias", "card"]),
+            POLICY,
+        )
+        assert d.allowed_data == []
+        assert d.outcome is BoundaryOutcome.REDUCE_SCOPE
 
     def test_require_approval_for_send_action(self):
         d = check(_plan(action_type="send", data_requested=["name", "issue"]), POLICY)
@@ -130,3 +151,209 @@ class TestDoctor:
         )
         assert d.outcome is BoundaryOutcome.REQUIRE_APPROVAL
         assert "email" in d.blocked_data
+
+
+class TestTrustBoundaryHardening:
+    """Regression suite for the doctor→shield fail-open class (S-redteam).
+
+    Each case is a confirmed bypass that must now fail closed end-to-end:
+    feed the decision's enforcement-coupled scope into shield and assert the
+    forbidden value never surfaces.
+    """
+
+    def _emit(self, scope, record):
+        @shield(purpose="p", scope=scope)
+        def get():
+            return record
+
+        return get()
+
+    def test_f1_dotnotation_does_not_escape_never_block(self):
+        d = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["profile.ssn"]),
+            LocalPolicy(never_fields=["ssn"]),
+        )
+        assert d.outcome is BoundaryOutcome.BLOCK
+        assert d.scope_for_shield() == []
+
+    def test_f2_bare_parent_does_not_leak_child_secret(self):
+        # Doctor allows the bare parent name it cannot introspect, but shield
+        # now drops a bare leaf over a nested mapping fail-closed.
+        assert self._emit(["config"], {"config": {"api_key": "SECRET"}}) == {}
+
+    def test_f3_unknown_destination_treated_external(self):
+        d = check(
+            ActionPlan(
+                purpose="p",
+                action_type="send",
+                data_requested=["ssn"],
+                destinations=["evilcorp"],
+            ),
+            LocalPolicy(
+                sensitive_fields=["ssn"], external_destinations=["external_llm"]
+            ),
+        )
+        assert d.scope_for_shield() == []
+
+    def test_f7_deny_blacklist_path_aware(self):
+        d = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["profile.ssn"]),
+            LocalPolicy(purposes={"p": PurposeRule(deny=["ssn"])}),
+        )
+        assert d.scope_for_shield() == []
+
+    def test_f9_casing_cannot_dodge_never(self):
+        d = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["SSN"]),
+            LocalPolicy(never_fields=["ssn"]),
+        )
+        assert d.outcome is BoundaryOutcome.BLOCK
+
+    def test_a1_parent_in_never_blocks_child_request(self):
+        d = check(
+            ActionPlan(
+                purpose="p", action_type="read", data_requested=["config.api_key"]
+            ),
+            LocalPolicy(never_fields=["config"]),
+        )
+        assert d.outcome is BoundaryOutcome.BLOCK
+
+    def test_a2_approval_decision_yields_no_enforceable_scope(self):
+        d = check(
+            ActionPlan(
+                purpose="p",
+                action_type="send",
+                data_requested=["ssn", "name"],
+            ),
+            LocalPolicy(actions={"send": ActionRule(requires_approval=True)}),
+        )
+        assert d.outcome is BoundaryOutcome.REQUIRE_APPROVAL
+        # Diagnostic still populated, but the enforcement-coupled scope is empty:
+        # nothing flows before the human approval is cleared.
+        assert d.allowed_data == ["ssn", "name"]
+        assert d.scope_for_shield() == []
+        assert self._emit(d.scope_for_shield(), {"ssn": "S", "name": "n"}) == {}
+
+    def test_f12_malformed_path_fails_closed_at_gate(self):
+        d = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["a..b"]),
+            LocalPolicy(),
+        )
+        assert d.outcome is BoundaryOutcome.BLOCK
+        assert "MALFORMED_FIELD_PATH" in d.reason_codes
+
+    def test_cx2_nfkc_folds_fullwidth_onto_ascii_guard(self):
+        # codex cross-review: NFC left full-width 'ＳＳＮ' distinct from 'ssn'.
+        d = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["ＳＳＮ"]),
+            LocalPolicy(never_fields=["ssn"]),
+        )
+        assert d.outcome is BoundaryOutcome.BLOCK
+
+    def test_cx3_prototype_chain_purpose_cannot_dodge_guard(self):
+        # Parity with the Node fix: a dunder purpose must not be treated as a
+        # known rule-less purpose. (Python's dict.get is immune by construction;
+        # this locks the behaviour as a cross-SDK contract.)
+        for purpose in ("__proto__", "__class__", "constructor"):
+            d = check(
+                ActionPlan(
+                    purpose=purpose,
+                    action_type="read",
+                    data_requested=["name", "ssn", "card"],
+                ),
+                LocalPolicy(purposes={"support": PurposeRule(allow=["name"])}),
+            )
+            assert d.scope_for_shield() == []
+
+    def test_cx4_path_traversal_field_paths_fail_closed(self):
+        # Sweep hypothesis: '../'-style traversal in a field path. The malformed-
+        # path gate (consecutive dots) rejects every '..'-bearing path.
+        for p in ("../etc/passwd", "a/../b", "..", "config/../secret"):
+            d = check(
+                ActionPlan(purpose="p", action_type="read", data_requested=[p]),
+                LocalPolicy(),
+            )
+            assert d.outcome is BoundaryOutcome.BLOCK
+
+    def test_cx5_toctou_mutation_after_check_is_refiltered_by_shield(self):
+        # Sweep hypothesis: mutate the shared payload between check() and the
+        # shield emit. shield filters the *live* return value at call time, so a
+        # post-check injection (new fields, or shape-shifting the allowed field
+        # into a container) never surfaces — no cross-field leak.
+        data = {"name": "alice", "ssn": "111"}
+        d = check(
+            ActionPlan(purpose="cs", action_type="read", data_requested=["name"]),
+            LocalPolicy(purposes={"cs": PurposeRule(allow=["name"])}),
+        )
+
+        @shield(purpose="cs", scope=d.scope_for_shield())
+        def get():
+            return data
+
+        data["ssn"] = "MUTATED-SECRET"
+        data["evil"] = "INJECTED"
+        data["name"] = {"nested_secret": "X"}
+        out = get()
+        assert "ssn" not in out and "evil" not in out
+        assert out == {}  # name shape-shifted to a container → fail-closed drop
+
+    def test_f1_allow_list_normalization_confused_deputy(self):
+        # Red-team F-1: the allow-list must match EXACTLY. allow=["name"] must not
+        # loosely authorize a request for "NAME" / full-width / "Name" — that
+        # would emit the attacker's token to shield and disclose a *distinct*
+        # field the operator never allowed (normalization confused-deputy).
+        pol = LocalPolicy(purposes={"p": PurposeRule(allow=["name"])})
+        for variant in ("NAME", "ＮＡＭＥ", "Name"):
+            d = check(
+                ActionPlan(purpose="p", action_type="read", data_requested=[variant]),
+                pol,
+            )
+            assert d.scope_for_shield() == []
+            assert (
+                self._emit(d.scope_for_shield(), {"name": "ok", variant: "SECRET"})
+                == {}
+            )
+        # legitimate exact + descendant requests still work
+        d_ok = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["name"]), pol
+        )
+        assert d_ok.scope_for_shield() == ["name"]
+        d_desc = check(
+            ActionPlan(purpose="p", action_type="read", data_requested=["name.first"]),
+            pol,
+        )
+        assert self._emit(
+            d_desc.scope_for_shield(), {"name": {"first": "A", "ssn": "S"}}
+        ) == {"name": {"first": "A"}}
+
+    def test_f2_internal_destination_normalization_confused_deputy(self):
+        # Same class as F-1 on the destination side: classifying a destination as
+        # internal (→ do NOT strip sensitive) is the permissive direction, so it
+        # must match EXACTLY. A variant label like "INTERNAL_SINK" must not fold
+        # onto the trusted "internal_sink" and let sensitive data flow to a
+        # different actual endpoint.
+        pol = LocalPolicy(
+            sensitive_fields=["ssn"], internal_destinations=["internal_sink"]
+        )
+        for variant in ("INTERNAL_SINK", "Internal_Sink", "ｉｎｔｅｒｎａｌ＿ｓｉｎｋ"):
+            d = check(
+                ActionPlan(
+                    purpose="p",
+                    action_type="send",
+                    data_requested=["ssn"],
+                    destinations=[variant],
+                ),
+                pol,
+            )
+            assert d.scope_for_shield() == []  # variant → external → stripped
+        # the exact internal sink keeps sensitive (data stays inside the boundary)
+        d_ok = check(
+            ActionPlan(
+                purpose="p",
+                action_type="send",
+                data_requested=["ssn"],
+                destinations=["internal_sink"],
+            ),
+            pol,
+        )
+        assert d_ok.scope_for_shield() == ["ssn"]

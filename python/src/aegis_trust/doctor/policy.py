@@ -33,13 +33,26 @@ class LocalPolicy:
     - ``sensitive_fields``: fields stripped before any *external* destination.
     - ``never_fields``: fields that, if requested at all, hard-BLOCK the action
       (e.g. secrets / ``.env`` / raw card numbers).
-    - ``external_destinations``: destinations treated as outside the trust
-      boundary (e.g. ``external_llm``).
+    - ``external_destinations``: destinations explicitly treated as outside the
+      trust boundary (e.g. ``external_llm``).
+    - ``internal_destinations``: destinations explicitly trusted as inside the
+      boundary. Any named destination that is in *neither* list is treated as
+      **external** (fail-closed minimum disclosure) — an unknown sink must not
+      silently receive sensitive data. Leave both empty and pass no
+      destinations to keep a purely local action internal.
     - ``actions``: per-action-type rules (e.g. ``send`` requires approval).
+    - ``strict_unknown_purpose``: when True (default) a ``purpose`` absent from
+      ``purposes`` — while ``purposes`` is non-empty — yields an empty allow set
+      (fail-closed) instead of allowing everything requested. An attacker must
+      not be able to disable the whole per-purpose whitelist by inventing a
+      purpose string. An empty ``purposes`` map stays permissive (caller opted
+      out of purpose gating entirely).
     """
 
     purposes: dict[str, PurposeRule] = field(default_factory=dict)
     sensitive_fields: list[str] = field(default_factory=list)
     never_fields: list[str] = field(default_factory=list)
     external_destinations: list[str] = field(default_factory=list)
+    internal_destinations: list[str] = field(default_factory=list)
     actions: dict[str, ActionRule] = field(default_factory=dict)
+    strict_unknown_purpose: bool = True

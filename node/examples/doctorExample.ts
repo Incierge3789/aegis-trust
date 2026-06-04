@@ -15,7 +15,7 @@
 //   No LLM, no network, no Aegis Core — fully local and deterministic.
 
 import { shield } from "aegis-trust";
-import { check, type ActionPlan, type LocalPolicy } from "aegis-trust/doctor";
+import { check, scopeForShield, type ActionPlan, type LocalPolicy } from "aegis-trust/doctor";
 
 const policy: LocalPolicy = {
   purposes: { customer_support: { allow: ["name", "issue"] } },
@@ -37,12 +37,16 @@ const plan: ActionPlan = {
 const decision = check(plan, policy);
 
 console.log("Doctor decision:", decision.outcome);
-console.log("  allowed:", decision.allowedData);
+console.log("  allowed (diagnostic):", decision.allowedData);
 console.log("  blocked before the agent runs:", decision.blockedData);
 console.log("  reasons:", decision.reasonCodes);
 
-// Enforce the decision: shield filters the real fetch to the allowed scope.
-const getCustomer = shield({ purpose: plan.purpose, scope: [...decision.allowedData] })(() => ({
+// Enforce the decision. ALWAYS drive shield from `scopeForShield(decision)`, NOT
+// from `allowedData` directly: `allowedData` is a *diagnostic* and stays
+// populated even for REQUIRE_APPROVAL / BLOCK, so passing it raw would let data
+// flow before a required approval. `scopeForShield()` returns [] unless the
+// outcome permits the action (ALLOW / REDUCE_SCOPE).
+const getCustomer = shield({ purpose: plan.purpose, scope: scopeForShield(decision) })(() => ({
   name: "Tanaka Taro",
   issue: "Login problem",
   email: "tanaka@example.com",

@@ -21,8 +21,23 @@ export interface LocalPolicy {
   readonly sensitiveFields?: ReadonlyArray<string>;
   /** Fields that, if requested at all, hard-BLOCK the action (e.g. secrets / `.env`). */
   readonly neverFields?: ReadonlyArray<string>;
-  /** Destinations treated as outside the trust boundary (e.g. `external_llm`). */
+  /** Destinations explicitly treated as outside the trust boundary (e.g. `external_llm`). */
   readonly externalDestinations?: ReadonlyArray<string>;
+  /**
+   * Destinations explicitly trusted as inside the boundary. Any named
+   * destination in *neither* list is treated as **external** (fail-closed
+   * minimum disclosure) — an unknown sink must not silently receive sensitive
+   * data.
+   */
+  readonly internalDestinations?: ReadonlyArray<string>;
   /** Per-action-type rules (e.g. `send` requires approval). */
   readonly actions?: Readonly<Record<string, ActionRule>>;
+  /**
+   * When true (default) a `purpose` absent from `purposes` — while `purposes`
+   * is non-empty — yields an empty allow set (fail-closed) instead of allowing
+   * everything requested. An attacker must not disable the whole per-purpose
+   * whitelist by inventing a purpose string. An empty `purposes` map stays
+   * permissive (caller opted out of purpose gating entirely).
+   */
+  readonly strictUnknownPurpose?: boolean;
 }

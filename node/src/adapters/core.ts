@@ -111,8 +111,12 @@ export function shieldedTool<A = unknown>(spec: ShieldedToolSpec<A>): ShieldedTo
 
   const guarded = shield({
     purpose: spec.purpose,
-    scope: spec.scope ?? [],
-    denyFields: spec.denyFields ?? [],
+    // Pass the spec fields through verbatim (do NOT default to []). shield()
+    // distinguishes an explicitly-provided empty scope (valid: discloses
+    // nothing) from an absent spec (refused, minimum disclosure). Defaulting to
+    // [] here would mask that distinction and defer no validation.
+    ...(spec.scope !== undefined ? { scope: spec.scope } : {}),
+    ...(spec.denyFields !== undefined ? { denyFields: spec.denyFields } : {}),
     ...(spec.mode !== undefined ? { mode: spec.mode } : {}),
   })(accessor as (...args: unknown[]) => unknown);
 

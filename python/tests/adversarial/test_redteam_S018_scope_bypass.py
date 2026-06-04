@@ -139,7 +139,10 @@ def test_scope_deep_nesting_no_crash():
 
     result = get_deep()
     assert "top_secret" not in result
-    assert "data" in result
+    # Hardened contract: a bare leaf scope over a deeply-nested mapping drops
+    # fail-closed (no crash, and the buried secret never surfaces). The caller
+    # must enumerate explicit "data.<field>" paths to retrieve nested values.
+    assert result == {}
 
 
 # ── Attack 7: Key collision with dot-notation ────────────────────

@@ -78,6 +78,27 @@ class BoundaryDecision:
     receipt_required: bool = False
     schema_version: int = DOCTOR_SCHEMA_VERSION
 
+    def scope_for_shield(self) -> list[str]:
+        """The scope that may be handed to ``shield`` — enforcement-coupled.
+
+        ``allowed_data`` is a *diagnostic* field: it is populated even for
+        :attr:`BoundaryOutcome.REQUIRE_APPROVAL` and
+        :attr:`BoundaryOutcome.BLOCK` so a caller can show *what would have been
+        allowed*. Passing that diagnostic straight into ``shield(scope=...)``
+        would let data flow **before** a required human approval, or **after** a
+        hard block — the decision and the enforcement become decoupled.
+
+        This accessor returns the scope **only** when the outcome actually
+        permits the action to proceed (``ALLOW`` / ``REDUCE_SCOPE``). For
+        ``REQUIRE_APPROVAL`` / ``REQUIRE_CHECK`` / ``BLOCK`` it returns an empty
+        list, so the safe path — ``shield(scope=decision.scope_for_shield())`` —
+        discloses nothing until the gate is cleared. Use this, not
+        ``allowed_data``, to drive enforcement.
+        """
+        if self.outcome in (BoundaryOutcome.ALLOW, BoundaryOutcome.REDUCE_SCOPE):
+            return list(self.allowed_data)
+        return []
+
     def to_receipt(
         self,
         *,

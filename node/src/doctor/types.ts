@@ -79,6 +79,30 @@ export interface BoundaryReceipt {
   readonly schemaVersion: number;
 }
 
+/**
+ * The scope that may be handed to `shield` — enforcement-coupled (parity with
+ * Python `BoundaryDecision.scope_for_shield`).
+ *
+ * `allowedData` is a *diagnostic* field: it is populated even for
+ * `REQUIRE_APPROVAL` and `BLOCK` so a caller can show *what would have been
+ * allowed*. Passing that diagnostic straight into `shield({ scope })` would let
+ * data flow **before** a required human approval, or **after** a hard block —
+ * decoupling the decision from enforcement. This accessor returns the scope
+ * **only** when the outcome actually permits the action to proceed (`ALLOW` /
+ * `REDUCE_SCOPE`); otherwise it returns an empty array, so the safe pattern
+ * `shield({ scope: scopeForShield(decision) })` discloses nothing until the
+ * gate is cleared. Use this, not `allowedData`, to drive enforcement.
+ */
+export function scopeForShield(decision: BoundaryDecision): string[] {
+  if (
+    decision.outcome === BoundaryOutcome.ALLOW
+    || decision.outcome === BoundaryOutcome.REDUCE_SCOPE
+  ) {
+    return [...decision.allowedData];
+  }
+  return [];
+}
+
 /** Build a {@link BoundaryReceipt} from a decision (parity with Python `BoundaryDecision.to_receipt`). */
 export function toReceipt(
   decision: BoundaryDecision,

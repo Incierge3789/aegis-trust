@@ -10,7 +10,7 @@
 // Authoritative enforcement and formal Evidence remain Aegis Core's job.
 
 export { check } from "./check.js";
-export { BoundaryOutcome, DOCTOR_SCHEMA_VERSION, toReceipt } from "./types.js";
+export { BoundaryOutcome, DOCTOR_SCHEMA_VERSION, scopeForShield, toReceipt } from "./types.js";
 export type {
   ActionPlan,
   BoundaryDecision,
