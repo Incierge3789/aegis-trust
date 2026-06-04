@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Security — Doctor↔shield trust-boundary hardening (fail-closed by default)
+An independent red-team + synthetic-market sweep found that the (unreleased)
+`doctor.check()`→`shield(scope=...)` path failed **open** along several axes.
+All are now closed by construction:
+- **Path-aware, normalized field matching.** `never_fields` / `sensitive_fields`
+  / per-purpose `deny` now match any path that **is**, **descends from**, or
+  **encloses** a guarded field — `never_fields=["ssn"]` blocks `profile.ssn`;
+  `["config"]` blocks `config.api_key`. Comparison is Unicode-NFKC + casefold +
+  trimmed, so `SSN` can no longer dodge `ssn`. `allow` whitelists grant a field
+  and its descendants only (never a parent).
+- **`shield` drops a bare leaf over a record-like value (fail-closed).** A bare
+  `scope=["config"]` over a nested mapping/object no longer discloses the whole
+  subtree — it drops with a warning pointing at the explicit `'config.<field>'`
+  form (previously only collections-of-records were dropped; plain mappings
+  leaked). **Behaviour change** to `shield`: enumerate nested fields explicitly.
+- **Unknown destinations are treated as external (fail-closed).** A destination
+  named but listed in neither `external_destinations` nor the new
+  `internal_destinations` no longer bypasses the minimum-disclosure strip.
+- **Unknown purpose fails closed by default** (`strict_unknown_purpose=True`):
+  a purpose absent from a non-empty `purposes` map yields an empty allow set
+  rather than allowing everything. Set `strict_unknown_purpose=False` for the
+  prior permissive behaviour.
+- **Enforcement coupling:** new `BoundaryDecision.scope_for_shield()` returns the
+  scope only for `ALLOW` / `REDUCE_SCOPE`; for `REQUIRE_APPROVAL` / `BLOCK` it
+  returns `[]`. Use it (not `allowed_data`) to drive `shield` so nothing flows
+  before a required approval. `allowed_data` remains the diagnostic field.
+- **Malformed field paths fail closed at the gate** (`MALFORMED_FIELD_PATH`)
+  instead of deferring an exception to `shield` construction.
+- New `LocalPolicy` fields: `internal_destinations`, `strict_unknown_purpose`.
+
 ### Added — Doctor: pre-action boundary diagnosis (`aegis_trust.doctor`)
 - **`check(plan, policy)`** — a new local Trust Boundary primitive that diagnoses
   an Actor's **action plan before it executes** and returns a deterministic

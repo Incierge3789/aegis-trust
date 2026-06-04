@@ -172,13 +172,25 @@ describe("empty scope and deny → minimum-disclosure error (S015)", () => {
   it("shield() rejects a purpose-only spec", () => {
     expect(() => shield({ purpose: "p" })).toThrow(/minimum disclosure|required/);
   });
-  it("shield() rejects explicit empty arrays", () => {
-    expect(() => shield({ purpose: "p", scope: [], denyFields: [] })).toThrow(
-      /minimum disclosure|required/,
-    );
+  it("shield() accepts an explicit empty scope and discloses nothing (fail-closed, parity with Python shield(scope=[]) → {})", () => {
+    // An explicitly-provided empty scope is a maximally-restrictive whitelist:
+    // it discloses NOTHING rather than throwing (so a fully-reduced doctor
+    // verdict — scopeForShield() → [] — drives shield cleanly). This is
+    // fail-CLOSED, the opposite of the rc7 leak this suite guards against.
+    const guarded = shield({ purpose: "p", scope: [] })((_: unknown) => ({
+      name: "A",
+      ssn: "X",
+    }));
+    expect(guarded(0)).toEqual({});
   });
   it("wrap() rejects a purpose-only spec", () => {
     expect(() => wrap({ ssn: "x" }, { purpose: "p" })).toThrow(/minimum disclosure|required/);
+  });
+  it("a scope over a top-level array of scalars fails closed (no raw passthrough, Python parity)", () => {
+    // Regression: a scalar element carries no named field for the whitelist to
+    // grant, so it must be emptied — never passed through raw.
+    const guarded = shield({ purpose: "p", scope: ["name"] })(() => [1, 2, 3]);
+    expect(guarded(0)).toEqual([0, 0, 0]);
   });
 });
 

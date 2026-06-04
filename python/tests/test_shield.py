@@ -141,9 +141,17 @@ def test_nested_dict_top_level_filter():
         }
 
     result = get_report()
-    # "summary" is a leaf in scope — entire subtree is kept (v0.5 dot-notation)
-    assert result == {"summary": {"total": 100, "avg": 50}}
-    assert "raw_data" not in result
+    # Trust-boundary hardening: a bare leaf scope over a nested mapping drops
+    # fail-closed (it would otherwise disclose the whole subtree the caller never
+    # enumerated). "raw_data" (not in scope) is filtered; "summary" (record-like)
+    # is withheld until requested as explicit "summary.<field>" paths.
+    assert result == {}
+
+    @shield(purpose="report", scope=["summary.total", "summary.avg"])
+    def get_report_explicit():
+        return {"summary": {"total": 100, "avg": 50}, "raw_data": [1, 2, 3]}
+
+    assert get_report_explicit() == {"summary": {"total": 100, "avg": 50}}
 
 
 # ── functools.wraps preserved ─────────────────────────────────
@@ -485,8 +493,13 @@ def test_dot_notation_scope_flat_and_dot_mixed():
     assert result == {"id": 1, "name": "Tanaka", "address": {"city": "Tokyo"}}
 
 
-def test_dot_notation_scope_leaf_keeps_entire_subtree():
-    """A flat key in scope keeps the entire nested value as-is."""
+def test_dot_notation_scope_leaf_over_mapping_drops_fail_closed():
+    """A bare leaf scope over a nested mapping drops fail-closed.
+
+    Trust-boundary hardening (doctor-v0 fail-open class): ``scope=["profile"]``
+    must NOT silently disclose every child of ``profile`` (including secrets the
+    operator never enumerated). The caller must request explicit
+    ``profile.<field>`` paths."""
 
     @shield(purpose="admin", scope=["profile"])
     def get_user():
@@ -495,8 +508,17 @@ def test_dot_notation_scope_leaf_keeps_entire_subtree():
             "secret": "hidden",
         }
 
-    result = get_user()
-    assert result == {"profile": {"name": "A", "age": 30, "nested": {"x": 1}}}
+    assert get_user() == {}
+
+    @shield(purpose="admin", scope=["profile.name", "profile.age"])
+    def get_user_explicit():
+        return {
+            "profile": {"name": "A", "age": 30, "ssn": "leak"},
+            "secret": "hidden",
+        }
+
+    # Explicit leaves disclose only what was enumerated; ssn stays withheld.
+    assert get_user_explicit() == {"profile": {"name": "A", "age": 30}}
 
 
 def test_dot_notation_scope_in_list_of_dicts():

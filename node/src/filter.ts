@@ -118,17 +118,31 @@ export function filterDict(
     const isLeaf = Object.keys(subtree).length === 0;
 
     if (isLeaf) {
-      // Leaf: drop fail-closed if any element is record-like.
+      // Leaf: keep scalars and collections-of-scalars as-is, but drop
+      // fail-closed whenever the value carries named fields a bare leaf cannot
+      // filter — a record-like value itself (object / class instance), a `Map`
+      // (a key→value container shield's dot-notation cannot traverse, so it is
+      // all-or-nothing — and "nothing" is the safe choice), OR a collection
+      // containing record-like elements. A bare `scope=['config']` over
+      // `{ api_key: ... }` (or `new Map([['api_key', ...]])`) would otherwise
+      // disclose the entire subtree the caller never enumerated (the
+      // doctor→shield fail-open class; parity with Python where a Mapping is
+      // record-like). Minimum disclosure requires the explicit
+      // `'<field>.<subfield>'` form.
+      if (
+        isRecordLike(v)
+        || v instanceof Map
+        || (isTraversable(v) && materialize(v).some(isRecordLike))
+      ) {
+        warn(
+          `shield: scope=['${k}'] over a record-like value (or a collection of `
+            + `record-like elements) drops the key (fail-closed). Use `
+            + `'${k}.<field>' to enumerate the permitted nested fields.`,
+        );
+        continue;
+      }
       if (isTraversable(v)) {
-        const kept = materialize(v);
-        if (kept.some(isRecordLike)) {
-          warn(
-            `shield: scope=['${k}'] over a collection of record-like elements `
-              + `drops the key (fail-closed). Use '${k}.<field>' to filter each element.`,
-          );
-          continue;
-        }
-        result[k] = kept;
+        result[k] = materialize(v);
       } else {
         result[k] = v;
       }
