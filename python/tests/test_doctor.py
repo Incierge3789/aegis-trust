@@ -249,3 +249,18 @@ class TestTrustBoundaryHardening:
             LocalPolicy(never_fields=["ssn"]),
         )
         assert d.outcome is BoundaryOutcome.BLOCK
+
+    def test_cx3_prototype_chain_purpose_cannot_dodge_guard(self):
+        # Parity with the Node fix: a dunder purpose must not be treated as a
+        # known rule-less purpose. (Python's dict.get is immune by construction;
+        # this locks the behaviour as a cross-SDK contract.)
+        for purpose in ("__proto__", "__class__", "constructor"):
+            d = check(
+                ActionPlan(
+                    purpose=purpose,
+                    action_type="read",
+                    data_requested=["name", "ssn", "card"],
+                ),
+                LocalPolicy(purposes={"support": PurposeRule(allow=["name"])}),
+            )
+            assert d.scope_for_shield() == []

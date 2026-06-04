@@ -41,6 +41,21 @@ function segments(path: string): string[] {
   return norm(path).split(".");
 }
 
+/**
+ * Own-property lookup. A bare `obj[key]` resolves inherited members, so an
+ * attacker-controlled `purpose` / `actionType` of `"__proto__"`, `"constructor"`,
+ * `"toString"`, etc. would return a truthy `Object.prototype` member and be
+ * treated as a *known, rule-less* purpose — silently bypassing the
+ * unknown-purpose fail-closed guard (a fail-OPEN). hasOwnProperty restricts
+ * resolution to keys the policy actually declares. Parity with the null-proto /
+ * hasOwnProperty guards in paths.ts / filter.ts (S015 P0); Python's `dict.get`
+ * is already immune.
+ */
+function ownProp<T>(obj: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
+  if (obj == null) return undefined;
+  return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+}
+
 /** Mirror shield's field-path validation (fail-closed at the gate). */
 function isValidPath(path: string): boolean {
   if (!path || path !== path.trim()) return false;
@@ -127,8 +142,10 @@ export function check(plan: ActionPlan, policy: LocalPolicy = {}): BoundaryDecis
     };
   }
 
-  // 2. Per-purpose allow/deny → the baseline allowed set.
-  const rule = policy.purposes?.[plan.purpose];
+  // 2. Per-purpose allow/deny → the baseline allowed set. Own-property lookup
+  //    so an attacker-supplied purpose like "__proto__" cannot resolve an
+  //    inherited member and dodge the unknown-purpose fail-closed guard.
+  const rule = ownProp(policy.purposes, plan.purpose);
   let allowed: string[];
   if (rule && rule.allow != null) {
     const allow = rule.allow;
@@ -166,9 +183,9 @@ export function check(plan: ActionPlan, policy: LocalPolicy = {}): BoundaryDecis
 
   const blocked = requested.filter((f) => !allowed.includes(f));
 
-  // 4. Approval seam: action-type rules.
+  // 4. Approval seam: action-type rules (own-property lookup — see `ownProp`).
   const approvalRequiredFor: string[] = [];
-  if (policy.actions?.[plan.actionType]?.requiresApproval) {
+  if (ownProp(policy.actions, plan.actionType)?.requiresApproval) {
     approvalRequiredFor.push(plan.actionType);
   }
 

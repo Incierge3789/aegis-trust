@@ -199,4 +199,16 @@ describe("doctor.check — trust-boundary hardening (S-redteam regressions)", ()
     const d = check(p({ dataRequested: ["ＳＳＮ"] }), { neverFields: ["ssn"] });
     expect(d.outcome).toBe(BoundaryOutcome.BLOCK);
   });
+
+  it("CX3: a prototype-chain purpose cannot dodge the unknown-purpose guard", () => {
+    // post-fix sweep: purpose '__proto__' resolved policy.purposes['__proto__']
+    // to Object.prototype (truthy) → treated as a rule-less known purpose →
+    // ALLOW everything. Own-property lookup now fails it closed.
+    for (const purpose of ["__proto__", "constructor", "toString"]) {
+      const d = check(p({ purpose, dataRequested: ["name", "ssn", "card"] }), {
+        purposes: { support: { allow: ["name"] } },
+      });
+      expect(scopeForShield(d)).toEqual([]);
+    }
+  });
 });
