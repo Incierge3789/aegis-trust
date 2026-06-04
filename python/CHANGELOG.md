@@ -6,10 +6,12 @@
 `shielded_stream_tool()` ships in 0.9.1 but was absent from the README, while the
 "Alpha limitations" section implied streaming was unsupported and "planned for a
 later release." Corrected: record-boundary streaming (LITE) is now documented in
-the Runnable-integrations table and a dedicated README section; the limitation
-entry scopes the real remaining gaps (token-level partial-chunk filtering — not
-possible by design — and FULL-mode streaming, a tracked follow-up). No code
-change; behaviour is unchanged (14 `test_adapters_stream.py` cases stay green).
+the Runnable-integrations table, a dedicated README section, and a runnable
+example ([`examples/stream_example.py`](examples/stream_example.py)); the
+limitation entry scopes the real remaining gaps (token-level partial-chunk
+filtering — not possible by design — and FULL-mode streaming, a tracked
+follow-up). No code change; behaviour is unchanged (14 `test_adapters_stream.py`
+cases stay green).
 
 ### Security — Doctor↔shield trust-boundary hardening (fail-closed by default)
 An independent red-team + synthetic-market sweep found that the (unreleased)

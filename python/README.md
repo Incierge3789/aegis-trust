@@ -189,7 +189,8 @@ fields. **LITE only**: a partial token can't be field-filtered, and the FULL
 `/check-access` pre-execution gate can't run per-record without leaking match
 cardinality, so `mode="full"` raises `aegis.shield.stream.full_unsupported` (and
 AUTO that resolves to FULL refuses fail-closed). Use the non-streaming
-`shielded_tool()` when you need the FULL gate. API + contract:
+`shielded_tool()` when you need the FULL gate. Runnable example:
+[`examples/stream_example.py`](examples/stream_example.py); API + contract:
 [`src/aegis_trust/adapters/stream.py`](src/aegis_trust/adapters/stream.py); tests:
 [`tests/test_adapters_stream.py`](tests/test_adapters_stream.py).
 
