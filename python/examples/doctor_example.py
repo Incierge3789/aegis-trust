@@ -38,13 +38,17 @@ plan = ActionPlan(
 decision = check(plan, policy)
 
 print("Doctor decision:", decision.outcome.value)
-print("  allowed:", decision.allowed_data)
+print("  allowed (diagnostic):", decision.allowed_data)
 print("  blocked before the agent runs:", decision.blocked_data)
 print("  reasons:", decision.reason_codes)
 
 
-# Enforce the decision: shield filters the real fetch to the allowed scope.
-@shield(purpose=plan.purpose, scope=decision.allowed_data)
+# Enforce the decision. ALWAYS drive shield from `scope_for_shield()`, NOT from
+# `allowed_data` directly: `allowed_data` is a *diagnostic* and stays populated
+# even for REQUIRE_APPROVAL / BLOCK, so passing it raw would let data flow before
+# a required approval. `scope_for_shield()` returns [] unless the outcome permits
+# the action (ALLOW / REDUCE_SCOPE), so nothing is disclosed until the gate clears.
+@shield(purpose=plan.purpose, scope=decision.scope_for_shield())
 def get_customer() -> dict[str, str]:
     return {
         "name": "Tanaka Taro",

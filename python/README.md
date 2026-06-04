@@ -378,6 +378,7 @@ When `shield()` runs in FULL mode it calls the aegis-core gateway's `/check-acce
 - The `/check-access` scope check (#2) validates `scope` against a known registry. It is **not** purpose × scope field-level minimum-disclosure enforcement; field-level redaction by purpose × scope is not wired.
 - `AEGIS_PROFILE=production` validation (#4) is operator opt-in. The gateway is **not** production-ready out of the box; the default profile keeps silent config fallbacks.
 - These four guarantees are `/check-access`-scoped and do **not** amount to an all-gateway-operations audit-complete claim.
+- **LITE `shield()` and `doctor.check()` are LOCAL, in-process, and bypassable.** They enforce minimum disclosure for an *honest* caller — `doctor.check()` is a deterministic local diagnostic (no network, no LLM, no gateway) and LITE `shield()` filters in-process. An agent that calls neither is constrained by neither; they are developer-ergonomics minimum-disclosure tooling, not a sandbox or a server-enforced boundary. The recent hardening makes the `doctor`→`shield` path **fail closed by construction** (an honest caller cannot accidentally over-disclose), but attacker-resistant enforcement requires FULL mode. **Drive `shield` from `decision.scope_for_shield()`, never `decision.allowed_data` directly** — `allowed_data` is a diagnostic that stays populated for `REQUIRE_APPROVAL` / `BLOCK`, so using it raw would release data before a required approval.
 
 **Known follow-ups — tracked, not yet shipped:**
 

@@ -264,3 +264,35 @@ class TestTrustBoundaryHardening:
                 LocalPolicy(purposes={"support": PurposeRule(allow=["name"])}),
             )
             assert d.scope_for_shield() == []
+
+    def test_cx4_path_traversal_field_paths_fail_closed(self):
+        # Sweep hypothesis: '../'-style traversal in a field path. The malformed-
+        # path gate (consecutive dots) rejects every '..'-bearing path.
+        for p in ("../etc/passwd", "a/../b", "..", "config/../secret"):
+            d = check(
+                ActionPlan(purpose="p", action_type="read", data_requested=[p]),
+                LocalPolicy(),
+            )
+            assert d.outcome is BoundaryOutcome.BLOCK
+
+    def test_cx5_toctou_mutation_after_check_is_refiltered_by_shield(self):
+        # Sweep hypothesis: mutate the shared payload between check() and the
+        # shield emit. shield filters the *live* return value at call time, so a
+        # post-check injection (new fields, or shape-shifting the allowed field
+        # into a container) never surfaces — no cross-field leak.
+        data = {"name": "alice", "ssn": "111"}
+        d = check(
+            ActionPlan(purpose="cs", action_type="read", data_requested=["name"]),
+            LocalPolicy(purposes={"cs": PurposeRule(allow=["name"])}),
+        )
+
+        @shield(purpose="cs", scope=d.scope_for_shield())
+        def get():
+            return data
+
+        data["ssn"] = "MUTATED-SECRET"
+        data["evil"] = "INJECTED"
+        data["name"] = {"nested_secret": "X"}
+        out = get()
+        assert "ssn" not in out and "evil" not in out
+        assert out == {}  # name shape-shifted to a container → fail-closed drop
