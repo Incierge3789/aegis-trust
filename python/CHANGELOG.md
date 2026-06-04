@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Added — Doctor: pre-action boundary diagnosis (`aegis_trust.doctor`)
+- **`check(plan, policy)`** — a new local Trust Boundary primitive that diagnoses
+  an Actor's **action plan before it executes** and returns a deterministic
+  `BoundaryDecision`. Where `shield()` filters the data an agent *receives*,
+  `doctor` decides — ahead of time — what an agent may *do*: which fields are
+  justified for the declared purpose, whether sensitive fields are leaving for an
+  external destination, and whether the action needs human approval.
+  - Verdicts: `ALLOW` / `REDUCE_SCOPE` / `REQUIRE_APPROVAL` / `BLOCK`
+    (`REQUIRE_CHECK` reserved). Maps 1:1 to the planned Trust Signal outcomes.
+  - **Feeds `shield` directly:** `shield(scope=decision.allowed_data)` — one
+    boundary, diagnosed then enforced.
+  - **Deterministic, local, LITE-only:** no network, no LLM, no Aegis Core. The
+    rule source is a declarative `LocalPolicy` (per-purpose allow/deny, sensitive
+    fields, never-fields, external destinations, action approval rules).
+  - **Fail-closed:** a `never`-listed field (e.g. secrets) hard-`BLOCK`s the
+    action with an empty allowed set.
+  - Versioned shared contracts (`schema_version`), 1:1 with the Node SDK:
+    `TrustContext` / `ActionPlan` / `BoundaryDecision` / `BoundaryReceipt`
+    (Local Receipt is `evidence_mode="local"`, `core_verified=False` — LITE never
+    claims Core's authority).
+  - New module `aegis_trust.doctor`; runnable `examples/doctor_example.py`.
+    Zero new runtime dependencies. No `shield()` behaviour change; no version bump.
+  - Authoritative enforcement, principal/tenant binding, and formal Evidence
+    remain Aegis Core's responsibility (not provided by this SDK).
+
 ### Added — streaming framework adapter (`aegis_trust.adapters`)
 - **`shielded_stream_tool(...)`** — streaming sibling of `shielded_tool()` for a
   data accessor that yields a *sequence* of records. `stream(...)` is an async
