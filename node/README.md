@@ -194,6 +194,30 @@ await generateText({
 
 The schema key defaults to `inputSchema` (AI SDK v5+); pass `toVercelTool(t, { schemaKey: "parameters" })` for v4 and earlier. Runnable example: [`examples/vercelAiExample.ts`](examples/vercelAiExample.ts).
 
+### Streaming — filter each record as it arrives (record-boundary, LITE only)
+
+`shieldedTool()` buffers the whole return value before filtering. When a handler yields records *incrementally* (DB cursor, paginated fetch, an upstream LLM emitting one JSON object per step), `shieldedStreamTool()` filters each **whole record** at its boundary the moment it is complete — no full-result buffering.
+
+```typescript
+import { shieldedStreamTool } from "aegis-trust/adapters";
+
+const rows = shieldedStreamTool<{ q: string }>({
+  name: "customer_rows",
+  description: "Stream customer records for a support session.",
+  purpose: "customer_support",
+  scope: ["name", "issue"],
+  handler: async function* ({ q }) {
+    for await (const row of db.cursor(q)) yield row; // each row may carry ssn/email
+  },
+});
+
+for await (const rec of rows.stream({ q: "open" })) {
+  // rec is { name, issue } only — filtered as it arrives
+}
+```
+
+Each record passes through the **same** `shield()` as the non-streaming adapter (one filter implementation, one fail-closed contract): a handler error, a mid-stream iterator error, or a per-record filter error yields a short/empty stream — never a raw record or a thrown error that could carry withheld fields. **LITE only**: a partial token can't be field-filtered, and the FULL `/check-access` pre-execution gate can't run per-record without leaking match cardinality, so passing `mode: "full"` throws `aegis.shield.stream.full_unsupported` (and AUTO that resolves to FULL refuses fail-closed). Use the non-streaming `shieldedTool()` when you need the FULL gate. API + contract: [`src/adapters/stream.ts`](src/adapters/stream.ts); tests: [`tests/adaptersStream.test.ts`](tests/adaptersStream.test.ts).
+
 ### Other frameworks (MCP, Mastra, AutoGen.js, LangGraph, …)
 
 Because the shield lives at the data layer, `shieldedTool().run()` / `.call()` slot into any framework that calls a JS function — or use the generic `shield()` wrapper directly and pass the result into the framework's tool registry. Works identically with `@modelcontextprotocol/sdk`, Mastra `createTool`, AutoGen.js, swarm, and LangGraph.
