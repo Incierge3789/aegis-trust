@@ -180,8 +180,15 @@ export function check(plan: ActionPlan, policy: LocalPolicy = {}): BoundaryDecis
   //    named but classified as neither internal nor external is treated as
   //    EXTERNAL (fail-closed) — an unknown sink must not receive sensitive data.
   const isExternal = (d: string): boolean => {
+    // Classifying a destination as *internal* is the permissive direction
+    // (sensitive fields are NOT stripped), so — like the allow-list — it must
+    // match EXACTLY. Loose normalization here is a confused-deputy: a variant
+    // label like `INTERNAL_SINK` (a different actual endpoint) would fold onto
+    // the trusted `internal_sink`. The external direction is restrictive and an
+    // unclassified destination defaults to external, so normalizing it only
+    // fails closed.
+    if (internal.includes(d)) return false;
     const nd = norm(d);
-    if (internal.some((x) => nd === norm(x))) return false;
     if (external.some((x) => nd === norm(x))) return true;
     return true; // named but unclassified → external (fail-closed)
   };

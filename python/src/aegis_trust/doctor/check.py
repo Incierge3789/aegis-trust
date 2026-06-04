@@ -162,9 +162,17 @@ def check(plan: ActionPlan, policy: LocalPolicy | None = None) -> BoundaryDecisi
     #    treated as EXTERNAL (fail-closed) — an unknown sink must not receive
     #    sensitive data silently.
     def _is_external(d: str) -> bool:
-        nd = _norm(d)
-        if any(nd == _norm(x) for x in policy.internal_destinations):
+        # Classifying a destination as *internal* is the permissive direction
+        # (sensitive fields are NOT stripped), so — like the allow-list — it must
+        # match **exactly**. Loose normalization here is a confused-deputy: a
+        # variant label like ``INTERNAL_SINK`` (a *different* actual endpoint)
+        # would fold onto the trusted ``internal_sink`` and sensitive data would
+        # flow to it. The *external* direction is restrictive (strip), and an
+        # unclassified destination defaults to external anyway, so normalizing it
+        # only ever fails closed.
+        if d in policy.internal_destinations:
             return False
+        nd = _norm(d)
         if any(nd == _norm(x) for x in policy.external_destinations):
             return True
         # Named but unclassified → external (fail-closed).

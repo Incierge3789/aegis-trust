@@ -325,3 +325,35 @@ class TestTrustBoundaryHardening:
         assert self._emit(
             d_desc.scope_for_shield(), {"name": {"first": "A", "ssn": "S"}}
         ) == {"name": {"first": "A"}}
+
+    def test_f2_internal_destination_normalization_confused_deputy(self):
+        # Same class as F-1 on the destination side: classifying a destination as
+        # internal (→ do NOT strip sensitive) is the permissive direction, so it
+        # must match EXACTLY. A variant label like "INTERNAL_SINK" must not fold
+        # onto the trusted "internal_sink" and let sensitive data flow to a
+        # different actual endpoint.
+        pol = LocalPolicy(
+            sensitive_fields=["ssn"], internal_destinations=["internal_sink"]
+        )
+        for variant in ("INTERNAL_SINK", "Internal_Sink", "ｉｎｔｅｒｎａｌ＿ｓｉｎｋ"):
+            d = check(
+                ActionPlan(
+                    purpose="p",
+                    action_type="send",
+                    data_requested=["ssn"],
+                    destinations=[variant],
+                ),
+                pol,
+            )
+            assert d.scope_for_shield() == []  # variant → external → stripped
+        # the exact internal sink keeps sensitive (data stays inside the boundary)
+        d_ok = check(
+            ActionPlan(
+                purpose="p",
+                action_type="send",
+                data_requested=["ssn"],
+                destinations=["internal_sink"],
+            ),
+            pol,
+        )
+        assert d_ok.scope_for_shield() == ["ssn"]

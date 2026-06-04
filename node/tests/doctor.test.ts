@@ -231,4 +231,25 @@ describe("doctor.check — trust-boundary hardening (S-redteam regressions)", ()
     const desc = check(p({ dataRequested: ["name.first"] }), pol);
     expect(scopeForShield(desc)).toEqual(["name.first"]);
   });
+
+  it("F2: internal-destination match is exact (no normalization confused-deputy)", () => {
+    // Same class as F-1 on the destination side: a variant label must not fold
+    // onto the trusted internal sink and skip the sensitive strip.
+    const pol: LocalPolicy = {
+      sensitiveFields: ["ssn"],
+      internalDestinations: ["internal_sink"],
+    };
+    for (const variant of ["INTERNAL_SINK", "Internal_Sink", "ｉｎｔｅｒｎａｌ＿ｓｉｎｋ"]) {
+      const d = check(
+        p({ actionType: "send", dataRequested: ["ssn"], destinations: [variant] }),
+        pol,
+      );
+      expect(scopeForShield(d)).toEqual([]); // variant → external → stripped
+    }
+    const okd = check(
+      p({ actionType: "send", dataRequested: ["ssn"], destinations: ["internal_sink"] }),
+      pol,
+    );
+    expect(scopeForShield(okd)).toEqual(["ssn"]); // exact internal → kept
+  });
 });
