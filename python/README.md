@@ -159,6 +159,41 @@ handlers use `await tool.arun(...)` / `await tool.acall(...)`. Runnable examples
 [`examples/langchain_example.py`](examples/langchain_example.py),
 [`examples/crewai_example.py`](examples/crewai_example.py).
 
+### Streaming — filter each record as it arrives (record-boundary, LITE only)
+
+`shielded_tool()` buffers the whole return value before filtering. When a handler
+yields records *incrementally* (DB cursor, paginated fetch, an upstream LLM
+emitting one JSON object per step), `shielded_stream_tool()` filters each **whole
+record** at its boundary the moment it is complete — no full-result buffering.
+
+```python
+from aegis_trust.adapters import shielded_stream_tool
+
+rows = shielded_stream_tool(
+    name="customer_rows",
+    description="Stream customer records for a support session.",
+    purpose="customer_support",
+    scope=["name", "issue"],
+    handler=lambda q: db.cursor(q),  # yields rows that may carry ssn/email
+)
+
+async for rec in rows.stream("open"):
+    ...  # rec is {name, issue} only — filtered as it arrives
+```
+
+Each record passes through the **same** `shield()` as the non-streaming adapter
+(one filter implementation, one fail-closed contract): a handler error, a
+mid-stream iterator error, or a per-record filter error yields a short/empty
+stream — never a raw record or a raised exception that could carry withheld
+fields. **LITE only**: a partial token can't be field-filtered, and the FULL
+`/check-access` pre-execution gate can't run per-record without leaking match
+cardinality, so `mode="full"` raises `aegis.shield.stream.full_unsupported` (and
+AUTO that resolves to FULL refuses fail-closed). Use the non-streaming
+`shielded_tool()` when you need the FULL gate. Runnable example:
+[`examples/stream_example.py`](examples/stream_example.py); API + contract:
+[`src/aegis_trust/adapters/stream.py`](src/aegis_trust/adapters/stream.py); tests:
+[`tests/test_adapters_stream.py`](tests/test_adapters_stream.py).
+
 ### aegis.yaml (centralized policies)
 
 For multi-purpose deployments, define policies once in `aegis.yaml`:
