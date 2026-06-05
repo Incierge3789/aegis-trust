@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-06-05
+
 ### Added — Doctor v1: Core-backed `checkWithCore()` against `/check-boundary` (fail-closed)
 A new async Doctor entry point asks Aegis Core for the authoritative boundary
 decision instead of deciding locally. `checkWithCore(plan, { client?, context? })`
