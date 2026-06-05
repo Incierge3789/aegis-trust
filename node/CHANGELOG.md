@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added — Doctor v1: Core-backed `checkWithCore()` against `/check-boundary` (fail-closed)
+A new async Doctor entry point asks Aegis Core for the authoritative boundary
+decision instead of deciding locally. `checkWithCore(plan, { client?, context? })`
+POSTs to `/check-boundary` (Bearer auth, same plumbing as `checkAccess`), maps the
+returned `BoundaryDecisionView` to the SDK `BoundaryDecision`
+(`PROTECTED→ALLOW`, `ACCESS_REDUCED→REDUCE_SCOPE`, `CHECK_REQUIRED→REQUIRE_CHECK`,
+`APPROVAL_REQUIRED→REQUIRE_APPROVAL`, `BLOCKED→BLOCK`; `allowed_fields→allowedData`,
+`withheld_fields→blockedData`; `policyVersion="core-v1"`), and returns it so
+`scopeForShield(decision)` still drives `shield({ scope })` unchanged. Fail-closed:
+any network error, non-2xx, or malformed body yields a `BLOCK` with empty
+`allowedData` (never throws raw, never allows on error). The authenticated
+principal is the JWT subject server-side and is never sent in the body. The local,
+deterministic `check()` (v0) is untouched. New `AegisClient.checkBoundary()` method
+and `BoundaryDecisionView` wire types exported.
+
+### Fixed — `/check-access` scope contract (CSR-03)
+`checkAccess` / `authorize` previously sent `scope` as a JSON **array**, but the
+gateway's `CheckAccessRequest.scope` is a single advisory `Option<String>`; an
+array deserialized as a type error (non-200 → fail-closed). The SDK now sends a
+single string for a one-element scope and omits the field otherwise (`None` =
+purpose-level), matching the server. `authorize()`'s public signature and
+grant/deny behaviour are unchanged.
+
 ### Docs — surface the shipped record-boundary streaming adapter
 `shieldedStreamTool()` ships in 0.9.1 but was absent from the README, while the
 "Alpha limitations" section implied streaming was unsupported and "planned for a

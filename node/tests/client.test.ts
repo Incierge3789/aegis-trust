@@ -311,3 +311,93 @@ describe("metrics hook", () => {
     expect(events).toEqual([{ endpoint: "check-access", status: 200 }]);
   });
 });
+
+describe("checkAccess scope contract (CSR-03 fix)", () => {
+  it("sends a single string `scope` for a one-element scope", async () => {
+    const captured: { url: string; body: string }[] = [];
+    mockFetch(async (input, init) => {
+      captured.push({ url: String(input), body: String(init?.body) });
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await c.checkAccess("p", ["name"]);
+    const sent = JSON.parse(captured[0]!.body);
+    expect(sent.purpose).toBe("p");
+    // Single string, NOT an array — matches server Option<String>.
+    expect(sent.scope).toBe("name");
+  });
+  it("omits `scope` for an empty scope (purpose-level)", async () => {
+    const captured: { body: string }[] = [];
+    mockFetch(async (_input, init) => {
+      captured.push({ body: String(init?.body) });
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await c.checkAccess("p", []);
+    const sent = JSON.parse(captured[0]!.body);
+    expect("scope" in sent).toBe(false);
+  });
+  it("omits `scope` for a multi-element scope (forward contract undefined)", async () => {
+    const captured: { body: string }[] = [];
+    mockFetch(async (_input, init) => {
+      captured.push({ body: String(init?.body) });
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await c.authorize("p", ["name", "issue"]);
+    const sent = JSON.parse(captured[0]!.body);
+    expect("scope" in sent).toBe(false);
+    expect(sent.purpose).toBe("p");
+  });
+});
+
+describe("checkBoundary (Doctor v1)", () => {
+  it("posts scope as an array, snake_cases optional fields, never sends principal", async () => {
+    const captured: { url: string; body: string }[] = [];
+    mockFetch(async (input, init) => {
+      captured.push({ url: String(input), body: String(init?.body) });
+      return new Response(
+        JSON.stringify({
+          source: "CORE",
+          outcome: "PROTECTED",
+          purpose_label: "p",
+          allowed_fields: ["name"],
+          withheld_fields: [],
+          reason_code: "minimum_disclosure",
+          reason_label: "Minimum disclosure",
+          evidence_available: true,
+          evidence: null,
+        }),
+        { status: 200 },
+      );
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    const view = await c.checkBoundary({
+      purpose: "p",
+      scope: ["name", "issue"],
+      destination: "external_llm",
+      agentId: "agent-7",
+      environment: "prod",
+      mode: "full",
+      schemaVersion: 1,
+    });
+    expect(captured[0]!.url).toContain("/check-boundary");
+    const sent = JSON.parse(captured[0]!.body);
+    expect(sent.scope).toEqual(["name", "issue"]);
+    expect(sent.destination).toBe("external_llm");
+    expect(sent.agent_id).toBe("agent-7");
+    expect(sent.environment).toBe("prod");
+    expect(sent.mode).toBe("full");
+    expect(sent.schema_version).toBe(1);
+    expect("principal" in sent).toBe(false);
+    expect(view.outcome).toBe("PROTECTED");
+    expect(view.allowed_fields).toEqual(["name"]);
+  });
+  it("throws httpError on non-2xx (caller maps to fail-closed)", async () => {
+    mockFetch(async () => new Response("nope", { status: 503 }));
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await expect(c.checkBoundary({ purpose: "p", scope: ["name"] })).rejects.toThrow(
+      /check-boundary HTTP 503/,
+    );
+  });
+});
