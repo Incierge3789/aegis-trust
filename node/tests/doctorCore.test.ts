@@ -261,7 +261,7 @@ describe("doctor.checkWithCore (v1) — scopeForShield coupling", () => {
 });
 
 describe("doctor.checkWithCore (v1) — request shaping", () => {
-  it("sends scope as an array, omits principal, maps agentId/destination", async () => {
+  it("sends scope as an array, omits principal, and takes agentId from context (NOT the plan)", async () => {
     let captured: Record<string, unknown> | null = null;
     const client = fakeClient(async () => view({}));
     (client as unknown as { checkBoundary: (a: Record<string, unknown>) => Promise<BoundaryDecisionView> })
@@ -269,14 +269,24 @@ describe("doctor.checkWithCore (v1) — request shaping", () => {
       captured = a;
       return view({});
     };
+    // A plan-only agentId is an action-plan diagnostic, NOT an identity claim:
+    // it must NOT be sent (else the gateway 403s on a subject mismatch and Doctor
+    // v1 always BLOCKs — found by the live e2e). Identity comes from the context.
     await checkWithCore(
-      plan({ dataRequested: ["name", "issue"], destinations: ["external_llm"], agentId: "agent-7" }),
+      plan({ dataRequested: ["name", "issue"], destinations: ["external_llm"], agentId: "agent-from-plan" }),
       { client },
     );
     expect(captured).not.toBeNull();
     expect(captured!.scope).toEqual(["name", "issue"]);
     expect(captured!.destination).toBe("external_llm");
-    expect(captured!.agentId).toBe("agent-7");
+    expect(captured!.agentId).toBeUndefined();
     expect(captured!.principal).toBeUndefined();
+
+    // An explicit TrustContext agentId IS sent (the caller's deliberate identity).
+    await checkWithCore(plan({ dataRequested: ["name"] }), {
+      client,
+      context: { agentId: "agent-7", purpose: "support" },
+    });
+    expect(captured!.agentId).toBe("agent-7");
   });
 });

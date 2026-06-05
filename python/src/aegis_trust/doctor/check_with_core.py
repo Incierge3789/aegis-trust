@@ -141,8 +141,15 @@ async def check_with_core(
             client = _get_client()
 
         destination = _resolve_destination(plan.destinations)
-        agent_id = context.agent_id if context is not None else plan.agent_id
-        environment = context.environment if context is not None else plan.environment
+        # ``agent_id`` is an IDENTITY claim the gateway constant-time compares to
+        # the authenticated JWT subject (mismatch -> 403 -> fail-closed BLOCK). It
+        # must come ONLY from an explicit TrustContext, never from the ActionPlan's
+        # local-diagnostic ``agent_id``/``environment`` (whose defaults
+        # ``"unknown"``/``"local"`` would mismatch every real subject and make
+        # Doctor v1 always BLOCK). Omitted when no context -> the gateway uses the
+        # JWT subject alone. (Found by the live SDK<->gateway e2e; Node parity.)
+        agent_id = context.agent_id if context is not None else None
+        environment = context.environment if context is not None else None
         mode = context.mode if context is not None else None
 
         view = await client.acheck_boundary(

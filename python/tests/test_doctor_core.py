@@ -11,8 +11,12 @@ import httpx
 import pytest
 
 from aegis_trust.client import BoundaryDecisionView
-from aegis_trust.doctor import ActionPlan, BoundaryOutcome, check_with_core
-from aegis_trust.doctor.types import TrustContext
+from aegis_trust.doctor import (
+    ActionPlan,
+    BoundaryOutcome,
+    TrustContext,
+    check_with_core,
+)
 
 
 def _plan(**kw) -> ActionPlan:
@@ -290,3 +294,27 @@ async def test_request_shaping_no_principal():
     assert kw["agent_id"] == "agent-7"
     assert kw["mode"] == "full"
     assert "principal" not in kw
+
+
+@pytest.mark.asyncio
+async def test_agent_id_comes_from_context_not_plan():
+    """agent_id is an IDENTITY claim (constant-time matched to the JWT subject by
+    the gateway -> 403 on mismatch). It must come ONLY from an explicit
+    TrustContext, never from the ActionPlan's local default ("unknown"), which
+    would mismatch every real subject and make Doctor v1 always BLOCK. Found by
+    the live SDK<->gateway e2e; Node parity. (See doctorCore.test.ts.)"""
+    # Plan-only: even though ActionPlan.agent_id defaults to "unknown", nothing is
+    # sent as an identity claim.
+    client = _client_returning(_view())
+    await check_with_core(_plan(), client=client)
+    assert client.last_kwargs is not None
+    assert client.last_kwargs["agent_id"] is None
+
+    # Explicit context agent_id IS sent.
+    client2 = _client_returning(_view())
+    await check_with_core(
+        _plan(),
+        client=client2,
+        context=TrustContext(agent_id="agent-7", purpose="customer_support"),
+    )
+    assert client2.last_kwargs["agent_id"] == "agent-7"
