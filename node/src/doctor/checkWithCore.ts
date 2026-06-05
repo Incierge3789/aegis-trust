@@ -173,8 +173,15 @@ export async function checkWithCore(
       purpose: plan.purpose,
       scope: [...plan.dataRequested],
       destination,
-      agentId: ctx?.agentId ?? plan.agentId,
-      environment: ctx?.environment ?? plan.environment,
+      // `agent_id` is an IDENTITY claim the gateway constant-time compares to the
+      // authenticated JWT subject (mismatch → 403 → fail-closed BLOCK). It must
+      // therefore come ONLY from an explicit TrustContext, never from the
+      // ActionPlan's local-diagnostic `agentId`/`environment` (whose defaults —
+      // Python `"unknown"`/`"local"` — would mismatch every real subject and make
+      // Doctor v1 always BLOCK). Omitted when no context → the gateway uses the
+      // JWT subject alone. (Found by the live SDK↔gateway e2e.)
+      agentId: ctx?.agentId,
+      environment: ctx?.environment,
       mode: ctx?.mode,
       schemaVersion: plan.schemaVersion ?? DOCTOR_SCHEMA_VERSION,
     });
