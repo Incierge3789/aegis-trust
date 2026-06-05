@@ -30,6 +30,16 @@
         }
       }
     },
+    "/check-boundary": {
+      "post": {
+        "summary": "FULL-mode Doctor v1 boundary check (Core-backed BoundaryDecisionView)",
+        "responses": {
+          "200": {
+            "description": "BoundaryDecisionView (source=CORE)"
+          }
+        }
+      }
+    },
     "/shield/ingest": {
       "post": {
         "summary": "Post-authorization audit ingest",

@@ -14,6 +14,7 @@ import warnings
 from typing import Any, Callable, Literal
 
 import httpx
+from dataclasses import dataclass, field
 
 from aegis_trust._constants import AUDIT_SCHEMA_VERSION
 from aegis_trust.types import (
@@ -84,6 +85,37 @@ def _clear_sensitive(*objs: Any) -> None:
             for i in range(len(obj)):
                 obj[i] = 0
     gc.collect()
+
+
+@dataclass(frozen=True)
+class CoreDecisionEvidence:
+    """Evidence pointer attached to a Core BoundaryDecisionView."""
+
+    decision_id: str
+    policy: str
+    enforced_by: str
+    integrity_checkable_at: str
+    recorded_at: str
+
+
+@dataclass(frozen=True)
+class BoundaryDecisionView:
+    """Wire shape of the gateway's ``BoundaryDecisionView`` (POST
+    ``/check-boundary``). ``outcome`` is the SCREAMING_SNAKE_CASE
+    ``DecisionOutcome`` enum (``decision_bundle.rs``); ``reason_code`` is
+    snake_case. Field *names* are surfaced (never values)."""
+
+    source: str  # "CORE"
+    outcome: (
+        str  # PROTECTED | ACCESS_REDUCED | CHECK_REQUIRED | APPROVAL_REQUIRED | BLOCKED
+    )
+    purpose_label: str
+    allowed_fields: list[str] = field(default_factory=list)
+    withheld_fields: list[str] = field(default_factory=list)
+    reason_code: str = ""
+    reason_label: str = ""
+    evidence_available: bool = False
+    evidence: CoreDecisionEvidence | None = None
 
 
 class AegisClient:
@@ -173,11 +205,48 @@ class AegisClient:
         except (httpx.ConnectError, httpx.TimeoutException, Exception):
             return False
 
+    @staticmethod
+    def _check_access_body(purpose: str, scope: list[str]) -> dict[str, Any]:
+        """Build the ``/check-access`` request body.
+
+        Contract fix (CSR-03): the gateway's ``CheckAccessRequest.scope`` field
+        is a single ``Option<String>`` advisory scope identifier (aegis_gateway
+        ``rest.rs:296``), NOT an array. Sending a JSON array deserializes as a
+        type error server-side (non-200 -> fail-closed), so the prior
+        ``{"purpose", "scope": [...]}`` body silently broke every scope-bearing
+        ``/check-access`` call. The authoritative gate is the JWT subject +
+        purpose; ``scope`` is advisory minimum-disclosure metadata where ``None``
+        means "purpose-level access only". This emits what the endpoint expects
+        without changing :meth:`authorize`'s grant/deny contract:
+
+        - 0 scopes  -> omit ``scope`` (None / purpose-level)
+        - 1 scope   -> send the single string
+        - >1 scopes -> see :meth:`authorize`/:meth:`aauthorize`: the caller
+          FAILS CLOSED before a request is built (this body builder is never
+          invoked with >1 scope on the gate path).
+
+        Review finding B (fail-closed regression fix): a >1-scope check must NOT
+        silently drop to purpose-level. Earlier, sending the array produced a
+        server type error (non-2xx -> deny); the scope->``Option<String>`` fix
+        turned ">1 scope" into "omit scope", which made the server evaluate at
+        purpose-level and could ALLOW where the caller asked for a stricter,
+        narrower scope — a fail-open regression. :meth:`authorize` therefore
+        DENIES a multi-scope check rather than send a purpose-level request the
+        single-scope server would evaluate more permissively than asked.
+
+        NOTE: ``/check-boundary`` correctly uses ``scope: list[str]`` and does
+        NOT route through here.
+        """
+        body: dict[str, Any] = {"purpose": purpose}
+        if len(scope) == 1:
+            body["scope"] = scope[0]
+        return body
+
     def check_access(self, purpose: str, scope: list[str]) -> dict[str, Any]:
         """Check access permission via the Aegis enterprise backend."""
         resp = self._get_httpx().post(
             "/check-access",
-            json={"purpose": purpose, "scope": scope},
+            json=self._check_access_body(purpose, scope),
         )
         resp.raise_for_status()
         return resp.json()
@@ -186,10 +255,161 @@ class AegisClient:
         """Async variant of :meth:`check_access`."""
         resp = await self._get_async_httpx().post(
             "/check-access",
-            json={"purpose": purpose, "scope": scope},
+            json=self._check_access_body(purpose, scope),
         )
         resp.raise_for_status()
         return resp.json()
+
+    # ── check-boundary (Doctor v1, Core-backed) ───────────
+    @staticmethod
+    def _check_boundary_body(
+        purpose: str,
+        scope: list[str],
+        *,
+        destination: str | None = None,
+        agent_id: str | None = None,
+        environment: str | None = None,
+        mode: str | None = None,
+        schema_version: int | None = None,
+    ) -> dict[str, Any]:
+        """Build the ``/check-boundary`` request body.
+
+        ``purpose`` + ``scope`` are required; ``scope`` is a *list* here (the
+        boundary endpoint's contract, unlike ``/check-access``). The
+        authenticated principal is the JWT subject server-side and is NEVER sent
+        in the body; ``agent_id`` is advisory.
+        """
+        body: dict[str, Any] = {"purpose": purpose, "scope": list(scope)}
+        if destination is not None:
+            body["destination"] = destination
+        if agent_id is not None:
+            body["agent_id"] = agent_id
+        if environment is not None:
+            body["environment"] = environment
+        if mode is not None:
+            body["mode"] = mode
+        if schema_version is not None:
+            body["schema_version"] = schema_version
+        return body
+
+    @staticmethod
+    def _parse_boundary_view(body: Any) -> BoundaryDecisionView:
+        """Parse a ``/check-boundary`` 200 body into a
+        :class:`BoundaryDecisionView`. Raises :class:`ValueError` on a malformed
+        shape so the Doctor v1 entry point maps it to a fail-closed BLOCK.
+
+        Review finding A (fail-closed): require the FULL ``BoundaryDecisionView``
+        shape — a partial-but-valid-JSON body such as ``{"outcome": "PROTECTED"}``
+        (every other field missing/defaulted) MUST NOT be trusted and map to
+        ALLOW. Every required field must be present and correctly typed:
+        ``source`` (str), ``outcome`` (str), ``allowed_fields`` (list[str]),
+        ``withheld_fields`` (list[str]), ``reason_code`` (str). Any
+        missing/mistyped required field -> ValueError -> CORE_MALFORMED_RESPONSE
+        -> BLOCK.
+        """
+        if not isinstance(body, dict):
+            raise ValueError("check-boundary: body is not a dict")
+        source = body.get("source")
+        if not isinstance(source, str):
+            raise ValueError("check-boundary: 'source' missing or not a str")
+        outcome = body.get("outcome")
+        if not isinstance(outcome, str):
+            raise ValueError("check-boundary: 'outcome' missing or not a str")
+        reason_code = body.get("reason_code")
+        if not isinstance(reason_code, str):
+            raise ValueError("check-boundary: 'reason_code' missing or not a str")
+        # allowed_fields / withheld_fields are REQUIRED here (no default): a
+        # missing array is a malformed view, not an empty allow set.
+        allowed = body.get("allowed_fields")
+        withheld = body.get("withheld_fields")
+        if not isinstance(allowed, list) or not all(
+            isinstance(x, str) for x in allowed
+        ):
+            raise ValueError("check-boundary: 'allowed_fields' invalid")
+        if not isinstance(withheld, list) or not all(
+            isinstance(x, str) for x in withheld
+        ):
+            raise ValueError("check-boundary: 'withheld_fields' invalid")
+        ev_raw = body.get("evidence")
+        evidence: CoreDecisionEvidence | None = None
+        if isinstance(ev_raw, dict):
+            evidence = CoreDecisionEvidence(
+                decision_id=str(ev_raw.get("decision_id", "")),
+                policy=str(ev_raw.get("policy", "")),
+                enforced_by=str(ev_raw.get("enforced_by", "")),
+                integrity_checkable_at=str(ev_raw.get("integrity_checkable_at", "")),
+                recorded_at=str(ev_raw.get("recorded_at", "")),
+            )
+        return BoundaryDecisionView(
+            source=source,
+            outcome=outcome,
+            purpose_label=str(body.get("purpose_label", "")),
+            allowed_fields=list(allowed),
+            withheld_fields=list(withheld),
+            reason_code=reason_code,
+            reason_label=str(body.get("reason_label", "")),
+            evidence_available=bool(body.get("evidence_available", False)),
+            evidence=evidence,
+        )
+
+    def check_boundary(
+        self,
+        purpose: str,
+        scope: list[str],
+        *,
+        destination: str | None = None,
+        agent_id: str | None = None,
+        environment: str | None = None,
+        mode: str | None = None,
+        schema_version: int | None = None,
+    ) -> BoundaryDecisionView:
+        """POST ``/check-boundary`` and return the parsed
+        :class:`BoundaryDecisionView`. Reuses the same auth header / base-url /
+        timeout / httpx plumbing as :meth:`check_access`. Non-2xx raises (via
+        ``raise_for_status``) so the Doctor v1 entry point maps it to a
+        fail-closed BLOCK.
+        """
+        resp = self._get_httpx().post(
+            "/check-boundary",
+            json=self._check_boundary_body(
+                purpose,
+                scope,
+                destination=destination,
+                agent_id=agent_id,
+                environment=environment,
+                mode=mode,
+                schema_version=schema_version,
+            ),
+        )
+        resp.raise_for_status()
+        return self._parse_boundary_view(resp.json())
+
+    async def acheck_boundary(
+        self,
+        purpose: str,
+        scope: list[str],
+        *,
+        destination: str | None = None,
+        agent_id: str | None = None,
+        environment: str | None = None,
+        mode: str | None = None,
+        schema_version: int | None = None,
+    ) -> BoundaryDecisionView:
+        """Async variant of :meth:`check_boundary`."""
+        resp = await self._get_async_httpx().post(
+            "/check-boundary",
+            json=self._check_boundary_body(
+                purpose,
+                scope,
+                destination=destination,
+                agent_id=agent_id,
+                environment=environment,
+                mode=mode,
+                schema_version=schema_version,
+            ),
+        )
+        resp.raise_for_status()
+        return self._parse_boundary_view(resp.json())
 
     # ── check_access enforcement (AO-003) ───────────────────────────
     def _cache_key(
@@ -232,7 +452,15 @@ class AegisClient:
         a 200 whose body lacks ``{"allowed": true}``. A 200-allow result is
         cached for :data:`_ACCESS_CACHE_TTL_S` seconds, keyed by the current token
         epoch so token rotation invalidates the cache. Deny is never cached.
+
+        Review finding B: a >1-scope request fails closed (deny) before any
+        request is sent — see :meth:`_check_access_body`.
         """
+        if len(scope) > 1:
+            logger.warning(
+                "authorize: >1 scope vs single-scope server, fail-closed (finding B)"
+            )
+            return False
         if self._cached_allow(purpose, scope):
             return True
         epoch_at_request = self._token_epoch
@@ -240,7 +468,7 @@ class AegisClient:
         try:
             resp = self._get_httpx().post(
                 "/check-access",
-                json={"purpose": purpose, "scope": scope},
+                json=self._check_access_body(purpose, scope),
             )
         except Exception:
             _emit_metric("check-access", t0, 0)
@@ -264,6 +492,11 @@ class AegisClient:
 
     async def aauthorize(self, purpose: str, scope: list[str]) -> bool:
         """Async variant of :meth:`authorize`."""
+        if len(scope) > 1:
+            logger.warning(
+                "aauthorize: >1 scope vs single-scope server, fail-closed (finding B)"
+            )
+            return False
         if self._cached_allow(purpose, scope):
             return True
         epoch_at_request = self._token_epoch
@@ -271,7 +504,7 @@ class AegisClient:
         try:
             resp = await self._get_async_httpx().post(
                 "/check-access",
-                json={"purpose": purpose, "scope": scope},
+                json=self._check_access_body(purpose, scope),
             )
         except Exception:
             _emit_metric("check-access", t0, 0)

@@ -81,6 +81,11 @@ export {
   // this re-export, the Migration story is non-functional for npm
   // consumers (codex iter-1 cross-review P1 closure).
   userIntendsFull,
+  // Doctor v1 (Core-backed) — boundary check wire types.
+  type BoundaryDecisionView,
+  type CoreBoundaryOutcome,
+  type CoreDecisionEvidence,
+  type CheckBoundaryArgs,
 } from "./client.js";
 
 // Config (YAML loader, parity with aegis.config).

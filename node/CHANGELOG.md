@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+### Added — Doctor v1: Core-backed `checkWithCore()` against `/check-boundary` (fail-closed)
+A new async Doctor entry point asks Aegis Core for the authoritative boundary
+decision instead of deciding locally. `checkWithCore(plan, { client?, context? })`
+POSTs to `/check-boundary` (Bearer auth, same plumbing as `checkAccess`), maps the
+returned `BoundaryDecisionView` to the SDK `BoundaryDecision`
+(`PROTECTED→ALLOW`, `ACCESS_REDUCED→REDUCE_SCOPE`, `CHECK_REQUIRED→REQUIRE_CHECK`,
+`APPROVAL_REQUIRED→REQUIRE_APPROVAL`, `BLOCKED→BLOCK`; `allowed_fields→allowedData`,
+`withheld_fields→blockedData`; `policyVersion="core-v1"`), and returns it so
+`scopeForShield(decision)` still drives `shield({ scope })` unchanged. Fail-closed:
+any network error, non-2xx, or malformed body yields a `BLOCK` with empty
+`allowedData` (never throws raw, never allows on error). The authenticated
+principal is the JWT subject server-side and is never sent in the body. The local,
+deterministic `check()` (v0) is untouched. New `AegisClient.checkBoundary()` method
+and `BoundaryDecisionView` wire types exported.
+
+#### Fail-closed hardening from 3-model cross-review
+- **Partial Core response → BLOCK.** `isValidView` now requires the **full**
+  `BoundaryDecisionView` shape (`source`, `outcome`, `allowed_fields`,
+  `withheld_fields`, `reason_code` all present and correctly typed) before
+  trusting it. A partial-but-valid-JSON body like `{"outcome":"PROTECTED"}` no
+  longer maps to ALLOW — it is malformed → `CORE_MALFORMED_RESPONSE` → BLOCK.
+- **Own-property outcome lookup.** Outcome is matched with
+  `Object.prototype.hasOwnProperty.call(OUTCOME_MAP, …)`, so inherited keys
+  (`toString`, `constructor`, `__proto__`) can never be accepted as a valid
+  outcome (prototype-pollution → BLOCK).
+- **Allow set cleared on non-grant outcomes.** Only `ALLOW`/`REDUCE_SCOPE` carry
+  an allow set; `REQUIRE_CHECK`/`REQUIRE_APPROVAL`/`BLOCK` force `allowedData`
+  to `[]`, even if the Core body (incorrectly) carries `allowed_fields`.
+- **Multi-destination fail-closed.** A plan with >1 destination now sends a
+  restrictive sentinel (treated as external/unknown) instead of just the first
+  destination, so the decision can only get stricter, never looser.
+- **Mapping & client-acquisition inside the fail-closed boundary.** `getModuleClient()`
+  and the view→decision mapping run inside the try, so any error → BLOCK rather
+  than escaping as a raw throw.
+
+### Fixed — `/check-access` scope contract (CSR-03) + multi-scope fail-closed
+`checkAccess` / `authorize` previously sent `scope` as a JSON **array**, but the
+gateway's `CheckAccessRequest.scope` is a single advisory `Option<String>`; an
+array deserialized as a type error (non-200 → fail-closed). The SDK now sends a
+single string for a one-element scope and omits the field otherwise (`None` =
+purpose-level), matching the server. **Fail-closed hardening (cross-review):** a
+`>1`-element scope can no longer be expressed faithfully against the single
+`Option<String>` contract — `authorizeDetailed`/`authorize` now **deny** a
+multi-scope check (reason `multi_scope_unsupported`) instead of silently dropping
+to a purpose-level request the server could ALLOW more permissively than asked.
+This restores the pre-CSR-03 fail-closed direction (array body → server type
+error → deny). The single-scope (string) and 0-scope (purpose-level) paths and
+`authorize()`'s public boolean contract are unchanged.
+
 ### Docs — surface the shipped record-boundary streaming adapter
 `shieldedStreamTool()` ships in 0.9.1 but was absent from the README, while the
 "Alpha limitations" section implied streaming was unsupported and "planned for a

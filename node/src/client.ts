@@ -133,6 +133,51 @@ export function resolveVerifySsl(
   return true;
 }
 
+// ── check-boundary (Doctor v1, Core-backed) ────────────────
+// Wire shape of the gateway's BoundaryDecisionView (POST /check-boundary).
+// `outcome` is the SCREAMING_SNAKE_CASE DecisionOutcome enum
+// (decision_bundle.rs); `reason_code` is snake_case. Field names are surfaced
+// (never values).
+export type CoreBoundaryOutcome =
+  | "PROTECTED"
+  | "ACCESS_REDUCED"
+  | "CHECK_REQUIRED"
+  | "APPROVAL_REQUIRED"
+  | "BLOCKED";
+
+export interface CoreDecisionEvidence {
+  readonly decision_id: string;
+  readonly policy: string;
+  readonly enforced_by: string;
+  readonly integrity_checkable_at: string;
+  readonly recorded_at: string;
+}
+
+export interface BoundaryDecisionView {
+  readonly source: string; // "CORE"
+  readonly outcome: CoreBoundaryOutcome;
+  readonly purpose_label: string;
+  readonly allowed_fields: ReadonlyArray<string>;
+  readonly withheld_fields: ReadonlyArray<string>;
+  readonly reason_code: string;
+  readonly reason_label: string;
+  readonly evidence_available: boolean;
+  readonly evidence: CoreDecisionEvidence | null;
+}
+
+// Request to POST /check-boundary. `purpose` + `scope` are required; the rest
+// are optional. The authenticated principal is the JWT subject server-side and
+// is NEVER sent in the body.
+export interface CheckBoundaryArgs {
+  readonly purpose: string;
+  readonly scope: ReadonlyArray<string>;
+  readonly destination?: string;
+  readonly agentId?: string;
+  readonly environment?: string;
+  readonly mode?: string;
+  readonly schemaVersion?: number;
+}
+
 // T-SDK-FULL-GATE-01: reason a /check-access authorization did not grant.
 // Lets shield() FULL record a local diagnostic without widening the boolean
 // `authorize()` public contract.
@@ -141,7 +186,8 @@ export type AuthzReason =
   | "denied" // HTTP 200 + allowed:false — gateway policy denied
   | "core_503" // aegis-core audit-fail-closed (CSR-02)
   | "http_error" // 403 identity_mismatch / other non-200 / unparseable body
-  | "unreachable"; // network error / timeout — gateway not reached
+  | "unreachable" // network error / timeout — gateway not reached
+  | "multi_scope_unsupported"; // >1 scope vs single-scope server (fail-closed, finding B)
 
 export interface AuthzResult {
   readonly allowed: boolean;
@@ -269,15 +315,72 @@ export class AegisClient {
     return false;
   }
 
+  // Contract fix (CSR-03): the gateway's `/check-access` `scope` field is a
+  // single `Option<String>` advisory scope identifier (aegis_gateway
+  // rest.rs:296), NOT an array. Sending a JSON array deserializes as a type
+  // error server-side (non-200 -> fail-closed), so the prior `{ purpose, scope }`
+  // array body silently broke every scope-bearing /check-access call. The
+  // authoritative gate is the JWT subject + purpose; `scope` is advisory
+  // minimum-disclosure metadata where `None` means "purpose-level access only".
+  // This helper emits what the endpoint expects without changing authorize()'s
+  // grant/deny contract:
+  //   - 0 scopes  -> omit `scope` (None / purpose-level)
+  //   - 1 scope   -> send the single string
+  //   - >1 scopes -> see authorizeDetailed(): the caller FAILS CLOSED before a
+  //                 request is even built (this body builder is never invoked
+  //                 with >1 scope on the gate path).
+  // Review finding B (fail-closed regression fix): a >1-scope check must NOT
+  // silently drop to purpose-level. Earlier, sending the array produced a
+  // server type error (non-2xx -> deny); the scope->Option<String> fix changed
+  // ">1 scope" into "omit scope", which made the server evaluate at
+  // purpose-level and could ALLOW where the caller asked for a stricter,
+  // narrower scope. That is a fail-open regression. We therefore DENY a
+  // multi-scope check in authorizeDetailed() rather than send a purpose-level
+  // request the single-scope server would evaluate more permissively than asked.
+  // NOTE: /check-boundary correctly uses `scope: string[]` and does NOT route
+  // through here.
+  private static checkAccessBody(
+    purpose: string,
+    scope: ReadonlyArray<string>,
+  ): Record<string, unknown> {
+    const body: Record<string, unknown> = { purpose };
+    if (scope.length === 1) {
+      body.scope = scope[0];
+    }
+    return body;
+  }
+
   async checkAccess(
     purpose: string,
     scope: ReadonlyArray<string>,
   ): Promise<{ allowed: boolean } & Record<string, unknown>> {
     const resp = await this.req("POST", "/check-access", {
-      body: { purpose, scope },
+      body: AegisClient.checkAccessBody(purpose, scope),
     });
     if (!resp.ok) throw httpError("check-access", resp.status);
     return (await resp.json()) as { allowed: boolean };
+  }
+
+  // ── check-boundary (Doctor v1) ────────────────────────
+  // POST /check-boundary, reusing the SAME auth header / base-url / timeout /
+  // req() + httpError plumbing as checkAccess. Non-2xx throws httpError so the
+  // Doctor v1 entry point maps it to a fail-closed BLOCK. `scope` is a string[]
+  // here (the boundary endpoint's contract), unlike /check-access. The JWT
+  // subject is the authoritative principal server-side — agentId is advisory
+  // and the principal is never sent.
+  async checkBoundary(args: CheckBoundaryArgs): Promise<BoundaryDecisionView> {
+    const body: Record<string, unknown> = {
+      purpose: args.purpose,
+      scope: [...args.scope],
+    };
+    if (args.destination !== undefined) body.destination = args.destination;
+    if (args.agentId !== undefined) body.agent_id = args.agentId;
+    if (args.environment !== undefined) body.environment = args.environment;
+    if (args.mode !== undefined) body.mode = args.mode;
+    if (args.schemaVersion !== undefined) body.schema_version = args.schemaVersion;
+    const resp = await this.req("POST", "/check-boundary", { body });
+    if (!resp.ok) throw httpError("check-boundary", resp.status);
+    return (await resp.json()) as BoundaryDecisionView;
   }
 
   // AO-003 gate: fail-closed authorize. The detailed variant returns the
@@ -288,6 +391,15 @@ export class AegisClient {
     purpose: string,
     scope: ReadonlyArray<string>,
   ): Promise<AuthzResult> {
+    // Review finding B: the gateway's /check-access scope is a single
+    // Option<String>. A >1-scope request cannot be expressed faithfully, and
+    // dropping to purpose-level would let the server ALLOW more than the caller
+    // asked for. Fail closed BEFORE any request — deny, never grant
+    // purpose-level. (0-scope purpose-level and 1-scope single-string are
+    // unchanged.) /check-boundary is the right path for multi-field scope.
+    if (scope.length > 1) {
+      return { allowed: false, reason: "multi_scope_unsupported" };
+    }
     if (this.cachedAllow(purpose, scope)) {
       return { allowed: true, reason: "allowed" };
     }
@@ -296,7 +408,7 @@ export class AegisClient {
     let resp: Response;
     try {
       resp = await this.req("POST", "/check-access", {
-        body: { purpose, scope },
+        body: AegisClient.checkAccessBody(purpose, scope),
       });
     } catch {
       emitMetric("check-access", t0, 0);

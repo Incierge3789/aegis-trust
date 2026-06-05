@@ -11,6 +11,7 @@ enforcement and formal Evidence remain Aegis Core's responsibility.
 """
 
 from aegis_trust.doctor.check import check
+from aegis_trust.doctor.check_with_core import check_with_core
 from aegis_trust.doctor.policy import ActionRule, LocalPolicy, PurposeRule
 from aegis_trust.doctor.types import (
     DOCTOR_SCHEMA_VERSION,
@@ -23,6 +24,7 @@ from aegis_trust.doctor.types import (
 
 __all__ = [
     "check",
+    "check_with_core",
     "ActionPlan",
     "BoundaryDecision",
     "BoundaryOutcome",
