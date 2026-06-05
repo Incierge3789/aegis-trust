@@ -186,7 +186,8 @@ export type AuthzReason =
   | "denied" // HTTP 200 + allowed:false — gateway policy denied
   | "core_503" // aegis-core audit-fail-closed (CSR-02)
   | "http_error" // 403 identity_mismatch / other non-200 / unparseable body
-  | "unreachable"; // network error / timeout — gateway not reached
+  | "unreachable" // network error / timeout — gateway not reached
+  | "multi_scope_unsupported"; // >1 scope vs single-scope server (fail-closed, finding B)
 
 export interface AuthzResult {
   readonly allowed: boolean;
@@ -325,10 +326,17 @@ export class AegisClient {
   // grant/deny contract:
   //   - 0 scopes  -> omit `scope` (None / purpose-level)
   //   - 1 scope   -> send the single string
-  //   - >1 scopes -> omit `scope` (ambiguous against an Option<String>; the
-  //                 minimal safe correction is to fall back to purpose-level
-  //                 rather than send a malformed array. The multi-scope advisory
-  //                 wire shape is a forward server contract, not yet defined.)
+  //   - >1 scopes -> see authorizeDetailed(): the caller FAILS CLOSED before a
+  //                 request is even built (this body builder is never invoked
+  //                 with >1 scope on the gate path).
+  // Review finding B (fail-closed regression fix): a >1-scope check must NOT
+  // silently drop to purpose-level. Earlier, sending the array produced a
+  // server type error (non-2xx -> deny); the scope->Option<String> fix changed
+  // ">1 scope" into "omit scope", which made the server evaluate at
+  // purpose-level and could ALLOW where the caller asked for a stricter,
+  // narrower scope. That is a fail-open regression. We therefore DENY a
+  // multi-scope check in authorizeDetailed() rather than send a purpose-level
+  // request the single-scope server would evaluate more permissively than asked.
   // NOTE: /check-boundary correctly uses `scope: string[]` and does NOT route
   // through here.
   private static checkAccessBody(
@@ -383,6 +391,15 @@ export class AegisClient {
     purpose: string,
     scope: ReadonlyArray<string>,
   ): Promise<AuthzResult> {
+    // Review finding B: the gateway's /check-access scope is a single
+    // Option<String>. A >1-scope request cannot be expressed faithfully, and
+    // dropping to purpose-level would let the server ALLOW more than the caller
+    // asked for. Fail closed BEFORE any request — deny, never grant
+    // purpose-level. (0-scope purpose-level and 1-scope single-string are
+    // unchanged.) /check-boundary is the right path for multi-field scope.
+    if (scope.length > 1) {
+      return { allowed: false, reason: "multi_scope_unsupported" };
+    }
     if (this.cachedAllow(purpose, scope)) {
       return { allowed: true, reason: "allowed" };
     }

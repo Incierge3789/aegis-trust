@@ -132,6 +132,108 @@ describe("doctor.checkWithCore (v1) — fail-closed", () => {
     expect(d.outcome).toBe(BoundaryOutcome.BLOCK);
     expect(d.reasonCodes).toContain("CORE_MALFORMED_RESPONSE");
   });
+
+  // Finding A: a partial-but-valid-JSON body must NOT map to ALLOW.
+  it("partial body { outcome: PROTECTED } only → BLOCK (not ALLOW)", async () => {
+    const client = fakeClient(async () =>
+      ({ outcome: "PROTECTED" } as unknown as BoundaryDecisionView),
+    );
+    const d = await checkWithCore(plan(), { client });
+    expect(d.outcome).toBe(BoundaryOutcome.BLOCK);
+    expect(d.allowedData).toEqual([]);
+    expect(d.reasonCodes).toContain("CORE_MALFORMED_RESPONSE");
+  });
+
+  // Finding A: missing reason_code (otherwise full) → BLOCK.
+  it("body missing reason_code → BLOCK", async () => {
+    const bad = view({});
+    delete (bad as unknown as Record<string, unknown>).reason_code;
+    const client = fakeClient(async () => bad);
+    const d = await checkWithCore(plan(), { client });
+    expect(d.outcome).toBe(BoundaryOutcome.BLOCK);
+    expect(d.reasonCodes).toContain("CORE_MALFORMED_RESPONSE");
+  });
+
+  // Finding C: prototype-pollution — inherited keys must not be valid outcomes.
+  it("prototype-pollution { outcome: 'toString' } → BLOCK", async () => {
+    const client = fakeClient(async () =>
+      ({
+        source: "CORE",
+        outcome: "toString",
+        purpose_label: "p",
+        allowed_fields: [],
+        withheld_fields: [],
+        reason_code: "x",
+      } as unknown as BoundaryDecisionView),
+    );
+    const d = await checkWithCore(plan(), { client });
+    expect(d.outcome).toBe(BoundaryOutcome.BLOCK);
+    expect(d.reasonCodes).toContain("CORE_MALFORMED_RESPONSE");
+  });
+
+  // Finding D: a BLOCKED outcome with non-empty allowed_fields must clear the
+  // allow set (non-grant outcomes never carry an allow set).
+  it("BLOCKED + non-empty allowed_fields → allowedData empty", async () => {
+    const client = fakeClient(async () =>
+      view({ outcome: "BLOCKED", allowed_fields: ["name", "ssn"], withheld_fields: ["ssn"] }),
+    );
+    const d = await checkWithCore(plan(), { client });
+    expect(d.outcome).toBe(BoundaryOutcome.BLOCK);
+    expect(d.allowedData).toEqual([]);
+    expect(scopeForShield(d)).toEqual([]);
+  });
+
+  // Finding D: REQUIRE_CHECK / REQUIRE_APPROVAL also clear the allow set.
+  it("CHECK_REQUIRED + non-empty allowed_fields → allowedData empty", async () => {
+    const client = fakeClient(async () =>
+      view({ outcome: "CHECK_REQUIRED", allowed_fields: ["name"] }),
+    );
+    const d = await checkWithCore(plan(), { client });
+    expect(d.outcome).toBe(BoundaryOutcome.REQUIRE_CHECK);
+    expect(d.allowedData).toEqual([]);
+  });
+
+  // Finding E/G: a mapping error (e.g. plan.tools tampered to a non-iterable)
+  // must BLOCK, not escape as a raw throw.
+  it("mapping error (bad plan) → BLOCK", async () => {
+    const client = fakeClient(async () => view({}));
+    const badPlan = plan();
+    // Force plan.tools to a non-iterable to make mapView throw on spread.
+    (badPlan as unknown as Record<string, unknown>).tools = 5;
+    const d = await checkWithCore(badPlan, { client });
+    expect(d.outcome).toBe(BoundaryOutcome.BLOCK);
+    expect(d.reasonCodes).toContain("CORE_UNAVAILABLE");
+  });
+});
+
+describe("doctor.checkWithCore (v1) — destination fail-closed (finding F)", () => {
+  it("single destination is sent as-is", async () => {
+    let captured: Record<string, unknown> | null = null;
+    const client = fakeClient(async () => view({}));
+    (client as unknown as { checkBoundary: (a: Record<string, unknown>) => Promise<BoundaryDecisionView> })
+      .checkBoundary = async (a) => {
+      captured = a;
+      return view({});
+    };
+    await checkWithCore(plan({ destinations: ["internal_reply"] }), { client });
+    expect(captured!.destination).toBe("internal_reply");
+  });
+
+  it("multiple destinations → most-restrictive sentinel (never the first)", async () => {
+    let captured: Record<string, unknown> | null = null;
+    const client = fakeClient(async () => view({}));
+    (client as unknown as { checkBoundary: (a: Record<string, unknown>) => Promise<BoundaryDecisionView> })
+      .checkBoundary = async (a) => {
+      captured = a;
+      return view({});
+    };
+    await checkWithCore(
+      plan({ destinations: ["internal_reply", "external_llm"] }),
+      { client },
+    );
+    expect(captured!.destination).toBe("__aegis_multi_external__");
+    expect(captured!.destination).not.toBe("internal_reply");
+  });
 });
 
 describe("doctor.checkWithCore (v1) — scopeForShield coupling", () => {

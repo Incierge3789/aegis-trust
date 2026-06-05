@@ -98,7 +98,10 @@ class TestShieldFullScope:
         transport = _make_transport()
         _patch_client_transport(transport)
 
-        @shield(purpose="support", scope=["name", "issue"])
+        # Single-scope FULL gate path (the supported wire shape — server scope
+        # is Option<String>). Filtering itself is multi-field via the policy/
+        # filter spec; the *gate* scope below is single.
+        @shield(purpose="support", scope=["name"])
         def get_customer(cid: str) -> dict:
             return {
                 "name": "Tanaka",
@@ -108,9 +111,32 @@ class TestShieldFullScope:
             }
 
         result = get_customer("C-001")
-        assert result == {"name": "Tanaka", "issue": "Login problem"}
+        assert result == {"name": "Tanaka"}
         assert "email" not in result
         assert "card" not in result
+
+    def test_multi_scope_full_gate_fails_closed(self):
+        # Review finding B: a >1-element gate scope cannot be expressed against
+        # the single Option<String> /check-access contract. The FULL gate
+        # therefore DENIES (fn never runs, returns None) rather than dropping to
+        # a purpose-level request the server could ALLOW more permissively.
+        # Against a real server the prior array body was a type error -> deny;
+        # this restores that fail-closed direction.
+        from aegis_trust import shield
+
+        transport = _make_transport()
+        _patch_client_transport(transport)
+
+        ran = {"n": 0}
+
+        @shield(purpose="support", scope=["name", "issue"])
+        def get_customer(cid: str) -> dict:
+            ran["n"] += 1
+            return {"name": "Tanaka", "issue": "Login problem", "card": "4242"}
+
+        result = get_customer("C-001")
+        assert result is None
+        assert ran["n"] == 0  # fn never invoked — gate denied before execution.
 
     def test_scope_nested_dot_path(self):
         from aegis_trust import shield
@@ -118,7 +144,8 @@ class TestShieldFullScope:
         transport = _make_transport()
         _patch_client_transport(transport)
 
-        @shield(purpose="analytics", scope=["name", "profile.age"])
+        # Single nested gate scope: supported (one Option<String> element).
+        @shield(purpose="analytics", scope=["profile.age"])
         def get_user(uid: str) -> dict:
             return {
                 "name": "Sato",
@@ -126,7 +153,7 @@ class TestShieldFullScope:
             }
 
         result = get_user("U-001")
-        assert result == {"name": "Sato", "profile": {"age": 28}}
+        assert result == {"profile": {"age": 28}}
 
     def test_scope_list_input(self):
         from aegis_trust import shield

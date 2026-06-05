@@ -68,7 +68,13 @@ def _fail_closed(purpose: str, reason_code: str) -> BoundaryDecision:
 def _map_view(view: BoundaryDecisionView, plan: ActionPlan) -> BoundaryDecision:
     """Map a validated ``BoundaryDecisionView`` into a :class:`BoundaryDecision`."""
     outcome = _OUTCOME_MAP[view.outcome]
-    allowed_data = list(view.allowed_fields)
+    # Review finding D (invariant parity with v0 ``check()``): an allow set is
+    # only meaningful for a grant. For ALLOW / REDUCE_SCOPE we carry the Core
+    # ``allowed_fields``; for REQUIRE_CHECK / REQUIRE_APPROVAL / BLOCK we FORCE
+    # the allow set to empty so a Core ``BLOCKED`` body that (incorrectly)
+    # carries non-empty ``allowed_fields`` can never populate ``allowed_data``.
+    grants = outcome in (BoundaryOutcome.ALLOW, BoundaryOutcome.REDUCE_SCOPE)
+    allowed_data = list(view.allowed_fields) if grants else []
     blocked_data = list(view.withheld_fields)
     reason_codes = [view.reason_code] if view.reason_code else []
     approval_required_for = (
@@ -86,6 +92,28 @@ def _map_view(view: BoundaryDecisionView, plan: ActionPlan) -> BoundaryDecision:
         receipt_required=outcome is not BoundaryOutcome.ALLOW or bool(blocked_data),
         schema_version=DOCTOR_SCHEMA_VERSION,
     )
+
+
+# Sentinel destination sent when a plan declares MORE THAN ONE destination.
+# The /check-boundary endpoint accepts a single ``Option<String>`` destination,
+# so only one of the plan's destinations could be sent. Sending just the first
+# (the prior behaviour) UNDER-estimates the boundary: the riskiest sink might be
+# the second one, and the server would evaluate the (possibly trusted) first
+# destination and ALLOW. Review finding F: instead, when there are multiple
+# destinations we send a reserved sentinel that cannot match any trusted
+# internal destination, so the server can only evaluate it as an
+# unknown/external sink — the decision can get STRICTER, never looser.
+_MULTI_DESTINATION_SENTINEL = "__aegis_multi_external__"
+
+
+def _resolve_destination(destinations: list[str]) -> str | None:
+    """Choose the single destination to send (fail-closed for multi-dest)."""
+    if not destinations:
+        return None
+    if len(destinations) == 1:
+        return destinations[0]
+    # >1 destination: most-restrictive sentinel (treated as external/unknown).
+    return _MULTI_DESTINATION_SENTINEL
 
 
 async def check_with_core(
@@ -106,17 +134,17 @@ async def check_with_core(
         context: trust context (agent_id / environment / mode). ``principal`` is
             NOT sent.
     """
-    if client is None:
-        from aegis_trust.shield import _get_client
-
-        client = _get_client()
-
-    destination = plan.destinations[0] if plan.destinations else None
-    agent_id = context.agent_id if context is not None else plan.agent_id
-    environment = context.environment if context is not None else plan.environment
-    mode = context.mode if context is not None else None
-
     try:
+        if client is None:
+            from aegis_trust.shield import _get_client
+
+            client = _get_client()
+
+        destination = _resolve_destination(plan.destinations)
+        agent_id = context.agent_id if context is not None else plan.agent_id
+        environment = context.environment if context is not None else plan.environment
+        mode = context.mode if context is not None else None
+
         view = await client.acheck_boundary(
             plan.purpose,
             list(plan.data_requested),
@@ -126,19 +154,22 @@ async def check_with_core(
             mode=mode,
             schema_version=plan.schema_version or DOCTOR_SCHEMA_VERSION,
         )
+        if view.outcome not in _OUTCOME_MAP:
+            # Unknown outcome string -> fail-closed BLOCK.
+            logger.warning("check_with_core: unknown Core outcome, fail-closed")
+            return _fail_closed(plan.purpose, "CORE_MALFORMED_RESPONSE")
+
+        # Review finding E: the mapping is INSIDE the fail-closed try so a
+        # malformed plan (e.g. plan.tools is None) raises here and BLOCKs,
+        # rather than escaping as a raw exception.
+        return _map_view(view, plan)
     except ValueError:
-        # Malformed / unparseable body (_parse_boundary_view raises ValueError)
-        # -> fail-closed BLOCK. Distinct reason code for Node/Python parity.
+        # Malformed / partial / unparseable body (_parse_boundary_view raises
+        # ValueError) -> fail-closed BLOCK. Distinct reason code for parity.
         logger.warning("check_with_core: malformed Core response, fail-closed")
         return _fail_closed(plan.purpose, "CORE_MALFORMED_RESPONSE")
     except Exception:
-        # Network error / timeout / non-2xx (raise_for_status) -> fail-closed.
+        # Network error / timeout / non-2xx (raise_for_status), client
+        # acquisition error, or mapping error -> fail-closed BLOCK.
         logger.warning("check_with_core: Core unavailable, fail-closed")
         return _fail_closed(plan.purpose, "CORE_UNAVAILABLE")
-
-    if view.outcome not in _OUTCOME_MAP:
-        # Unknown outcome string -> fail-closed BLOCK.
-        logger.warning("check_with_core: unknown Core outcome, fail-closed")
-        return _fail_closed(plan.purpose, "CORE_MALFORMED_RESPONSE")
-
-    return _map_view(view, plan)

@@ -167,6 +167,75 @@ async def test_unknown_outcome_fails_closed():
     assert "CORE_MALFORMED_RESPONSE" in d.reason_codes
 
 
+@pytest.mark.asyncio
+async def test_prototype_pollution_outcome_fails_closed():
+    # Finding C: an inherited-style attribute string like "toString" is not a
+    # member of _OUTCOME_MAP (dict membership is own-key in Python) -> BLOCK.
+    client = _client_returning(_view(outcome="toString"))
+    d = await check_with_core(_plan(), client=client)
+    assert d.outcome is BoundaryOutcome.BLOCK
+    assert "CORE_MALFORMED_RESPONSE" in d.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_blocked_with_allowed_fields_clears_allow_set():
+    # Finding D: a BLOCKED view that (incorrectly) carries allowed_fields must
+    # not populate allowed_data.
+    client = _client_returning(
+        _view(
+            outcome="BLOCKED", allowed_fields=["name", "ssn"], withheld_fields=["ssn"]
+        )
+    )
+    d = await check_with_core(_plan(), client=client)
+    assert d.outcome is BoundaryOutcome.BLOCK
+    assert d.allowed_data == []
+    assert d.scope_for_shield() == []
+
+
+@pytest.mark.asyncio
+async def test_check_required_with_allowed_fields_clears_allow_set():
+    # Finding D: REQUIRE_CHECK / REQUIRE_APPROVAL also clear the allow set.
+    client = _client_returning(_view(outcome="CHECK_REQUIRED", allowed_fields=["name"]))
+    d = await check_with_core(_plan(), client=client)
+    assert d.outcome is BoundaryOutcome.REQUIRE_CHECK
+    assert d.allowed_data == []
+
+
+@pytest.mark.asyncio
+async def test_mapping_error_fails_closed():
+    # Finding E: a malformed plan (tools is None -> list(None) raises) must
+    # BLOCK because the mapping is inside the fail-closed try.
+    client = _client_returning(_view())
+    bad_plan = _plan()
+    object.__setattr__(bad_plan, "tools", None)
+    d = await check_with_core(bad_plan, client=client)
+    assert d.outcome is BoundaryOutcome.BLOCK
+    assert "CORE_UNAVAILABLE" in d.reason_codes
+
+
+# ── destination fail-closed (finding F) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_single_destination_sent_as_is():
+    client = _client_returning(_view())
+    await check_with_core(_plan(destinations=["internal_reply"]), client=client)
+    assert client.last_kwargs is not None
+    assert client.last_kwargs["destination"] == "internal_reply"
+
+
+@pytest.mark.asyncio
+async def test_multi_destination_uses_restrictive_sentinel():
+    client = _client_returning(_view())
+    await check_with_core(
+        _plan(destinations=["internal_reply", "external_llm"]), client=client
+    )
+    assert client.last_kwargs is not None
+    # Never the first (possibly-trusted) destination — a restrictive sentinel.
+    assert client.last_kwargs["destination"] == "__aegis_multi_external__"
+    assert client.last_kwargs["destination"] != "internal_reply"
+
+
 # ── scope_for_shield coupling ───────────────────────────────
 
 

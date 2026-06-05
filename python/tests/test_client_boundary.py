@@ -52,17 +52,28 @@ def test_check_access_empty_scope_omits_field():
     assert "scope" not in captured["body"]
 
 
-def test_authorize_multi_scope_omits_field():
-    captured = {}
+def test_authorize_multi_scope_fails_closed():
+    # Review finding B: a >1-scope authorize must DENY without even sending a
+    # request — dropping to purpose-level could let the single-scope server
+    # ALLOW more than the caller asked for (fail-open regression).
+    called = {"n": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["body"] = json.loads(request.content)
+        called["n"] += 1
         return httpx.Response(200, json={"allowed": True})
 
     c = _client_with_transport(handler)
-    assert c.authorize("p", ["name", "issue"]) is True
-    assert "scope" not in captured["body"]
-    assert captured["body"]["purpose"] == "p"
+    assert c.authorize("p", ["name", "issue"]) is False
+    # No request was issued at all.
+    assert called["n"] == 0
+
+
+def test_check_access_body_omits_scope_for_multi_scope():
+    # The body builder still omits scope for >1 (defensive), but the gate path
+    # never reaches it because authorize() denies first.
+    body = AegisClient._check_access_body("p", ["name", "issue"])
+    assert "scope" not in body
+    assert body["purpose"] == "p"
 
 
 # ── /check-boundary (Doctor v1) ─────────────────────────────
@@ -124,6 +135,74 @@ def test_check_boundary_raises_on_non_2xx():
 def test_check_boundary_raises_on_malformed_body():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"source": "CORE"})  # no outcome
+
+    c = _client_with_transport(handler)
+    with pytest.raises(ValueError):
+        c.check_boundary("p", ["name"])
+
+
+def test_check_boundary_raises_on_partial_body_with_outcome_only():
+    # Finding A: a partial-but-valid-JSON body with only outcome present must
+    # NOT parse to a trusted view (it would otherwise map PROTECTED -> ALLOW).
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"outcome": "PROTECTED"})
+
+    c = _client_with_transport(handler)
+    with pytest.raises(ValueError):
+        c.check_boundary("p", ["name"])
+
+
+def test_check_boundary_raises_on_missing_source():
+    # Finding A: source is a required field.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "outcome": "PROTECTED",
+                "purpose_label": "p",
+                "allowed_fields": [],
+                "withheld_fields": [],
+                "reason_code": "x",
+            },
+        )
+
+    c = _client_with_transport(handler)
+    with pytest.raises(ValueError):
+        c.check_boundary("p", ["name"])
+
+
+def test_check_boundary_raises_on_missing_reason_code():
+    # Finding A: reason_code is a required field.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "source": "CORE",
+                "outcome": "PROTECTED",
+                "purpose_label": "p",
+                "allowed_fields": [],
+                "withheld_fields": [],
+            },
+        )
+
+    c = _client_with_transport(handler)
+    with pytest.raises(ValueError):
+        c.check_boundary("p", ["name"])
+
+
+def test_check_boundary_raises_on_missing_allowed_fields():
+    # Finding A: allowed_fields is now REQUIRED (no default-to-empty).
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "source": "CORE",
+                "outcome": "PROTECTED",
+                "purpose_label": "p",
+                "withheld_fields": [],
+                "reason_code": "x",
+            },
+        )
 
     c = _client_with_transport(handler)
     with pytest.raises(ValueError):

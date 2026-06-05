@@ -221,10 +221,18 @@ class AegisClient:
 
         - 0 scopes  -> omit ``scope`` (None / purpose-level)
         - 1 scope   -> send the single string
-        - >1 scopes -> omit ``scope`` (ambiguous against an ``Option<String>``;
-          the minimal safe correction is to fall back to purpose-level rather
-          than send a malformed array. The multi-scope advisory wire shape is a
-          forward server contract, not yet defined.)
+        - >1 scopes -> see :meth:`authorize`/:meth:`aauthorize`: the caller
+          FAILS CLOSED before a request is built (this body builder is never
+          invoked with >1 scope on the gate path).
+
+        Review finding B (fail-closed regression fix): a >1-scope check must NOT
+        silently drop to purpose-level. Earlier, sending the array produced a
+        server type error (non-2xx -> deny); the scope->``Option<String>`` fix
+        turned ">1 scope" into "omit scope", which made the server evaluate at
+        purpose-level and could ALLOW where the caller asked for a stricter,
+        narrower scope — a fail-open regression. :meth:`authorize` therefore
+        DENIES a multi-scope check rather than send a purpose-level request the
+        single-scope server would evaluate more permissively than asked.
 
         NOTE: ``/check-boundary`` correctly uses ``scope: list[str]`` and does
         NOT route through here.
@@ -289,14 +297,31 @@ class AegisClient:
         """Parse a ``/check-boundary`` 200 body into a
         :class:`BoundaryDecisionView`. Raises :class:`ValueError` on a malformed
         shape so the Doctor v1 entry point maps it to a fail-closed BLOCK.
+
+        Review finding A (fail-closed): require the FULL ``BoundaryDecisionView``
+        shape — a partial-but-valid-JSON body such as ``{"outcome": "PROTECTED"}``
+        (every other field missing/defaulted) MUST NOT be trusted and map to
+        ALLOW. Every required field must be present and correctly typed:
+        ``source`` (str), ``outcome`` (str), ``allowed_fields`` (list[str]),
+        ``withheld_fields`` (list[str]), ``reason_code`` (str). Any
+        missing/mistyped required field -> ValueError -> CORE_MALFORMED_RESPONSE
+        -> BLOCK.
         """
         if not isinstance(body, dict):
             raise ValueError("check-boundary: body is not a dict")
+        source = body.get("source")
+        if not isinstance(source, str):
+            raise ValueError("check-boundary: 'source' missing or not a str")
         outcome = body.get("outcome")
         if not isinstance(outcome, str):
             raise ValueError("check-boundary: 'outcome' missing or not a str")
-        allowed = body.get("allowed_fields", [])
-        withheld = body.get("withheld_fields", [])
+        reason_code = body.get("reason_code")
+        if not isinstance(reason_code, str):
+            raise ValueError("check-boundary: 'reason_code' missing or not a str")
+        # allowed_fields / withheld_fields are REQUIRED here (no default): a
+        # missing array is a malformed view, not an empty allow set.
+        allowed = body.get("allowed_fields")
+        withheld = body.get("withheld_fields")
         if not isinstance(allowed, list) or not all(
             isinstance(x, str) for x in allowed
         ):
@@ -316,12 +341,12 @@ class AegisClient:
                 recorded_at=str(ev_raw.get("recorded_at", "")),
             )
         return BoundaryDecisionView(
-            source=str(body.get("source", "")),
+            source=source,
             outcome=outcome,
             purpose_label=str(body.get("purpose_label", "")),
             allowed_fields=list(allowed),
             withheld_fields=list(withheld),
-            reason_code=str(body.get("reason_code", "")),
+            reason_code=reason_code,
             reason_label=str(body.get("reason_label", "")),
             evidence_available=bool(body.get("evidence_available", False)),
             evidence=evidence,
@@ -427,7 +452,15 @@ class AegisClient:
         a 200 whose body lacks ``{"allowed": true}``. A 200-allow result is
         cached for :data:`_ACCESS_CACHE_TTL_S` seconds, keyed by the current token
         epoch so token rotation invalidates the cache. Deny is never cached.
+
+        Review finding B: a >1-scope request fails closed (deny) before any
+        request is sent — see :meth:`_check_access_body`.
         """
+        if len(scope) > 1:
+            logger.warning(
+                "authorize: >1 scope vs single-scope server, fail-closed (finding B)"
+            )
+            return False
         if self._cached_allow(purpose, scope):
             return True
         epoch_at_request = self._token_epoch
@@ -459,6 +492,11 @@ class AegisClient:
 
     async def aauthorize(self, purpose: str, scope: list[str]) -> bool:
         """Async variant of :meth:`authorize`."""
+        if len(scope) > 1:
+            logger.warning(
+                "aauthorize: >1 scope vs single-scope server, fail-closed (finding B)"
+            )
+            return False
         if self._cached_allow(purpose, scope):
             return True
         epoch_at_request = self._token_epoch

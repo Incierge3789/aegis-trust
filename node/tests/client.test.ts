@@ -337,14 +337,33 @@ describe("checkAccess scope contract (CSR-03 fix)", () => {
     const sent = JSON.parse(captured[0]!.body);
     expect("scope" in sent).toBe(false);
   });
-  it("omits `scope` for a multi-element scope (forward contract undefined)", async () => {
+  it("authorize fails closed for a multi-element scope (finding B, no request sent)", async () => {
+    // Review finding B: a >1-scope authorize must DENY without sending a
+    // request — dropping to purpose-level could let the single-scope server
+    // ALLOW more than the caller asked for (fail-open regression).
+    let calls = 0;
+    mockFetch(async () => {
+      calls++;
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    expect(await c.authorize("p", ["name", "issue"])).toBe(false);
+    expect(calls).toBe(0);
+    const detailed = await c.authorizeDetailed("p", ["name", "issue"]);
+    expect(detailed.allowed).toBe(false);
+    expect(detailed.reason).toBe("multi_scope_unsupported");
+    expect(calls).toBe(0);
+  });
+
+  it("checkAccessBody still omits scope for >1 (defensive; gate denies first)", async () => {
+    // checkAccessBody is private; assert behaviour via checkAccess (non-gate).
     const captured: { body: string }[] = [];
     mockFetch(async (_input, init) => {
       captured.push({ body: String(init?.body) });
       return new Response(JSON.stringify({ allowed: true }), { status: 200 });
     });
     const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
-    await c.authorize("p", ["name", "issue"]);
+    await c.checkAccess("p", ["name", "issue"]);
     const sent = JSON.parse(captured[0]!.body);
     expect("scope" in sent).toBe(false);
     expect(sent.purpose).toBe("p");

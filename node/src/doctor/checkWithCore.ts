@@ -63,27 +63,55 @@ function failClosed(purpose: string, reasonCode: string): BoundaryDecision {
   };
 }
 
-/** True iff `v` has the minimal shape of a BoundaryDecisionView we can trust. */
+/** A string[] (every element a string). */
+function isStringArray(arr: unknown): arr is string[] {
+  return Array.isArray(arr) && arr.every((x) => typeof x === "string");
+}
+
+/**
+ * True iff `v` is a FULL, correctly-typed `BoundaryDecisionView`.
+ *
+ * Review finding A (fail-closed): a partial-but-valid-JSON body such as
+ * `{ "outcome": "PROTECTED" }` (every other field missing/defaulted) MUST NOT
+ * map to ALLOW. We therefore require EVERY required field to be present and
+ * correctly typed before we trust the view — `source` (string), `outcome`
+ * (own-key of OUTCOME_MAP), `allowed_fields` (string[]), `withheld_fields`
+ * (string[]), and `reason_code` (string). Any missing/mistyped required field
+ * → malformed → caller maps to CORE_MALFORMED_RESPONSE → BLOCK.
+ *
+ * Review finding C (prototype pollution): the outcome is matched with
+ * `Object.prototype.hasOwnProperty.call(...)` so inherited keys like
+ * `toString` / `constructor` / `__proto__` are NOT accepted as valid outcomes.
+ */
 function isValidView(v: unknown): v is BoundaryDecisionView {
   if (!v || typeof v !== "object") return false;
   const o = v as Record<string, unknown>;
+  // outcome: must be an OWN key of OUTCOME_MAP (not an inherited prototype key).
   if (typeof o.outcome !== "string") return false;
-  if (!(o.outcome in OUTCOME_MAP)) return false;
-  // allowed_fields / withheld_fields must be string arrays when present.
-  for (const key of ["allowed_fields", "withheld_fields"]) {
-    const arr = o[key];
-    if (arr !== undefined && (!Array.isArray(arr) || arr.some((x) => typeof x !== "string"))) {
-      return false;
-    }
-  }
+  if (!Object.prototype.hasOwnProperty.call(OUTCOME_MAP, o.outcome)) return false;
+  // source: required string.
+  if (typeof o.source !== "string") return false;
+  // reason_code: required string.
+  if (typeof o.reason_code !== "string") return false;
+  // allowed_fields / withheld_fields: required string[] (not optional anymore).
+  if (!isStringArray(o.allowed_fields)) return false;
+  if (!isStringArray(o.withheld_fields)) return false;
   return true;
 }
 
 /** Map a validated `BoundaryDecisionView` into the SDK `BoundaryDecision`. */
 function mapView(view: BoundaryDecisionView, plan: ActionPlan): BoundaryDecision {
   const outcome = OUTCOME_MAP[view.outcome];
-  const allowedData = [...(view.allowed_fields ?? [])];
-  const blockedData = [...(view.withheld_fields ?? [])];
+  // Review finding D (invariant parity with v0 `check()`): an allow set is only
+  // meaningful for a grant. For ALLOW / REDUCE_SCOPE we carry the Core
+  // `allowed_fields`; for REQUIRE_CHECK / REQUIRE_APPROVAL / BLOCK we FORCE the
+  // allow set to empty so a Core `BLOCKED` body that (incorrectly) carries
+  // non-empty `allowed_fields` can never populate `allowedData`. Withheld
+  // fields are always informational and preserved.
+  const grants =
+    outcome === BoundaryOutcome.ALLOW || outcome === BoundaryOutcome.REDUCE_SCOPE;
+  const allowedData = grants ? [...view.allowed_fields] : [];
+  const blockedData = [...view.withheld_fields];
   const reasonCodes: string[] = [];
   if (view.reason_code) reasonCodes.push(view.reason_code);
   const approvalRequiredFor =
@@ -102,6 +130,27 @@ function mapView(view: BoundaryDecisionView, plan: ActionPlan): BoundaryDecision
   };
 }
 
+// Sentinel destination sent when a plan declares MORE THAN ONE destination.
+// The /check-boundary endpoint accepts a single `Option<String>` destination,
+// so only one of the plan's destinations could be sent. Sending just the first
+// (the prior behaviour) UNDER-estimates the boundary: the riskiest sink might
+// be the second one, and the server would evaluate the (possibly trusted) first
+// destination and ALLOW. Review finding F: instead, when there are multiple
+// destinations we send a reserved sentinel that cannot match any trusted
+// internal destination, so the server can only evaluate it as an
+// unknown/external sink — the decision can get STRICTER, never looser.
+const MULTI_DESTINATION_SENTINEL = "__aegis_multi_external__";
+
+/** Choose the single destination to send (fail-closed for multi-destination). */
+function resolveDestination(
+  destinations: ReadonlyArray<string> | undefined,
+): string | undefined {
+  if (!destinations || destinations.length === 0) return undefined;
+  if (destinations.length === 1) return destinations[0];
+  // >1 destination: most-restrictive sentinel (treated as external/unknown).
+  return MULTI_DESTINATION_SENTINEL;
+}
+
 /**
  * Diagnose `plan` against Aegis Core (POST /check-boundary) and return the
  * mapped `BoundaryDecision`. Async (network). Fail-closed on every error path.
@@ -113,16 +162,14 @@ export async function checkWithCore(
   plan: ActionPlan,
   opts: CheckWithCoreOptions = {},
 ): Promise<BoundaryDecision> {
-  const client = opts.client ?? getModuleClient();
   const ctx = opts.context;
-  // First requested destination, if any (the boundary endpoint takes a single
-  // optional destination).
-  const destination = plan.destinations && plan.destinations.length > 0
-    ? plan.destinations[0]
-    : undefined;
-  let view: BoundaryDecisionView;
   try {
-    view = await client.checkBoundary({
+    // Review finding G: acquire the client INSIDE the fail-closed try. If
+    // getModuleClient() throws (e.g. bad env / construction error), that must
+    // BLOCK, not escape as a raw exception.
+    const client = opts.client ?? getModuleClient();
+    const destination = resolveDestination(plan.destinations);
+    const view = await client.checkBoundary({
       purpose: plan.purpose,
       scope: [...plan.dataRequested],
       destination,
@@ -131,13 +178,14 @@ export async function checkWithCore(
       mode: ctx?.mode,
       schemaVersion: plan.schemaVersion ?? DOCTOR_SCHEMA_VERSION,
     });
+    if (!isValidView(view)) {
+      // Malformed / partial / unparseable body → fail-closed BLOCK (finding A).
+      return failClosed(plan.purpose, "CORE_MALFORMED_RESPONSE");
+    }
+    return mapView(view, plan);
   } catch {
-    // Network error / timeout / non-2xx (httpError) → fail-closed BLOCK.
+    // Network error / timeout / non-2xx (httpError) / client-acquisition error
+    // / any mapping error → fail-closed BLOCK (findings E/G parity with Python).
     return failClosed(plan.purpose, "CORE_UNAVAILABLE");
   }
-  if (!isValidView(view)) {
-    // Malformed / unparseable body → fail-closed BLOCK.
-    return failClosed(plan.purpose, "CORE_MALFORMED_RESPONSE");
-  }
-  return mapView(view, plan);
 }

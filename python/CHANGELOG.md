@@ -18,13 +18,40 @@ never sent in the body. The local, deterministic `check()` (v0) is untouched. Ne
 `AegisClient.check_boundary()` / `acheck_boundary()` methods and
 `BoundaryDecisionView` wire types added.
 
-### Fixed — `/check-access` scope contract (CSR-03)
+#### Fail-closed hardening from 3-model cross-review
+- **Partial Core response → BLOCK.** `_parse_boundary_view` now requires the
+  **full** `BoundaryDecisionView` shape (`source`, `outcome`, `allowed_fields`,
+  `withheld_fields`, `reason_code` all present and correctly typed). A
+  partial-but-valid-JSON body like `{"outcome":"PROTECTED"}` no longer parses to
+  a trusted view — it raises `ValueError` → `CORE_MALFORMED_RESPONSE` → BLOCK.
+- **Own-key outcome lookup.** Outcome membership is resolved via `dict`
+  membership in `_OUTCOME_MAP` (own-key only in Python), so attribute-style
+  strings (`toString`, etc.) can never be accepted as a valid outcome.
+- **Allow set cleared on non-grant outcomes.** Only `ALLOW`/`REDUCE_SCOPE` carry
+  an allow set; `REQUIRE_CHECK`/`REQUIRE_APPROVAL`/`BLOCK` force `allowed_data`
+  to `[]`, even if the Core body (incorrectly) carries `allowed_fields`.
+- **Multi-destination fail-closed.** A plan with >1 destination now sends a
+  restrictive sentinel (treated as external/unknown) instead of just the first
+  destination, so the decision can only get stricter, never looser.
+- **Mapping & client-acquisition inside the fail-closed boundary.** `_get_client()`
+  and the view→decision mapping run inside the try, so any error (e.g. a malformed
+  `plan`) → BLOCK rather than escaping as a raw exception.
+
+### Fixed — `/check-access` scope contract (CSR-03) + multi-scope fail-closed
 `check_access` / `authorize` previously sent `scope` as a JSON **array**, but the
 gateway's `CheckAccessRequest.scope` is a single advisory `Option<String>`; an
 array deserialized as a type error (non-200 → fail-closed). The SDK now sends a
 single string for a one-element scope and omits the field otherwise (`None` =
-purpose-level), matching the server. `authorize()`'s public signature and
-grant/deny behaviour are unchanged.
+purpose-level), matching the server. **Fail-closed hardening (cross-review):** a
+`>1`-element scope can no longer be expressed faithfully against the single
+`Option<String>` contract — `authorize`/`aauthorize` now **deny** a multi-scope
+check instead of silently dropping to a purpose-level request the server could
+ALLOW more permissively than asked. This restores the pre-CSR-03 fail-closed
+direction (array body → server type error → deny). The single-scope (string) and
+0-scope (purpose-level) paths and `authorize()`'s public boolean contract are
+unchanged. (Note: in FULL mode, `@shield(scope=[...])` with **multiple** scope
+fields now fails closed at the gate; use a single gate scope, or `/check-boundary`
+via Doctor v1 for multi-field boundary decisions.)
 
 ### Docs — surface the shipped record-boundary streaming adapter
 `shielded_stream_tool()` ships in 0.9.1 but was absent from the README, while the
