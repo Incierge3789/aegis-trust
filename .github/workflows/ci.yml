@@ -95,6 +95,15 @@ jobs:
         working-directory: python
         run: uv run ruff format --check src/ tests/
 
+      - name: mypy --strict (type-safety gate, parity with the release dogfood)
+        # The release-time 9-verifier dogfood runs `mypy --strict` and fail-closes
+        # the publish on any error. Running it here means a type error is caught
+        # on the PR, not at `git tag v*` time. Scope/excludes live in
+        # `[tool.mypy]` (files = src/aegis_trust). Found necessary when 0.9.2's
+        # publish failed on an unused `type: ignore` that ruff + pytest let pass.
+        working-directory: python
+        run: uv run mypy --strict
+
       - name: Install opentimestamps-client (integration-test runtime dep)
         # `python/tests/test_ots_verify_external.py` invokes
         # `scripts/ots-verify-external.sh`, which requires the `ots` binary
