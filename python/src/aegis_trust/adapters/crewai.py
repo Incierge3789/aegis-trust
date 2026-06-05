@@ -38,7 +38,7 @@ def to_crewai_tool(base_tool_cls: type, tool: ShieldedTool) -> Any:
     """
     shielded = tool
 
-    class _ShieldedCrewaiTool(base_tool_cls):  # type: ignore[misc, valid-type]
+    class _ShieldedCrewaiTool(base_tool_cls):  # type: ignore[misc]
         name: str = shielded.name
         description: str = shielded.description
 
@@ -46,6 +46,6 @@ def to_crewai_tool(base_tool_cls: type, tool: ShieldedTool) -> Any:
             return shielded.run(**kwargs)
 
     if shielded.schema is not None:
-        _ShieldedCrewaiTool.args_schema = shielded.schema  # type: ignore[attr-defined]
+        _ShieldedCrewaiTool.args_schema = shielded.schema
 
     return _ShieldedCrewaiTool()
