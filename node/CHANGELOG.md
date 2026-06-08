@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed — docker quickstart example
+- Bumped the demo dependency pin from `aegis-trust@0.9.0-rc5` to `0.9.2` (npm latest)
+  and the demo's own version to `0.9.2`.
+- HEALTHCHECK now probes `http://127.0.0.1:8080/health` (IPv4) instead of
+  `localhost`: in the container `localhost` resolves to both 127.0.0.1 and ::1,
+  busybox wget tries ::1 first, but the Node server binds IPv4 0.0.0.0 only, so the
+  `localhost` probe was refused and the container was marked unhealthy forever.
+- Example-only change (no SDK source touched); no npm/PyPI re-release required.
+
 ## [0.9.2] - 2026-06-05
 
 ### Added — Doctor v1: Core-backed `checkWithCore()` against `/check-boundary` (fail-closed)
