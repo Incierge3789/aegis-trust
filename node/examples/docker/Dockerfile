@@ -26,7 +26,12 @@ ENV PORT=8080
 ENV AEGIS_AUDIT_PATH=/data/audit.jsonl
 
 EXPOSE 8080
+# NOTE: probe 127.0.0.1 (IPv4) explicitly, not `localhost`. In the
+# container /etc/hosts maps `localhost` to both 127.0.0.1 and ::1, and
+# busybox wget tries ::1 first; the Node server binds IPv4 0.0.0.0 only,
+# so a `localhost` probe gets "connection refused" and the container is
+# marked unhealthy forever even though it serves fine.
 HEALTHCHECK --interval=5s --timeout=2s --start-period=3s --retries=3 \
-    CMD wget -q -O - http://localhost:8080/health || exit 1
+    CMD wget -q -O - http://127.0.0.1:8080/health || exit 1
 
 CMD ["node", "dist/agentServer.js"]
