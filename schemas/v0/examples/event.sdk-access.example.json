@@ -1,0 +1,26 @@
+{
+  "audit_schema_version": 0,
+  "timestamp": "2026-06-10T03:12:45Z",
+  "enforcement_point": "sdk",
+  "enforcement_runtime": "trust-sdk-python/0.9.2",
+  "event_type": "access",
+  "principal": {
+    "agent_id": "agent:sales-01",
+    "role": "sales_agent",
+    "session_id": "b1f6c2e8-1111-4a4a-9c9c-aaaa00000001",
+    "tenant_id": "acme",
+    "transport": "cli"
+  },
+  "purpose": "customer_data",
+  "operation": "query_business_data",
+  "scope": ["name", "company"],
+  "deny_fields": [],
+  "blocked_fields": ["email", "phone", "address"],
+  "decision": "allow",
+  "outcome": "access_reduced",
+  "reason_code": "minimum_disclosure",
+  "policy_id": "acme-sales-agent-v0",
+  "mode": "lite",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "count": 1
+}

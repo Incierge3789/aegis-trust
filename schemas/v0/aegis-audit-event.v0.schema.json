@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisagentcontrol.com/schemas/v0/aegis-audit-event.v0.schema.json",
+  "title": "Aegis Audit Event v0",
+  "description": "Canonical audit event emitted by every Aegis PEP form factor (trust SDK, MCP proxy, core gateway). Normalized wire shape shared by all enforcement points. Field names are snake_case (matches both existing wire formats).",
+  "type": "object",
+  "required": [
+    "audit_schema_version",
+    "timestamp",
+    "enforcement_point",
+    "event_type",
+    "principal",
+    "purpose",
+    "operation",
+    "decision",
+    "blocked_fields"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "audit_schema_version": {
+      "description": "Canonical audit event schema version. Independent of each product's internal record version; see DESIGN.md. Readers treat unknown higher versions as unverifiable, not as v0.",
+      "type": "integer",
+      "const": 0
+    },
+    "event_id": {
+      "description": "Unique event identifier (UUID recommended). Optional for SDK LITE; gateway uses seq within integrity block as its ordering authority.",
+      "type": "string"
+    },
+    "timestamp": {
+      "description": "ISO8601 / RFC3339 UTC timestamp of the enforcement decision.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "enforcement_point": {
+      "description": "REQUIRED (v0 requirement): which PEP form factor produced this event. This is what lets one audit stream span the LITE-to-FULL upgrade path. sdk = in-process (cooperative/hygiene), mcp_proxy = process boundary (hosts: Claude Code, codex, agy, any MCP-speaking agent), gateway = key-separated cryptographic enforcement.",
+      "type": "string",
+      "enum": ["sdk", "mcp_proxy", "gateway"]
+    },
+    "enforcement_runtime": {
+      "description": "Implementation and version that enforced, e.g. trust-sdk-python/0.9.2, trust-sdk-node/0.9.2, mcp-proxy/0.1.0, gateway/1.x.",
+      "type": "string"
+    },
+    "event_type": {
+      "description": "access = data read/filter inside the boundary; egress = data leaving toward an external destination (gateway-enforced). When event_type=egress, destination is REQUIRED.",
+      "type": "string",
+      "enum": ["access", "egress"]
+    },
+    "principal": {
+      "description": "Who acted. Identity context with authoritative and advisory layers. At least agent_id or auth_sub MUST be present. auth_sub (cryptographically bound JWT subject) is authoritative; agent_id is advisory self-identification (e.g. claude-code, codex, agy instance id).",
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["agent_id"] },
+        { "required": ["auth_sub"] }
+      ],
+      "properties": {
+        "agent_id": { "type": "string", "minLength": 1 },
+        "auth_sub": { "type": "string", "minLength": 1 },
+        "claimed_id": {
+          "description": "Advisory id claimed in tool args (gateway-enforced). MUST NOT be used for authorization; recorded for forensics.",
+          "type": "string"
+        },
+        "identity_mismatch": {
+          "description": "true iff claimed_id != auth_sub (gateway-enforced). When true, decision MUST be deny.",
+          "type": "boolean"
+        },
+        "role": { "type": "string" },
+        "session_id": { "type": "string" },
+        "tenant_id": { "type": "string" },
+        "transport": {
+          "description": "Channel the principal arrived on (transport channel): e.g. mcp, rest, cli, discord, telegram, system.",
+          "type": "string"
+        }
+      }
+    },
+    "purpose": {
+      "description": "Declared or inferred purpose for the access.",
+      "type": "string",
+      "minLength": 1
+    },
+    "operation": {
+      "description": "Tool or function name that triggered enforcement. SDK: decorated function name; proxy: MCP tool name; gateway: tool name / request path.",
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "description": "Field whitelist in force (empty when policy used deny_fields mode).",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "deny_fields": {
+      "description": "Field blacklist in force (empty when policy used scope mode).",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "allowed_fields": {
+      "description": "Field names actually released (BoundaryDecisionView.allowed_fields). Field NAMES only, never values (AO-002).",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blocked_fields": {
+      "description": "Field names actually removed/withheld by enforcement (SDK blocked_fields / gateway withheld_fields). REQUIRED, may be empty. Field NAMES only, never values.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "decision": {
+      "description": "Binary enforcement decision (gateway AuditRecord.decision).",
+      "type": "string",
+      "enum": ["allow", "deny"]
+    },
+    "outcome": {
+      "description": "Five-state outcome (gateway DecisionOutcome / SDK BoundaryDecisionView). Optional refinement of decision: allow maps to protected|access_reduced, deny maps to blocked|check_required|approval_required.",
+      "type": "string",
+      "enum": ["protected", "access_reduced", "check_required", "approval_required", "blocked"]
+    },
+    "reason_code": {
+      "description": "Machine-stable snake_case reason (gateway ReasonCode): e.g. minimum_disclosure, policy_denied, approval_required, check_required, invalid_scope, destination_denied, identity_mismatch, internal_failure. Value-free (AO-002): never embeds data values.",
+      "type": "string"
+    },
+    "destination": {
+      "description": "Egress target label (REQUIRED for egress): e.g. llm:openai, llm:anthropic, webhook:slack. REQUIRED when event_type=egress.",
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_id": {
+      "description": "Identifier of the policy document that produced this decision (links event to the policy document schema v0).",
+      "type": "string"
+    },
+    "mode": {
+      "description": "SDK operating mode at enforcement time.",
+      "type": "string",
+      "enum": ["lite", "full", "auto"]
+    },
+    "trace_id": {
+      "description": "End-to-end trace correlation id (SDK TraceContext / W3C Trace Context idiom).",
+      "type": "string"
+    },
+    "correlation_id": {
+      "description": "Request correlation id across layers (gateway-enforced). When both present, trace_id and correlation_id refer to the same trace.",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "description": "Dedup key for retried emissions (SDK HistoryRecord).",
+      "type": "string"
+    },
+    "count": {
+      "description": "Aggregation count for batched ingest (SDK IngestEntry). Default 1.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "subject_id_hash": {
+      "description": "SHA-256 hash of the GDPR data subject id, never the raw id (gateway-enforced).",
+      "type": "string"
+    },
+    "region": {
+      "description": "Cloud region of enforcement (GDPR Art.30(1)(f)).",
+      "type": "string"
+    },
+    "jurisdiction": {
+      "description": "Legal jurisdiction (gateway-enforced): EU, EEA, US, JP, UK, ...",
+      "type": "string"
+    },
+    "integrity": {
+      "description": "Tamper-evidence block. Gateway events carry the full chain (AO-003); SDK/proxy events omit it. Presence and strength of this block is the auditable difference between enforcement points; its absence on sdk events is the documented evidentiary limit of in-process logging.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "prev_hash", "curr_hash"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 0 },
+        "prev_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "curr_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "Egress events must name their destination (v0 requirement).",
+      "if": { "properties": { "event_type": { "const": "egress" } } },
+      "then": { "required": ["destination"] }
+    },
+    {
+      "description": "Identity mismatch always denies (gateway-enforced).",
+      "if": {
+        "properties": { "principal": { "properties": { "identity_mismatch": { "const": true } }, "required": ["identity_mismatch"] } }
+      },
+      "then": { "properties": { "decision": { "const": "deny" } } }
+    }
+  ]
+}

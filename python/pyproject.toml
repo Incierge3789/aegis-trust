@@ -82,6 +82,8 @@ dev = [
     "pip-audit>=2.7",
     "pydantic>=2",
     "sqlalchemy>=2",
+    # canonical contract v0: schema harness must run (not skip) in CI
+    "jsonschema>=4.21",
 ]
 
 [project.entry-points."pytest11"]

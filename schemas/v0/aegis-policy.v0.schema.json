@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisagentcontrol.com/schemas/v0/aegis-policy.v0.schema.json",
+  "title": "Aegis Policy Document v0",
+  "description": "Canonical policy contract read by every Aegis PEP form factor (trust SDK in-process, MCP proxy, core gateway). One policy document drives all enforcement strengths; customers upgrade enforcement without rewriting policy.",
+  "type": "object",
+  "required": ["policy_schema_version", "purposes"],
+  "additionalProperties": false,
+  "properties": {
+    "policy_schema_version": {
+      "description": "Canonical policy schema version. Readers MUST fail-closed (deny all) when they encounter a version greater than they support.",
+      "type": "integer",
+      "const": 0
+    },
+    "policy_id": {
+      "description": "Stable identifier for this policy document (used in audit events' evidence.policy).",
+      "type": "string",
+      "minLength": 1
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "owner": { "type": "string" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "purposes": {
+      "description": "Map of purpose name to its disclosure rule. Combines field-level disclosure rules (scope/deny_fields) with sensitivity-level gating (max_level, legal_basis, retention_days) and per-purpose field allowlists.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/purposeRule" }
+    },
+    "tools": {
+      "description": "Map of tool/function name to purpose name. Optional: callers may also declare purpose explicitly per call; explicit declaration takes precedence.",
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "roles": {
+      "description": "Optional role layer . A role constrains which purposes a principal may invoke. Enforced natively by the gateway; SDK and MCP proxy treat it as advisory unless they can resolve the principal's role.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/roleRule" }
+    },
+    "defaults": {
+      "description": "Fail-closed defaults. v0 admits no permissive default: unknown purpose, unknown destination, and unparseable policy all deny.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "unknown_purpose": { "type": "string", "const": "block" },
+        "unknown_destination": { "type": "string", "const": "block" },
+        "unknown_tool": {
+          "description": "What to do when a tool is not in `tools` and the call declares no purpose. block = deny; passthrough_unfiltered is intentionally NOT offered in v0.",
+          "type": "string",
+          "const": "block"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fieldPath": {
+      "description": "Dot-notation field path (trust SDK semantics): no leading/trailing dots, no consecutive dots. Array indices allowed (users.0.email).",
+      "type": "string",
+      "pattern": "^[^.\\s](?:[^.\\s]|\\.(?=[^.\\s]))*$"
+    },
+    "purposeRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "scope": {
+          "description": "Whitelist of field paths released for this purpose. scope: [] is valid and releases nothing (fail-closed). Mutually exclusive with deny_fields.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/fieldPath" }
+        },
+        "deny_fields": {
+          "description": "Blacklist of field paths removed for this purpose. An empty list is INVALID (trust SDK invariant: hiding nothing is a misconfiguration). Mutually exclusive with scope.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/fieldPath" }
+        },
+        "max_level": {
+          "description": "Maximum sensitivity level this purpose may touch (sensitivity gating). Optional in v0; gateway enforces, SDK/proxy enforce when a field classification is available.",
+          "type": "string",
+          "enum": ["public", "operational", "pii", "financial", "confidential", "critical"]
+        },
+        "legal_basis": {
+          "description": "GDPR Art.6 legal basis (optional GDPR metadata).",
+          "type": "string",
+          "enum": ["consent", "contract", "legal_obligation", "vital_interests", "public_task", "legitimate_interests"]
+        },
+        "retention_days": {
+          "description": "GDPR Art.30(1)(g) retention period in days (optional GDPR metadata).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "destinations": {
+          "description": "Egress boundary for this purpose (v0 requirement: the destination dimension is part of v0, not a later addition). Controls where data filtered under this purpose may be sent. Destination labels are namespaced strings, e.g. llm:openai, llm:anthropic, webhook:slack, internal:db.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow": {
+              "description": "Whitelist of destination labels. Mutually exclusive with deny. allow: [] means no egress permitted.",
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "deny": {
+              "description": "Blacklist of destination labels. Mutually exclusive with allow. An empty list is invalid.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "oneOf": [
+            { "required": ["allow"], "not": { "required": ["deny"] } },
+            { "required": ["deny"], "not": { "required": ["allow"] } }
+          ]
+        }
+      },
+      "oneOf": [
+        { "required": ["scope"], "not": { "required": ["deny_fields"] } },
+        { "required": ["deny_fields"], "not": { "required": ["scope"] } }
+      ]
+    },
+    "roleRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "allow_purposes": {
+          "description": "Whitelist of purpose names this role may invoke. Mutually exclusive with deny_purposes.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "deny_purposes": {
+          "description": "Blacklist of purpose names. Mutually exclusive with allow_purposes. Empty list invalid.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "oneOf": [
+        { "required": ["allow_purposes"], "not": { "required": ["deny_purposes"] } },
+        { "required": ["deny_purposes"], "not": { "required": ["allow_purposes"] } }
+      ]
+    }
+  }
+}

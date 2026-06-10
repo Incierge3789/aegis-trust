@@ -1,0 +1,61 @@
+{
+  "policy_schema_version": 0,
+  "policy_id": "acme-sales-agent-v0",
+  "metadata": {
+    "name": "ACME sales agent minimum-disclosure policy",
+    "description": "Example: sales-agent minimum-disclosure policy, loadable by the in-process SDK and unmodified by the MCP proxy (Claude Code / codex / agy hosts).",
+    "owner": "acme-corp",
+    "updated_at": "2026-06-10T00:00:00Z"
+  },
+  "purposes": {
+    "customer_data": {
+      "description": "Customer list lookup for sales conversations",
+      "scope": ["name", "company"],
+      "max_level": "operational",
+      "destinations": {
+        "allow": ["llm:anthropic"]
+      }
+    },
+    "customer_contact": {
+      "description": "Contact lookup when drafting outreach",
+      "scope": ["name", "email", "phone"],
+      "max_level": "pii",
+      "legal_basis": "legitimate_interests",
+      "retention_days": 365,
+      "destinations": {
+        "allow": []
+      }
+    },
+    "billing": {
+      "description": "Billing questions; hide payment identifiers",
+      "deny_fields": ["ssn", "credit_card", "bank_account"],
+      "max_level": "financial",
+      "destinations": {
+        "deny": ["llm:openai", "webhook:slack"]
+      }
+    },
+    "read_only": {
+      "description": "Fail-closed default purpose",
+      "scope": []
+    }
+  },
+  "tools": {
+    "query_business_data": "customer_data",
+    "send_message_discord": "customer_contact",
+    "web_search": "read_only"
+  },
+  "roles": {
+    "sales_agent": {
+      "description": "Autonomous sales agent principal",
+      "allow_purposes": ["customer_data", "customer_contact", "read_only"]
+    },
+    "support_agent": {
+      "deny_purposes": ["billing"]
+    }
+  },
+  "defaults": {
+    "unknown_purpose": "block",
+    "unknown_destination": "block",
+    "unknown_tool": "block"
+  }
+}

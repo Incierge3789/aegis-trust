@@ -1,0 +1,25 @@
+{
+  "audit_schema_version": 0,
+  "event_id": "9f8e7d6c-2222-4b4b-8d8d-bbbb00000002",
+  "timestamp": "2026-06-10T03:14:02Z",
+  "enforcement_point": "mcp_proxy",
+  "enforcement_runtime": "mcp-proxy/0.1.0",
+  "event_type": "egress",
+  "principal": {
+    "agent_id": "claude-code:dev-host",
+    "session_id": "c2a7d3f9-3333-4c4c-9e9e-cccc00000003",
+    "tenant_id": "acme",
+    "transport": "mcp"
+  },
+  "purpose": "billing",
+  "operation": "send_message_slack",
+  "scope": [],
+  "deny_fields": ["ssn", "credit_card", "bank_account"],
+  "blocked_fields": [],
+  "decision": "deny",
+  "outcome": "blocked",
+  "reason_code": "destination_denied",
+  "destination": "webhook:slack",
+  "policy_id": "acme-sales-agent-v0",
+  "trace_id": "00f067aa0ba902b7aabbccdd11223344"
+}
