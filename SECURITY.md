@@ -83,12 +83,24 @@ SDK — as the trust anchor.
 ## Supply chain
 
 - Deterministic dependency resolution (lockfiles per package)
-- Dependency audit (`pip-audit` / `npm audit`) on every CI build
+- Dependency audit (`pip-audit --strict` / `npm audit --audit-level=low`) on
+  every push/PR plus a weekly scheduled run, via
+  [`.github/workflows/audit.yml`](.github/workflows/audit.yml) (fail-closed: a
+  finding fails the build; invariants enforced by
+  `python/tests/adversarial/test_redteam_S002_audit_workflow.py`)
 - CI Actions are SHA-pinned
 - Release artifacts (npm tarball, Python wheel + sdist) are signed with Sigstore
   cosign (keyless OIDC, Rekor public log) and attached to the GitHub Release.
   Customer-side integrity is verifiable with `cosign verify-blob` against the
   release assets.
+
+## Security documentation
+
+- [`docs/security/SECURITY_ASSESSMENT.md`](docs/security/SECURITY_ASSESSMENT.md)
+  — latest tool-verified security assessment (commands, exit codes, findings,
+  raw logs under `docs/security/evidence/`)
+- [`docs/security/THREAT_MODEL.md`](docs/security/THREAT_MODEL.md) — trust
+  boundaries (LITE vs FULL), per-component STRIDE, threat→mitigation→test map
 
 ## Contact
 
