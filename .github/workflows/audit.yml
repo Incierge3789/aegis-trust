@@ -15,9 +15,12 @@
 #   6. Fail-closed: no `|| true`, no `continue-on-error`. A vulnerability
 #      finding fails the job (python/CHANGELOG.md S017 doctrine: pip-audit
 #      failure must not silently continue).
+#   7. Command invariants: `uv run pip-audit --strict`, `npm ci` (never
+#      `npm install`), `npm audit --audit-level=low`, and the audit-gate
+#      `if: always()` are load-bearing and individually test-pinned.
 #
 # `python/tests/adversarial/test_redteam_S002_audit_workflow.py` mechanically
-# enforces invariants 1-4 + 6 on every run. Changing this workflow WITHOUT
+# enforces invariants 1-4 + 6-7 on every run. Changing this workflow WITHOUT
 # updating that test will fail CI.
 #
 # NOTE: the `audit-gate` aggregator below is NOT part of the `ci-gate`
@@ -62,14 +65,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install package with dev extras
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+      # Same resolution path as ci.yml python-test: pinned uv + uv.lock via
+      # `uv sync --extra dev` (PEP 621 extras). Auditing a pip-resolved env
+      # while CI tests a uv.lock env would audit a different dependency set.
+      - name: Install uv (pinned)
+        run: pip install 'uv==0.5.30'
+
+      - name: uv sync (dev extras, lockfile-exact)
+        run: uv sync --extra dev
 
       - name: pip-audit (fail-closed)
-        run: |
-          python -m pip_audit --strict
+        run: uv run pip-audit --strict
 
   npm-audit:
     runs-on: ubuntu-latest

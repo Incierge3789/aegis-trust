@@ -13,6 +13,11 @@ Checked invariants (mirroring ci.yml):
   4. all `uses:` references pinned to a full 40-char commit SHA
   6. fail-closed: no `|| true`, no `continue-on-error` (a finding must
      fail the job — S017 doctrine)
+  7. command invariants (S002 cross-review round-2 P1 fix): the YAML-shape
+     checks above pass even if the audit commands themselves are gutted
+     (`--strict` dropped, `npm install` substituted for `npm ci`,
+     `--audit-level` raised to critical, `if: always()` removed so the
+     gate skips instead of failing). Pin the load-bearing strings.
 """
 
 import re
@@ -108,4 +113,51 @@ def test_audit_gate_aggregator_exists():
     needs = jobs["audit-gate"].get("needs", [])
     assert set(needs) == {"pip-audit", "npm-audit"}, (
         "audit-gate must aggregate pip-audit and npm-audit"
+    )
+
+
+# ── Invariant 7: command invariants (cross-review round-2 P1) ──────
+
+
+def _job_run_text(job_id: str) -> str:
+    """Concatenated `run:` blocks of one job."""
+    wf = _load_audit()
+    steps = wf["jobs"][job_id].get("steps", [])
+    return "\n".join(str(s.get("run", "")) for s in steps)
+
+
+def test_audit_pip_audit_strict_via_locked_env():
+    run_text = _job_run_text("pip-audit")
+    assert "uv run pip-audit --strict" in run_text, (
+        "pip-audit must run --strict inside the uv.lock-synced env "
+        "(same resolution as ci.yml python-test)"
+    )
+    assert "uv sync --extra dev" in run_text, (
+        "audit env must be uv.lock-synced (PEP 621 dev extras), not pip-resolved"
+    )
+    assert re.search(r"uv==[0-9.]+", run_text), "uv itself must be version-pinned"
+
+
+def test_audit_npm_uses_ci_not_install():
+    run_text = _job_run_text("npm-audit")
+    assert "npm ci" in run_text, "npm dependencies must install lockfile-exact (npm ci)"
+    assert not re.search(r"npm install\b", run_text), (
+        "npm install (lockfile-mutating) must not replace npm ci"
+    )
+
+
+def test_audit_npm_audit_level_low():
+    run_text = _job_run_text("npm-audit")
+    assert "npm audit --audit-level=low" in run_text, (
+        "npm audit must fail on ALL severities (--audit-level=low); "
+        "raising the level silently accepts low/moderate findings"
+    )
+
+
+def test_audit_gate_runs_even_on_upstream_failure():
+    wf = _load_audit()
+    gate = wf["jobs"]["audit-gate"]
+    assert str(gate.get("if", "")).strip() == "always()", (
+        "audit-gate must declare `if: always()` — without it an upstream "
+        "failure SKIPS the gate (skipped != failed, reads as green)"
     )

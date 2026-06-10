@@ -85,9 +85,13 @@ SDK — as the trust anchor.
 - Deterministic dependency resolution (lockfiles per package)
 - Dependency audit (`pip-audit --strict` / `npm audit --audit-level=low`) on
   every push/PR plus a weekly scheduled run, via
-  [`.github/workflows/audit.yml`](.github/workflows/audit.yml) (fail-closed: a
-  finding fails the build; invariants enforced by
-  `python/tests/adversarial/test_redteam_S002_audit_workflow.py`)
+  [`.github/workflows/audit.yml`](.github/workflows/audit.yml). Fail-closed at
+  build level: a finding fails the workflow. Merge-blocking requires the
+  operator to add `audit-gate` to branch protection (tracked as accepted risk
+  S002-AR-1 in
+  [`docs/security/SECURITY_ASSESSMENT.md`](docs/security/SECURITY_ASSESSMENT.md)).
+  Workflow and command invariants enforced by
+  `python/tests/adversarial/test_redteam_S002_audit_workflow.py`
 - CI Actions are SHA-pinned
 - Release artifacts (npm tarball, Python wheel + sdist) are signed with Sigstore
   cosign (keyless OIDC, Rekor public log) and attached to the GitHub Release.
