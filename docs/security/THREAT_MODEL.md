@@ -66,7 +66,7 @@ python-test / node-test jobs).
 |---|---|---|---|
 | Spoofing | client-asserted principal | principal = JWT subject server-side, never sent by client | `python/tests/test_client_boundary.py` |
 | Elevation of privilege | multi-scope request silently evaluated at broader purpose level (fail-open regression, "Review finding B") | `authorize`/`aauthorize` DENY >1-scope requests outright instead of widening | `python/tests/test_check_access_enforcement.py`, `python/tests/adversarial/test_redteam_S018_scope_bypass.py` |
-| Tampering | TLS verification disabled in production | `verify_ssl` production lock | `python/tests/test_verify_ssl_prod_lock.py` |
+| Tampering | TLS verification disabled in production | `_resolve_verify_ssl()` prod-lock (`python/src/aegis_trust/shield.py:142`; `client.py` only passes the resolved flag; node parity `resolveVerifySsl()` in `node/src/client.ts`) | `python/tests/test_verify_ssl_prod_lock.py` |
 | Information disclosure | malformed gateway responses leaking through error paths | error envelope parity + malformed-ingest handling | `python/tests/test_error_envelope_parity_S018.py`, `python/tests/test_malformed_ingest_response.py` |
 | Spoofing | stale/rotated credentials | token exchange + rotation lifecycle | `python/tests/test_token_rotation.py` |
 | Repudiation | unverifiable REST boundary behavior | REST boundary adversarial suite | `python/tests/adversarial/test_redteam_S018_rest_boundary.py` |
@@ -97,7 +97,7 @@ python-test / node-test jobs).
 |---|---|---|---|
 | Elevation of privilege | fork-PR token theft (`pull_request_target`), OIDC abuse, secret exfiltration from CI | read-only CI: no `pull_request_target`, no `id-token: write`, no secrets, SHA-pinned actions | `python/tests/adversarial/test_redteam_S018_ci_attack.py` (ci.yml), `python/tests/adversarial/test_redteam_S002_audit_workflow.py` (audit.yml) |
 | Tampering | malicious/vulnerable dependency enters either package | lockfiles + fail-closed `pip-audit --strict` / `npm audit --audit-level=low` on push/PR + weekly (`.github/workflows/audit.yml`) | `SECURITY_ASSESSMENT.md` §1–2 (evidence-linked) |
-| Tampering | dependency confusion / typosquat in install scripts | `npm ci` (lockfile-exact) in CI; deterministic resolution | `python/tests/adversarial/test_redteam_S018_supply_chain.py` |
+| Tampering | dependency confusion / typosquat in install scripts | `npm ci` (lockfile-exact) and `uv sync` (uv.lock-exact) in CI; lockfile/pyproject integrity covered by the S018 supply-chain suite (`uv.lock` + `pyproject.toml` scope), audit-command integrity by the S002 suite | `python/tests/adversarial/test_redteam_S018_supply_chain.py`, `python/tests/adversarial/test_redteam_S002_audit_workflow.py` |
 | Information disclosure | committed secrets in history | gitleaks over full history in CI + S002 full-history scan (131 commits, 0 leaks) | ci.yml `gitleaks` job; `evidence/s002-gitleaks.log` |
 
 ## 3. Assurance claims vs non-claims (README alignment)
