@@ -1,0 +1,5 @@
+Found 2 known vulnerabilities in 2 packages
+Name Version ID             Fix Versions
+---- ------- -------------- ------------
+idna 3.11    CVE-2026-45409 3.15
+pip  26.1.1  PYSEC-2026-196 26.1.2
