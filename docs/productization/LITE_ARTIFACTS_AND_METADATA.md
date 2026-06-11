@@ -40,7 +40,7 @@ the live registry versions, normalized PEP 440-style. Exit 0 = full parity.
 | In-process shield (LITE core) | `node/src/shield.ts`, `node/src/filter.ts` | `python/src/aegis_trust/shield.py` |
 | Types (canonical: Python) | `node/src/types.ts` | `python/src/aegis_trust/types.py` |
 | Client (FULL path + metering hook) | `node/src/client.ts` | `python/src/aegis_trust/client.py` |
-| Boundary receipt surface | `node/src/client.ts` (`checkBoundary` → `BoundaryDecisionView`) | — (Node-first; parity tracked) |
+| Boundary receipt surface | `node/src/client.ts` (`checkBoundary` → `BoundaryDecisionView`) | `python/src/aegis_trust/client.py` (`check_boundary` / `acheck_boundary` → `BoundaryDecisionView`) |
 | Machine-parseable errors | `node/src/errors.ts` | `python/src/aegis_trust/errors.py` |
 | Agent-readable summary | `node/llms.txt` | `python/llms.txt` |
 | Versioning doctrine | `node/docs/VERSIONING.md` | (shared doctrine, documented on the Node side) |

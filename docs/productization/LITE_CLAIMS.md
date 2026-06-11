@@ -69,8 +69,9 @@ parity.
 
 **Roadmap:** any surface that exists in one SDK but not the other is treated
 as a parity gap and tracked; it is not silently claimed as present on both.
-Known named gaps at the time of writing: `wrap()`/`ShieldResult` full-result
-helper (Node-only; see §1) and `checkBoundary()` (Node-first; see §3).
+Known named gap at the time of writing: the `wrap()`/`ShieldResult`
+full-result helper (Node-only; see §1). The boundary-receipt passthrough
+exists on **both** sides (see §3).
 
 **Never-claim:** "the SDKs are identical byte-for-byte." Parity means the
 public contract and deny semantics track each other, with Python canonical.
@@ -79,8 +80,9 @@ public contract and deny semantics track each other, with Python canonical.
 
 ## 3. Boundary receipt (typed decision view surface)
 
-**What it is.** The Node SDK exposes a typed, 1:1 passthrough surface for the
-gateway's boundary decision: `checkBoundary(args)` returns the wire
+**What it is.** Both SDKs expose a typed, 1:1 passthrough surface for the
+gateway's boundary decision: Node `checkBoundary(args)` and Python
+`check_boundary()` / `acheck_boundary()` return the wire
 `BoundaryDecisionView` (`outcome`, `allowed_fields`, `withheld_fields`,
 `reason_code`/`reason_label`, `evidence`).
 
@@ -88,9 +90,10 @@ gateway's boundary decision: `checkBoundary(args)` returns the wire
 
 | Claim | Evidence |
 |---|---|
-| `checkBoundary()` is a typed passthrough of `POST /check-boundary`; the SDK adds no client-side decision logic | `node/src/client.ts:137-383` (`BoundaryDecisionView`, `CheckBoundaryArgs`, `checkBoundary`) |
+| Node: `checkBoundary()` is a typed passthrough of `POST /check-boundary`; the SDK adds no client-side decision logic | `node/src/client.ts:137-383` (`BoundaryDecisionView`, `CheckBoundaryArgs`, `checkBoundary`) |
+| Python: `check_boundary()` / async `acheck_boundary()` with the same wire shape, parsed fail-closed (malformed views are rejected, not coerced) | `python/src/aegis_trust/client.py:102` (`BoundaryDecisionView`), `:296` (`_parse_boundary_view`), `:355` (`check_boundary`); `python/tests/test_client_boundary.py` |
 | Field **names** are surfaced, never field **values** | type comment at `node/src/client.ts:137-140`; projection tests in `node/tests/` |
-| The decision view carries evidence pointers (`decision_id`, `integrity_checkable_at`, `recorded_at`) **when produced by the gateway** | `CoreDecisionEvidence` in `node/src/client.ts` |
+| The decision view carries evidence pointers (`decision_id`, `integrity_checkable_at`, `recorded_at`) **when produced by the gateway** | `CoreDecisionEvidence` in `node/src/client.ts`; the Python evidence dataclass in `python/src/aegis_trust/client.py:92` |
 
 **The LITE boundary, stated plainly (never-claim for LITE):**
 
