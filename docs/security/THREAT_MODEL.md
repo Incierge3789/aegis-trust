@@ -1,6 +1,6 @@
 # Threat Model — aegis-trust
 
-- **Last updated:** 2026-06-10 (sprint S002)
+- **Last updated:** 2026-06-11 (sprint S1005 re-validation; first authored S002)
 - **Companion:** [`SECURITY_ASSESSMENT.md`](SECURITY_ASSESSMENT.md) (tool-verified
   state), root [`SECURITY.md`](../../SECURITY.md) (policy and disclosure)
 
@@ -28,7 +28,10 @@ explicit here.
   process. Code in the same interpreter can read memory, monkey-patch the
   decorator, or call the unwrapped function. This is by design and documented
   (SECURITY.md "Out of scope": issues requiring local code execution).
-  The defense against a hostile host is FULL mode.
+  The defense against a hostile host is FULL mode. These non-claims are
+  mechanically held truthful by `python/tests/adversarial/test_redteam_S1005_lite_boundary.py`
+  (S1005): the `__wrapped__` escape hatch and decorator monkey-patch are
+  asserted to remain reachable, alongside the positive LITE protections below.
 
 ### FULL (enterprise gateway)
 
@@ -55,8 +58,8 @@ python-test / node-test jobs).
 
 | STRIDE | Threat | Mitigation | Test |
 |---|---|---|---|
-| Information disclosure | Filter returns more fields than `scope` allows (CRITICAL baseline) | minimum-disclosure filtering; deny-unknown | `python/tests/test_shield_full.py`, `python/tests/test_clear_sensitive.py` |
-| Information disclosure | Record→dict conversion raises and the exception carries user data (HIGH baseline) | `_ConversionFailed` sentinel: fail closed without re-attributing, raw cause withheld by default (S018 D1) | `python/tests/adversarial/test_redteam_S018_exception_leak.py` |
+| Information disclosure | Filter returns more fields than `scope` allows (CRITICAL baseline) | minimum-disclosure filtering; deny-unknown | `python/tests/test_shield_full.py`, `python/tests/test_clear_sensitive.py`, `python/tests/adversarial/test_redteam_S1005_lite_boundary.py` (claim 1) |
+| Information disclosure | Record→dict conversion raises and the exception carries user data (HIGH baseline) | `_ConversionFailed` sentinel: fail closed without re-attributing, raw cause withheld by default (S018 D1) | `python/tests/adversarial/test_redteam_S018_exception_leak.py`, `python/tests/adversarial/test_redteam_S1005_lite_boundary.py` (claims 2–3) |
 | Tampering | ORM/pydantic objects that lie about their shape | real-framework conversion paths exercised (pydantic v2 `model_dump`, v1 `.dict`, SQLAlchemy `__table__` walk) | `python/tests/test_orm_pydantic.py` |
 | Elevation of privilege | deny-rule bypass via crafted field names / nesting | adversarial deny-bypass suite | `python/tests/adversarial/test_redteam_S018_deny_bypass.py` |
 
@@ -113,6 +116,12 @@ ship-readiness "never_claim" discipline).
 
 ## 4. Review cadence
 
-Re-validate this model in every security-family sprint (next: S003), or
-immediately when: a new enforcement point is added, the gateway contract
-changes (`schemas/v0`), or a HIGH/CRITICAL disclosure-baseline finding lands.
+Re-validate this model in every security-family sprint, or immediately when: a
+new enforcement point is added, the gateway contract changes (`schemas/v0`), or
+a HIGH/CRITICAL disclosure-baseline finding lands.
+
+- **S1005 (2026-06-11):** re-validated. §2 mitigation→test rows confirmed
+  present and live; no new enforcement point and no `schemas/v0` change, so the
+  STRIDE structure is unchanged. LITE §1 boundary statements exercised
+  adversarially (see `test_redteam_S1005_lite_boundary.py`). Next: the
+  subsequent security-family sprint.
