@@ -101,9 +101,7 @@ def test_audit_actions_pinned_to_sha():
 def test_audit_fail_closed():
     text = _read_audit_non_comment()
     assert "|| true" not in text, "audit jobs must not swallow failures (|| true)"
-    assert "continue-on-error" not in text, (
-        "audit jobs must not set continue-on-error"
-    )
+    assert "continue-on-error" not in text, "audit jobs must not set continue-on-error"
 
 
 def test_audit_gate_aggregator_exists():
