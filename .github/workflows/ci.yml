@@ -161,6 +161,17 @@ jobs:
         working-directory: node
         run: npm test
 
+      - name: MCP e2e runners (agent → shield → audit chain proof)
+        # Executes both fail-closed e2e runners against the dist/ built above:
+        #   tests/mcp/run_end_to_end.mjs        — 4-tool trace_id propagation
+        #   tests/mcp/run_dev_agent_workflow.mjs — dev-agent policy: exact
+        #     blockedFields per purpose + sentinel-value absence in audit JSONL
+        # Each exits non-zero on any assertion miss, so this step fails the
+        # node-test job (and ci-gate via needs:) — no extra reporting layer.
+        # Audit JSONL is written to an OS tmpdir; nothing is uploaded.
+        working-directory: node
+        run: npm run e2e:mcp
+
   gitleaks:
     runs-on: ubuntu-latest
     defaults:
