@@ -92,12 +92,21 @@ set_metrics_hook(lambda endpoint, duration, status: my_metrics.observe(endpoint,
 The SDK never auto-registers a metrics backend; the hook is the integration
 point (`python/tests/test_metrics_hook.py` pins this).
 
+**LITE note:** the hook instruments **gateway calls** (`check-access`,
+`shield.ingest` — FULL/AUTO mode). Purely LITE-local filtering as in §1–§2
+makes no gateway call, so the hook does not fire; it starts reporting once
+your calls actually reach the gateway in FULL mode. (Caveat: not every LITE
+call site meters as-is after upgrade — e.g. a multi-element `scope` fails
+closed in the Node FULL authorization path before any metered request is
+issued; see §4 for where the FULL boundary lives.)
+
 ## 4. Know the boundary (where LITE stops)
 
 | You want | Mode | What changes |
 |---|---|---|
 | In-process field filtering, zero infra | LITE (you are here) | — |
-| Decisions made outside the agent process, with receipts (`BoundaryDecisionView`: outcome, allowed/withheld fields, reason, `decision_id`) | FULL | Self-host the gateway, then `checkBoundary()` / `shield()` with FULL/AUTO mode — the call sites stay the same |
+| Gateway-authorized filtering + audit ingest (`shield()` keeps returning filtered data — not a receipt object) | FULL (`shield()` path) | Self-host the gateway; `shield()` call sites stay the same |
+| Explicit decision receipts (`BoundaryDecisionView`: outcome, allowed/withheld fields, reason, `decision_id`) | FULL (`checkBoundary()` / `check_boundary()` path) | Call `checkBoundary()` where you need the receipt — a separate call, not a `shield()` return value |
 
 AUTO mode selects between the two by configured intent and **fails closed**:
 if FULL intent is configured but the gateway is unreachable, calls deny
@@ -106,8 +115,11 @@ rather than silently degrading to LITE.
 ## 5. Verify what you installed
 
 ```bash
-cd node && npm run parity        # versions: local sources + git tag + registries
-cd node && npm test              # behavior: vitest suite incl. shield/filter parity cases
+cd node
+npm ci             # install exactly the locked dependency set
+npm run parity     # versions: local sources + git tag + registries
+npm run build      # required: one test exercises the built bin-shim (dist/cli.js)
+npm test           # behavior: vitest suite incl. shield/filter parity cases
 ```
 
 ---
