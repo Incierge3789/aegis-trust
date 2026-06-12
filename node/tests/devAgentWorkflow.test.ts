@@ -5,6 +5,8 @@
 //   row 2  withhold: credential-bearing fields    → scope omission + dot-notation paths
 //   row 3  allow/withhold: log fields             → denyFields incl. dot-notation deny
 //   row 4  unstructured content                   → NON-CLAIM (documented, not tested)
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -93,6 +95,20 @@ describe("dev-agent workflow — Tool 2: denyFields (dot-notation deny)", () => 
     expect(s).not.toContain("tanaka@example.com");
     expect(s).not.toContain("Bearer-EXAMPLE-authtoken");
     expect(s).not.toContain("203.0.113.10");
+  });
+});
+
+describe("dev-agent workflow — policy drift pin (example ↔ e2e runner)", () => {
+  it("the MCP e2e runner mirrors the example's policy literals verbatim", () => {
+    // tests/mcp/run_dev_agent_workflow.mjs redeclares the policy (it imports
+    // dist, not the example). If the example policy changes and the runner is
+    // left stale, this fails loudly instead of the runner silently passing
+    // with an outdated policy.
+    const src = readFileSync(new URL("./mcp/run_dev_agent_workflow.mjs", import.meta.url), "utf8");
+    expect(src).toContain('scope: ["service", "version", "endpoints", "spec_url", "db.engine", "db.host"]');
+    expect(src).toContain('denyFields: ["raw_lines", "client_ips", "context.auth_token"]');
+    expect(src).toContain('"api_key", "db.connection_string", "deploy_token"');
+    expect(src).toContain('"client_ips", "context.auth_token", "raw_lines"');
   });
 });
 

@@ -479,6 +479,8 @@ await withTraceContext({ traceId }, async () => {
 ```
 
 Runnable end-to-end example: [`tests/mcp/run_end_to_end.mjs`](tests/mcp/run_end_to_end.mjs).
+Dev-agent workflow variant (First Protected Workflow reference policy, exact
+`blockedFields` audit assertions): [`tests/mcp/run_dev_agent_workflow.mjs`](tests/mcp/run_dev_agent_workflow.mjs).
 
 ## Idempotent local audit (v0.9.0-rc1+)
 
