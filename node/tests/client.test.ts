@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AegisClient,
   isDevHost,
+  normalizeBaseUrl,
   resetModuleClient,
   resolveVerifySsl,
   setMetricsHook,
@@ -19,6 +20,52 @@ afterEach(() => {
 function mockFetch(impl: typeof fetch): void {
   globalThis.fetch = impl as unknown as typeof fetch;
 }
+
+describe("allow-cache window (S015 P-27)", () => {
+  it("caches an allow — a 2nd identical authorize skips the network", async () => {
+    let n = 0;
+    mockFetch(async () => {
+      n++;
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1", token: "t" });
+    expect(await c.authorize("p", ["name"])).toBe(true);
+    expect(await c.authorize("p", ["name"])).toBe(true);
+    // The 2nd call was served from cache (this is the documented 30s window;
+    // AEGIS_ACCESS_CACHE_TTL_MS=0 disables it — exercised in the live e2e).
+    expect(n).toBe(1);
+  });
+  it("never caches a deny — each denied authorize re-hits the gateway", async () => {
+    let n = 0;
+    mockFetch(async () => {
+      n++;
+      return new Response(JSON.stringify({ allowed: false }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1", token: "t" });
+    expect(await c.authorize("p", ["name"])).toBe(false);
+    expect(await c.authorize("p", ["name"])).toBe(false);
+    expect(n).toBe(2);
+  });
+});
+
+describe("normalizeBaseUrl (S015 install friction P-37)", () => {
+  it("completes a pathless URL to /api/v1", () => {
+    expect(normalizeBaseUrl("http://localhost:8443")).toBe("http://localhost:8443/api/v1");
+  });
+  it("completes a trailing-slash URL", () => {
+    expect(normalizeBaseUrl("https://gw.example:8443/")).toBe("https://gw.example:8443/api/v1");
+  });
+  it("leaves an explicit /api/v1 path unchanged", () => {
+    expect(normalizeBaseUrl("http://localhost:8443/api/v1")).toBe("http://localhost:8443/api/v1");
+  });
+  it("respects a non-root custom path", () => {
+    expect(normalizeBaseUrl("http://localhost:8443/custom")).toBe("http://localhost:8443/custom");
+  });
+  it("the client constructor applies it (pathless → completed)", () => {
+    const c = new AegisClient({ baseUrl: "http://localhost:8443" });
+    expect(c.baseUrl).toBe("http://localhost:8443/api/v1");
+  });
+});
 
 describe("isDevHost", () => {
   it("recognises localhost variants", () => {
@@ -353,6 +400,24 @@ describe("checkAccess scope contract (CSR-03 fix)", () => {
     expect(detailed.allowed).toBe(false);
     expect(detailed.reason).toBe("multi_scope_unsupported");
     expect(calls).toBe(0);
+  });
+
+  it("always sends required `tool_name` (gateway 422 → fail-closed otherwise; S015 live bug)", async () => {
+    // The gateway's CheckAccessRequest requires a non-Option `tool_name`. If the
+    // SDK omits it the body is 422 → every FULL authorize fail-closes, so
+    // shield() FULL can never grant against a live gateway. Pin that the field
+    // is always present (default placeholder), and that an explicit toolName is
+    // forwarded as the audit label.
+    const captured: { body: string }[] = [];
+    mockFetch(async (_input, init) => {
+      captured.push({ body: String(init?.body) });
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await c.checkAccess("p", ["name"]);
+    expect(JSON.parse(captured[0]!.body).tool_name).toBe("shielded_call");
+    await c.authorizeDetailed("p", ["name"], "fetchProfile");
+    expect(JSON.parse(captured[1]!.body).tool_name).toBe("fetchProfile");
   });
 
   it("checkAccessBody still omits scope for >1 (defensive; gate denies first)", async () => {

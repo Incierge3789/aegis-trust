@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import logging
+import os
 import time
 import warnings
 from typing import Any, Callable, Literal
@@ -32,9 +33,66 @@ from aegis_trust.types import (
 logger = logging.getLogger("aegis")
 
 _DEFAULT_BASE_URL = "https://localhost:8443/api/v1"
+
+_base_url_path_completed_warned = False
+
+
+def normalize_base_url(url: str) -> str:
+    """Complete a pathless base URL to ``…/api/v1``.
+
+    S015 install-friction fix (P-37, hit live this sprint): the gateway serves
+    every endpoint under ``/api/v1``. A base URL of just host:port (no path)
+    makes every call 404 with no hint it is a path problem. If the caller passes
+    a pathless URL, complete it and warn once so the assumption is visible. An
+    explicit non-root path is respected unchanged. Parity with node
+    ``normalizeBaseUrl``.
+    """
+    global _base_url_path_completed_warned
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    if parts.scheme and parts.netloc and parts.path in ("", "/"):
+        completed = urlunsplit((parts.scheme, parts.netloc, "/api/v1", "", ""))
+        if not _base_url_path_completed_warned:
+            _base_url_path_completed_warned = True
+            logging.getLogger("aegis").warning(
+                "base URL %r has no path; the gateway serves under '/api/v1', so "
+                "using %r. Set the full URL to silence this.",
+                url,
+                completed,
+            )
+        return completed
+    return url
+
+
 _HEALTH_TIMEOUT = 2.0
 _API_TIMEOUT = 10.0
-_ACCESS_CACHE_TTL_S = 30.0  # TTL for allow decisions.
+
+
+def _resolve_access_cache_ttl() -> float:
+    """TTL (seconds) for cached allow decisions.
+
+    The cache spares repeated identical calls a gateway round-trip, but the
+    window is also a fail-open exposure: a gateway that goes down or a policy
+    that revokes access is not seen until the entry expires (S015 P-27,
+    confirmed live). Set ``AEGIS_ACCESS_CACHE_TTL_S=0`` to disable the cache so
+    every call re-consults the gateway (zero stale window, higher latency).
+    Deny is never cached regardless. Default 30s.
+    """
+    raw = os.environ.get("AEGIS_ACCESS_CACHE_TTL_S")
+    if raw is None or raw.strip() == "":
+        return 30.0
+    try:
+        n = float(raw)
+    except ValueError:
+        return 30.0
+    return n if n >= 0 else 30.0
+
+
+_ACCESS_CACHE_TTL_S = _resolve_access_cache_ttl()
 
 # Pluggable metrics callback. The SDK does not import any specific metrics
 # library so users (or this process's other code) own the registry —
@@ -141,7 +199,7 @@ class AegisClient:
         token: str = "",
         verify_ssl: bool = True,
     ) -> None:
-        self._base_url = base_url or _DEFAULT_BASE_URL
+        self._base_url = normalize_base_url(base_url or _DEFAULT_BASE_URL)
         self._token = token
         self._verify_ssl = verify_ssl
         self._httpx: httpx.Client | None = None
@@ -206,7 +264,9 @@ class AegisClient:
             return False
 
     @staticmethod
-    def _check_access_body(purpose: str, scope: list[str]) -> dict[str, Any]:
+    def _check_access_body(
+        purpose: str, scope: list[str], tool_name: str = "shielded_call"
+    ) -> dict[str, Any]:
         """Build the ``/check-access`` request body.
 
         Contract fix (CSR-03): the gateway's ``CheckAccessRequest.scope`` field
@@ -236,8 +296,19 @@ class AegisClient:
 
         NOTE: ``/check-boundary`` correctly uses ``scope: list[str]`` and does
         NOT route through here.
+
+        ``tool_name`` is a REQUIRED (non-Option) field on the gateway's
+        ``CheckAccessRequest`` (aegis_gateway ``rest.rs``). Omitting it makes the
+        gateway reject the body with 422 -> fail-closed deny on EVERY FULL
+        authorize, so a FULL gate can never grant against a live gateway. It is
+        an audit LABEL only (it does not affect the allow/deny decision — that is
+        JWT subject + purpose + scope). (Found by the S015 live SDK<->gateway
+        e2e; same class as the Doctor-v1 ``agent_id`` always-BLOCK bug.)
         """
-        body: dict[str, Any] = {"purpose": purpose}
+        body: dict[str, Any] = {
+            "purpose": purpose,
+            "tool_name": tool_name or "shielded_call",
+        }
         if len(scope) == 1:
             body["scope"] = scope[0]
         return body

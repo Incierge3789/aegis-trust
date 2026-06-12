@@ -40,6 +40,22 @@ def test_check_access_single_scope_sent_as_string():
     assert captured["body"]["scope"] == "name"
 
 
+def test_check_access_always_sends_required_tool_name():
+    # The gateway's CheckAccessRequest requires a non-Option `tool_name`. Omit
+    # it and the body is 422 → every FULL authorize fail-closes, so a FULL gate
+    # can never grant against a live gateway (S015 live bug). Pin that the field
+    # is always present with the default placeholder.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"allowed": True})
+
+    c = _client_with_transport(handler)
+    c.check_access("p", ["name"])
+    assert captured["body"]["tool_name"] == "shielded_call"
+
+
 def test_check_access_empty_scope_omits_field():
     captured = {}
 
@@ -207,3 +223,32 @@ def test_check_boundary_raises_on_missing_allowed_fields():
     c = _client_with_transport(handler)
     with pytest.raises(ValueError):
         c.check_boundary("p", ["name"])
+
+
+def test_normalize_base_url_completes_pathless():
+    # S015 install friction (P-37): a pathless base URL must be completed to
+    # /api/v1 (the gateway serves everything there); explicit paths are kept.
+    import aegis_trust.client as cmod
+
+    cmod._base_url_path_completed_warned = False
+    assert (
+        cmod.normalize_base_url("http://localhost:8443")
+        == "http://localhost:8443/api/v1"
+    )
+    assert cmod.normalize_base_url("https://gw:8443/") == "https://gw:8443/api/v1"
+    assert (
+        cmod.normalize_base_url("http://localhost:8443/api/v1")
+        == "http://localhost:8443/api/v1"
+    )
+    assert (
+        cmod.normalize_base_url("http://localhost:8443/custom")
+        == "http://localhost:8443/custom"
+    )
+
+
+def test_client_constructor_normalizes_base_url():
+    import aegis_trust.client as cmod
+
+    cmod._base_url_path_completed_warned = False
+    c = cmod.AegisClient(base_url="http://localhost:8443")
+    assert c._base_url == "http://localhost:8443/api/v1"

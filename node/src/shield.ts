@@ -392,7 +392,7 @@ async function gateAndRunFull(
   // before it ever does.
   let authz: { allowed: boolean; reason: string };
   try {
-    authz = await client.authorizeDetailed(purpose, scope);
+    authz = await client.authorizeDetailed(purpose, scope, fnName);
   } catch {
     // Defensive: authorizeDetailed is itself fail-closed and should not
     // throw — but an unexpected throw must never grant access.

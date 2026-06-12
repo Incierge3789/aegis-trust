@@ -35,6 +35,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "e2e:mcp": "node tests/mcp/run_end_to_end.mjs && node tests/mcp/run_dev_agent_workflow.mjs",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build",
     "parity": "node ../scripts/version-parity.mjs"

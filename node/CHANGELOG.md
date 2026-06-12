@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added — dev-agent workflow e2e proof
+- `tests/mcp/run_dev_agent_workflow.mjs` — dev-agent → shield → audit end-to-end
+  for the First Protected Workflow reference policy: per-purpose exact
+  `blockedFields` assertions, trace propagation, and a no-value-leak regression
+  pin over the audit JSONL (names only, zero values).
+- `tests/devAgentWorkflow.test.ts` gains a policy drift pin between the example
+  and the runner.
+
 ### Fixed — docker quickstart example
 - Bumped the demo dependency pin from `aegis-trust@0.9.0-rc5` to `0.9.2` (npm latest)
   and the demo's own version to `0.9.2`.

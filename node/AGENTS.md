@@ -194,6 +194,7 @@ await withTraceContext({ traceId }, async () => {
 ```
 
 End-to-end runnable proof: [`tests/mcp/run_end_to_end.mjs`](tests/mcp/run_end_to_end.mjs).
+Dev-agent workflow variant: [`tests/mcp/run_dev_agent_workflow.mjs`](tests/mcp/run_dev_agent_workflow.mjs).
 
 ## Idempotency-Key (v0.9.0-rc1+)
 

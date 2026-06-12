@@ -64,7 +64,19 @@ function auditError(detail: string): AegisAuditError {
 const DEFAULT_BASE_URL = "https://localhost:8443/api/v1";
 const HEALTH_TIMEOUT_MS = 2_000;
 const API_TIMEOUT_MS = 10_000;
-const ACCESS_CACHE_TTL_MS = 30_000;
+// Allow-decision cache TTL. An allow is cached so repeated identical calls do
+// not re-hit the gateway. The window is also a fail-open exposure: a gateway
+// that goes down or a policy that revokes access is not seen until the entry
+// expires (S015 P-27, confirmed live). Operators who need policy changes to
+// take effect immediately can set AEGIS_ACCESS_CACHE_TTL_MS=0 to disable the
+// cache (every call re-consults the gateway), trading latency for zero stale
+// window. Deny is never cached regardless. Default 30s.
+const ACCESS_CACHE_TTL_MS = ((): number => {
+  const raw = process.env.AEGIS_ACCESS_CACHE_TTL_MS;
+  if (raw === undefined || raw.trim() === "") return 30_000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 30_000;
+})();
 
 export interface AegisClientOptions {
   readonly baseUrl?: string;
@@ -115,6 +127,33 @@ export function isDevHost(urlOrHost: string): boolean {
     const host = urlOrHost.toLowerCase();
     return DEV_HOSTS.has(host) || host.endsWith(".local");
   }
+}
+
+// S015 install-friction fix (P-37, hit live this sprint): the gateway serves
+// every endpoint under `/api/v1`. A base URL of just host:port (no path) makes
+// every call 404 with no hint it is a path problem. If the caller passes a
+// pathless URL, complete it to `…/api/v1` and warn once so the assumption is
+// visible. An explicit non-root path is respected unchanged.
+let _baseUrlPathCompletedWarned = false;
+export function normalizeBaseUrl(url: string): string {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return url; // not parseable here — leave it for the request layer to error
+  }
+  if (u.pathname === "/" || u.pathname === "") {
+    const completed = `${u.origin}/api/v1`;
+    if (!_baseUrlPathCompletedWarned) {
+      _baseUrlPathCompletedWarned = true;
+      console.warn(
+        `aegis-trust: base URL '${url}' has no path; the gateway serves under `
+          + `'/api/v1', so using '${completed}'. Set the full URL to silence this.`,
+      );
+    }
+    return completed;
+  }
+  return url;
 }
 
 export function resolveVerifySsl(
@@ -203,7 +242,7 @@ export class AegisClient {
   private _maxAuditSeq: number = 0;
 
   constructor(options: AegisClientOptions = {}) {
-    this._baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
+    this._baseUrl = normalizeBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL);
     this._token = options.token ?? "";
     this._verifySsl = resolveVerifySsl(this._baseUrl, options.verifySsl ?? true);
   }
@@ -342,8 +381,20 @@ export class AegisClient {
   private static checkAccessBody(
     purpose: string,
     scope: ReadonlyArray<string>,
+    toolName: string,
   ): Record<string, unknown> {
-    const body: Record<string, unknown> = { purpose };
+    // `tool_name` is a REQUIRED (non-Option) field on the gateway's
+    // CheckAccessRequest (aegis_gateway rest.rs). Omitting it makes the gateway
+    // reject the body with 422 → fail-closed deny on EVERY FULL authorize, so
+    // shield() FULL can never grant against a live gateway. It is an audit
+    // LABEL only (it does not affect the allow/deny decision — that is JWT
+    // subject + purpose + scope), so sending the wrapped function's name is the
+    // honest value. (Found by the S015 live SDK↔gateway e2e; same class as the
+    // Doctor-v1 agent_id always-BLOCK bug.)
+    const body: Record<string, unknown> = {
+      purpose,
+      tool_name: toolName && toolName.length > 0 ? toolName : "shielded_call",
+    };
     if (scope.length === 1) {
       body.scope = scope[0];
     }
@@ -353,9 +404,10 @@ export class AegisClient {
   async checkAccess(
     purpose: string,
     scope: ReadonlyArray<string>,
+    toolName: string = "shielded_call",
   ): Promise<{ allowed: boolean } & Record<string, unknown>> {
     const resp = await this.req("POST", "/check-access", {
-      body: AegisClient.checkAccessBody(purpose, scope),
+      body: AegisClient.checkAccessBody(purpose, scope, toolName),
     });
     if (!resp.ok) throw httpError("check-access", resp.status);
     return (await resp.json()) as { allowed: boolean };
@@ -390,6 +442,7 @@ export class AegisClient {
   async authorizeDetailed(
     purpose: string,
     scope: ReadonlyArray<string>,
+    toolName: string = "shielded_call",
   ): Promise<AuthzResult> {
     // Review finding B: the gateway's /check-access scope is a single
     // Option<String>. A >1-scope request cannot be expressed faithfully, and
@@ -408,7 +461,7 @@ export class AegisClient {
     let resp: Response;
     try {
       resp = await this.req("POST", "/check-access", {
-        body: AegisClient.checkAccessBody(purpose, scope),
+        body: AegisClient.checkAccessBody(purpose, scope, toolName),
       });
     } catch {
       emitMetric("check-access", t0, 0);
@@ -679,6 +732,7 @@ let _moduleClient: AegisClient | null = null;
 let _detectedMode: "lite" | "full" | null = null;
 let _detectedModeTs = 0;
 let _baseUrlAliasWarned = false;
+let _liteDespiteUrlWarned = false;
 
 // Mode detection cache TTL — parity with PyPI shield.py `_DETECT_MODE_TTL_S = 60.0`.
 // AEGIS_MODE=auto re-probes the backend every `_DETECT_MODE_TTL_MS` ms so
@@ -770,6 +824,22 @@ export async function detectMode(): Promise<"lite" | "full"> {
   // "auto + no Full intent → Lite" and is corrected here. Mirrors PyPI
   // shield.py _detect_mode intent-first variant.
   if (!userIntendsFull()) {
+    // S015 P-38 (confirmed live): an explicit AEGIS_URL pointing at a dev host
+    // (e.g. a localhost sidecar gateway) with no AEGIS_TOKEN resolves to LITE
+    // and the gateway is NEVER consulted — shield() filters locally only. That
+    // is the documented intent-first matrix, but it is silent, so an operator
+    // who stood up a gateway cannot tell it is being bypassed. Make it loud
+    // (fail-loud): warn once. Behaviour is unchanged.
+    const explicitUrl = (process.env.AEGIS_URL || process.env.AEGIS_BASE_URL || "").trim();
+    if (explicitUrl && !_liteDespiteUrlWarned) {
+      _liteDespiteUrlWarned = true;
+      console.warn(
+        "aegis-trust: AEGIS_URL is set but mode resolved to LITE — no Full intent "
+          + "(dev-host URL and no AEGIS_TOKEN). The gateway at this URL will NOT be "
+          + "consulted; shield() filters locally only. Set AEGIS_TOKEN (or "
+          + "AEGIS_MODE=full) to use the gateway.",
+      );
+    }
     _detectedMode = "lite";
     _detectedModeTs = nowMs;
     return _detectedMode;
@@ -799,4 +869,6 @@ export function resetModuleClient(): void {
   _detectedMode = null;
   _detectedModeTs = 0;
   _baseUrlAliasWarned = false;
+  _liteDespiteUrlWarned = false;
+  _baseUrlPathCompletedWarned = false;
 }

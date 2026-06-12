@@ -159,6 +159,30 @@ describe("Mode.AUTO — detect mode", () => {
     expect(m.calls.find((c) => c.url.includes("/shield/ingest"))).toBeUndefined();
   });
 
+  it("warns (fail-loud) when AEGIS_URL is set but resolves to LITE — no token, dev host (S015 P-38)", async () => {
+    // A localhost sidecar gateway with no AEGIS_TOKEN silently resolves to LITE
+    // and the gateway is never consulted. Behaviour is unchanged (still LITE),
+    // but it must now be loud so an operator notices the gateway is bypassed.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.AEGIS_MODE = "auto";
+    process.env.AEGIS_URL = "http://localhost:8443/api/v1";
+    delete process.env.AEGIS_TOKEN;
+    const m = await detectMode();
+    expect(m).toBe("lite");
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("will NOT be"))).toBe(true);
+  });
+
+  it("does NOT warn when no AEGIS_URL is set (ordinary LITE, S015 P-38)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.AEGIS_MODE = "auto";
+    delete process.env.AEGIS_URL;
+    delete process.env.AEGIS_BASE_URL;
+    delete process.env.AEGIS_TOKEN;
+    const m = await detectMode();
+    expect(m).toBe("lite");
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("will NOT be"))).toBe(false);
+  });
+
   it("upgrades to FULL when token present and backend reachable", async () => {
     const m = fetchMock();
     globalThis.fetch = m.fetch;

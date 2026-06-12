@@ -17,7 +17,7 @@
 // `../../dist/index.js` so it executes without a transpile step and is
 // used to materialise the audit JSONL for the trace_propagation verifier.
 
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -30,8 +30,9 @@ import {
 
 process.env.AEGIS_HISTORY = "1";
 if (!process.env.AEGIS_HISTORY_PATH) {
-  const dir = join(tmpdir(), "aegis-mcp-e2e");
-  mkdirSync(dir, { recursive: true });
+  // Fresh dir per run: a fixed default path accumulates records across runs
+  // and the trace_id match below would fail on the second local invocation.
+  const dir = mkdtempSync(join(tmpdir(), "aegis-mcp-e2e-"));
   process.env.AEGIS_HISTORY_PATH = join(dir, "audit.jsonl");
 }
 

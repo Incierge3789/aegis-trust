@@ -83,3 +83,27 @@ def test_cache_holds_within_ttl(monkeypatch):
     monkeypatch.setenv("AEGIS_MODE", "full")
     # within TTL — cache wins
     assert _detect_mode() == Mode.LITE
+
+
+def test_lite_despite_url_warns_once(monkeypatch, caplog):
+    # S015 P-38 (confirmed live): AEGIS_URL set to a dev host (localhost sidecar)
+    # with no AEGIS_TOKEN resolves to LITE and the gateway is never consulted.
+    # Behaviour is unchanged (LITE) but it must be loud so an operator notices.
+    monkeypatch.setenv("AEGIS_MODE", "auto")
+    monkeypatch.setenv("AEGIS_URL", "http://localhost:8443/api/v1")
+    monkeypatch.delenv("AEGIS_TOKEN", raising=False)
+    with caplog.at_level(logging.WARNING, logger="aegis"):
+        assert _detect_mode() == Mode.LITE
+    assert "will NOT be consulted" in caplog.text
+
+
+def test_no_url_does_not_warn(monkeypatch, caplog):
+    # Ordinary LITE (no AEGIS_URL) must stay silent — only a configured-but-
+    # ignored gateway is worth warning about (S015 P-38).
+    monkeypatch.setenv("AEGIS_MODE", "auto")
+    monkeypatch.delenv("AEGIS_URL", raising=False)
+    monkeypatch.delenv("AEGIS_BASE_URL", raising=False)
+    monkeypatch.delenv("AEGIS_TOKEN", raising=False)
+    with caplog.at_level(logging.WARNING, logger="aegis"):
+        assert _detect_mode() == Mode.LITE
+    assert "will NOT be consulted" not in caplog.text
