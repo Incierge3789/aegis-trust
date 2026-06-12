@@ -1,6 +1,7 @@
 # Threat Model — aegis-trust
 
-- **Last updated:** 2026-06-11 (sprint S1005 re-validation; first authored S002)
+- **Last updated:** 2026-06-11 (sprint S1005 re-validation — that sprint is now
+  filed as S006 after the 2026-06-11 T-040 sprint renumber; first authored S002)
 - **Companion:** [`SECURITY_ASSESSMENT.md`](SECURITY_ASSESSMENT.md) (tool-verified
   state), root [`SECURITY.md`](../../SECURITY.md) (policy and disclosure)
 
@@ -120,7 +121,7 @@ Re-validate this model in every security-family sprint, or immediately when: a
 new enforcement point is added, the gateway contract changes (`schemas/v0`), or
 a HIGH/CRITICAL disclosure-baseline finding lands.
 
-- **S1005 (2026-06-11):** re-validated. §2 mitigation→test rows confirmed
+- **S1005 (2026-06-11, now filed as S006 after the T-040 renumber):** re-validated. §2 mitigation→test rows confirmed
   present and live; no new enforcement point and no `schemas/v0` change, so the
   STRIDE structure is unchanged. LITE §1 boundary statements exercised
   adversarially (see `test_redteam_S1005_lite_boundary.py`). Next: the
