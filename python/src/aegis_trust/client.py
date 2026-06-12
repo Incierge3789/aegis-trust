@@ -33,6 +33,41 @@ from aegis_trust.types import (
 logger = logging.getLogger("aegis")
 
 _DEFAULT_BASE_URL = "https://localhost:8443/api/v1"
+
+_base_url_path_completed_warned = False
+
+
+def normalize_base_url(url: str) -> str:
+    """Complete a pathless base URL to ``…/api/v1``.
+
+    S015 install-friction fix (P-37, hit live this sprint): the gateway serves
+    every endpoint under ``/api/v1``. A base URL of just host:port (no path)
+    makes every call 404 with no hint it is a path problem. If the caller passes
+    a pathless URL, complete it and warn once so the assumption is visible. An
+    explicit non-root path is respected unchanged. Parity with node
+    ``normalizeBaseUrl``.
+    """
+    global _base_url_path_completed_warned
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    if parts.scheme and parts.netloc and parts.path in ("", "/"):
+        completed = urlunsplit((parts.scheme, parts.netloc, "/api/v1", "", ""))
+        if not _base_url_path_completed_warned:
+            _base_url_path_completed_warned = True
+            logging.getLogger("aegis").warning(
+                "base URL %r has no path; the gateway serves under '/api/v1', so "
+                "using %r. Set the full URL to silence this.",
+                url,
+                completed,
+            )
+        return completed
+    return url
+
+
 _HEALTH_TIMEOUT = 2.0
 _API_TIMEOUT = 10.0
 
@@ -164,7 +199,7 @@ class AegisClient:
         token: str = "",
         verify_ssl: bool = True,
     ) -> None:
-        self._base_url = base_url or _DEFAULT_BASE_URL
+        self._base_url = normalize_base_url(base_url or _DEFAULT_BASE_URL)
         self._token = token
         self._verify_ssl = verify_ssl
         self._httpx: httpx.Client | None = None

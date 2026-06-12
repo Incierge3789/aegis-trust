@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AegisClient,
   isDevHost,
+  normalizeBaseUrl,
   resetModuleClient,
   resolveVerifySsl,
   setMetricsHook,
@@ -44,6 +45,25 @@ describe("allow-cache window (S015 P-27)", () => {
     expect(await c.authorize("p", ["name"])).toBe(false);
     expect(await c.authorize("p", ["name"])).toBe(false);
     expect(n).toBe(2);
+  });
+});
+
+describe("normalizeBaseUrl (S015 install friction P-37)", () => {
+  it("completes a pathless URL to /api/v1", () => {
+    expect(normalizeBaseUrl("http://localhost:8443")).toBe("http://localhost:8443/api/v1");
+  });
+  it("completes a trailing-slash URL", () => {
+    expect(normalizeBaseUrl("https://gw.example:8443/")).toBe("https://gw.example:8443/api/v1");
+  });
+  it("leaves an explicit /api/v1 path unchanged", () => {
+    expect(normalizeBaseUrl("http://localhost:8443/api/v1")).toBe("http://localhost:8443/api/v1");
+  });
+  it("respects a non-root custom path", () => {
+    expect(normalizeBaseUrl("http://localhost:8443/custom")).toBe("http://localhost:8443/custom");
+  });
+  it("the client constructor applies it (pathless → completed)", () => {
+    const c = new AegisClient({ baseUrl: "http://localhost:8443" });
+    expect(c.baseUrl).toBe("http://localhost:8443/api/v1");
   });
 });
 

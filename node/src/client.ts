@@ -129,6 +129,33 @@ export function isDevHost(urlOrHost: string): boolean {
   }
 }
 
+// S015 install-friction fix (P-37, hit live this sprint): the gateway serves
+// every endpoint under `/api/v1`. A base URL of just host:port (no path) makes
+// every call 404 with no hint it is a path problem. If the caller passes a
+// pathless URL, complete it to `…/api/v1` and warn once so the assumption is
+// visible. An explicit non-root path is respected unchanged.
+let _baseUrlPathCompletedWarned = false;
+export function normalizeBaseUrl(url: string): string {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return url; // not parseable here — leave it for the request layer to error
+  }
+  if (u.pathname === "/" || u.pathname === "") {
+    const completed = `${u.origin}/api/v1`;
+    if (!_baseUrlPathCompletedWarned) {
+      _baseUrlPathCompletedWarned = true;
+      console.warn(
+        `aegis-trust: base URL '${url}' has no path; the gateway serves under `
+          + `'/api/v1', so using '${completed}'. Set the full URL to silence this.`,
+      );
+    }
+    return completed;
+  }
+  return url;
+}
+
 export function resolveVerifySsl(
   baseUrl: string,
   requested: boolean,
@@ -215,7 +242,7 @@ export class AegisClient {
   private _maxAuditSeq: number = 0;
 
   constructor(options: AegisClientOptions = {}) {
-    this._baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
+    this._baseUrl = normalizeBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL);
     this._token = options.token ?? "";
     this._verifySsl = resolveVerifySsl(this._baseUrl, options.verifySsl ?? true);
   }
@@ -843,4 +870,5 @@ export function resetModuleClient(): void {
   _detectedModeTs = 0;
   _baseUrlAliasWarned = false;
   _liteDespiteUrlWarned = false;
+  _baseUrlPathCompletedWarned = false;
 }

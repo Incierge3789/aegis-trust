@@ -73,6 +73,7 @@ export {
   detectMode,
   resetModuleClient,
   isDevHost,
+  normalizeBaseUrl,
   resolveVerifySsl,
   // userIntendsFull is the rc4-level intent heuristic (parity with PyPI
   // `_user_intends_full`). Re-exported in the barrel so the rc4 CHANGELOG
