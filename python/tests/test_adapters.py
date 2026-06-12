@@ -13,6 +13,7 @@ from aegis_trust.adapters import (
     shielded_tool,
     to_crewai_tool,
     to_langchain_tool,
+    to_llamaindex_tool,
 )
 from aegis_trust.errors import AegisValidationError
 from aegis_trust.shield import reset
@@ -181,6 +182,43 @@ class TestLangChain:
 
         to_langchain_tool(fake_from_function, _lookup())
         assert "args_schema" not in captured
+
+
+class TestLlamaIndex:
+    def test_binds_via_injected_factory(self):
+        schema = object()
+        t = shielded_tool(
+            name="customer_lookup",
+            description="Look up a customer.",
+            purpose="customer_support",
+            scope=["name", "issue"],
+            schema=schema,
+            handler=lambda **kw: RECORD,
+        )
+        captured = {}
+
+        def fake_from_defaults(**kwargs):
+            captured.update(kwargs)
+            return "LI_TOOL"
+
+        result = to_llamaindex_tool(fake_from_defaults, t)
+        assert result == "LI_TOOL"
+        assert captured["name"] == "customer_lookup"
+        assert captured["description"] == "Look up a customer."
+        # LlamaIndex names the schema param fn_schema (not LangChain's args_schema).
+        assert captured["fn_schema"] is schema
+        out = captured["fn"](customer_id="C-1001")
+        assert json.loads(out) == SCOPED
+
+    def test_omits_schema_when_absent(self):
+        captured = {}
+
+        def fake_from_defaults(**kwargs):
+            captured.update(kwargs)
+            return None
+
+        to_llamaindex_tool(fake_from_defaults, _lookup())
+        assert "fn_schema" not in captured
 
 
 class TestCrewai:

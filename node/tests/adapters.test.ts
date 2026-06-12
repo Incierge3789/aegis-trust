@@ -6,6 +6,7 @@ import {
   shieldedTool,
   toCrewaiTool,
   toLangChainTool,
+  toLlamaIndexTool,
   toVercelTool,
   type ShieldedTool,
 } from "../src/adapters/index.js";
@@ -205,6 +206,53 @@ describe("toLangChainTool", () => {
     }, lookup());
     expect(cfg).toEqual({ name: "customer_lookup", description: "Look up a customer record by id for support." });
     expect("schema" in cfg!).toBe(false);
+  });
+});
+
+describe("toLlamaIndexTool", () => {
+  it("calls the injected factory with name/description/parameters and a string-returning fn", async () => {
+    const schema = { type: "object", properties: { id: { type: "string" } } };
+    const t = shieldedTool<{ id: string }>({
+      name: "customer_lookup",
+      description: "Look up a customer.",
+      purpose: "customer_support",
+      scope: ["name", "issue"],
+      mode: Mode.LITE,
+      schema,
+      handler: async () => RECORD,
+    });
+
+    let captured: { fn: (i: unknown) => Promise<string> | string; config: Record<string, unknown> } | undefined;
+    const fakeFactory = (
+      fn: (i: unknown) => Promise<string> | string,
+      config: { name: string; description: string; parameters?: unknown },
+    ) => {
+      captured = { fn, config };
+      return { __isLlamaIndexTool: true };
+    };
+
+    const li = toLlamaIndexTool(fakeFactory, t);
+    expect(li).toEqual({ __isLlamaIndexTool: true });
+    // LlamaIndex names the schema param `parameters` (not LangChain's `schema`).
+    expect(captured!.config).toEqual({
+      name: "customer_lookup",
+      description: "Look up a customer.",
+      parameters: schema,
+    });
+
+    const out = await captured!.fn({ id: "C-1001" });
+    expect(typeof out).toBe("string");
+    expect(JSON.parse(out as string)).toEqual(SCOPED);
+  });
+
+  it("omits the parameters key when the tool has no schema", () => {
+    let cfg: Record<string, unknown> | undefined;
+    toLlamaIndexTool((_f, config) => {
+      cfg = config;
+      return null;
+    }, lookup());
+    expect(cfg).toEqual({ name: "customer_lookup", description: "Look up a customer record by id for support." });
+    expect("parameters" in cfg!).toBe(false);
   });
 });
 

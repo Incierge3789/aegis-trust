@@ -18,6 +18,9 @@ export type { ShieldedStreamTool, ShieldedStreamToolSpec } from "./stream.js";
 export { toLangChainTool } from "./langchain.js";
 export type { LangChainToolFactory } from "./langchain.js";
 
+export { toLlamaIndexTool } from "./llamaindex.js";
+export type { LlamaIndexToolFactory } from "./llamaindex.js";
+
 export { toVercelTool } from "./vercel.js";
 export type { VercelTool } from "./vercel.js";
 
