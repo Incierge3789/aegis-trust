@@ -14,6 +14,17 @@
 > the GitHub Release `v0.9.2`. The prior `0.9.0-rc3` (release-integrity incident
 > F-054) remains npm-deprecated and version-scoped.
 
+## For AI agents
+
+Machine-readable product surface, generated from live registry facts (never
+hand-edited; a CI guard rejects any drift from the generated content):
+
+- Manifest: <https://aegisagentcontrol.com/aegis.json>
+- Site guide: <https://aegisagentcontrol.com/llms.txt>
+- Quickstart with expected output: <https://aegisagentcontrol.com/quickstart>
+
+Package-level guides: [`python/llms.txt`](python/llms.txt) · [`node/llms.txt`](node/llms.txt).
+
 Both snippets below are **self-contained and run as written** (LITE mode, no
 gateway, no token). The literal record stands in for your real data source.
 
