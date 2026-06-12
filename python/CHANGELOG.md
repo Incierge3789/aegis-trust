@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added — LlamaIndex adapter
+- `to_llamaindex_tool` (`aegis_trust.adapters`): binds a `shielded_tool()` to a LlamaIndex
+  `FunctionTool` via the injected `FunctionTool.from_defaults` factory (no LlamaIndex
+  dependency; the tool's schema maps to LlamaIndex's `fn_schema` key). Runnable example
+  `examples/llamaindex_example.py` + `tests/test_adapters.py` coverage. Brings LlamaIndex
+  to parity with the existing LangChain / CrewAI adapters.
+
 ## [0.9.2] - 2026-06-05
 
 ### Added — Doctor v1: Core-backed `check_with_core()` against `/check-boundary` (fail-closed)

@@ -12,6 +12,7 @@ version-tolerant and need no framework installed to import or test.
 from aegis_trust.adapters.core import ShieldedTool, shielded_tool
 from aegis_trust.adapters.stream import ShieldedStreamTool, shielded_stream_tool
 from aegis_trust.adapters.langchain import to_langchain_tool
+from aegis_trust.adapters.llamaindex import to_llamaindex_tool
 from aegis_trust.adapters.crewai import to_crewai_tool
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "ShieldedStreamTool",
     "shielded_stream_tool",
     "to_langchain_tool",
+    "to_llamaindex_tool",
     "to_crewai_tool",
 ]

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added — LlamaIndex.TS adapter
+- `toLlamaIndexTool` (`aegis-trust/adapters`): binds a `shieldedTool()` to a LlamaIndex
+  `FunctionTool` via the injected `FunctionTool.from` factory (no LlamaIndex dependency;
+  the tool's schema maps to LlamaIndex's `parameters` key). Runnable example
+  `examples/llamaindexExample.ts` + `tests/adapters.test.ts` coverage. Brings LlamaIndex
+  to parity with the existing LangChain / CrewAI / Vercel adapters.
+
 ### Added — dev-agent workflow e2e proof
 - `tests/mcp/run_dev_agent_workflow.mjs` — dev-agent → shield → audit end-to-end
   for the First Protected Workflow reference policy: per-purpose exact
