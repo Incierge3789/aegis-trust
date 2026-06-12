@@ -43,7 +43,14 @@ def test_test_hook_captures_metadata_not_raw_data():
 
     @shield(purpose="support", scope=["name"])
     def get_customer():
-        return {"name": "Tanaka", "ssn": "123-45-6789", "card": "4242"}
+        # Sentinel values must contain letters: a digits-only sentinel like
+        # "4242" can collide with the microsecond field of the timestamp the
+        # hook legitimately records (observed flake: ".642424+00:00").
+        return {
+            "name": "Tanaka",
+            "ssn": "ssn-sentinel-123-45-6789",
+            "card": "card-sentinel-4242",
+        }
 
     get_customer()
 
@@ -63,8 +70,8 @@ def test_test_hook_captures_metadata_not_raw_data():
 
     # The actual values of ssn/card must not be in any hook field
     hook_str = str(hook_data)
-    assert "123-45-6789" not in hook_str
-    assert "4242" not in hook_str
+    assert "ssn-sentinel-123-45-6789" not in hook_str
+    assert "card-sentinel-4242" not in hook_str
 
 
 # ── Attack 2: _test_hook that modifies return value ──────────────
