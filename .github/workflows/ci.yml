@@ -161,7 +161,7 @@ jobs:
         working-directory: node
         run: npm test
 
-      - name: MCP e2e runners (agent → shield → audit chain proof)
+      - name: MCP callable-proof runners (agent → shield → audit chain)
         # Executes both fail-closed e2e runners against the dist/ built above:
         #   tests/mcp/run_end_to_end.mjs        — 4-tool trace_id propagation
         #   tests/mcp/run_dev_agent_workflow.mjs — dev-agent policy: exact

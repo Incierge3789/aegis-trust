@@ -16,7 +16,7 @@
 //   cat /tmp/aegis-mcp-e2e.jsonl
 //   # → 4 events, all sharing one trace_id, one per shield-wrapped tool call.
 
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -31,8 +31,9 @@ import {
 // AEGIS_HISTORY_PATH for shared inspection.
 process.env.AEGIS_HISTORY = "1";
 if (!process.env.AEGIS_HISTORY_PATH) {
-  const dir = join(tmpdir(), "aegis-mcp-e2e");
-  mkdirSync(dir, { recursive: true });
+  // Fresh dir per run: a fixed path accumulates records across runs and the
+  // trace_id verification below would fail on a second invocation.
+  const dir = mkdtempSync(join(tmpdir(), "aegis-mcp-e2e-"));
   process.env.AEGIS_HISTORY_PATH = join(dir, "audit.jsonl");
 }
 
