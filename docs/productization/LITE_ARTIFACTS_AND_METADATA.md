@@ -51,7 +51,9 @@ Node (`node/examples/`): `quickstart.ts`, `asyncExample.ts`,
 `denyFieldsExample.ts`, `dotNotationExample.ts`, `multiPurpose.ts`,
 `langchainExample.ts`, `crewaiExample.ts`, `vercelAiExample.ts`,
 `mcpTool.ts`, `mcpEndToEnd.ts`, `streamExample.ts`, `doctorExample.ts`,
-`sandboxDemo.ts`, `cryptoWallet.ts`, `docker/`.
+`sandboxDemo.ts`, `cryptoWallet.ts`, `devAgentWorkflow.ts` (dev-agent
+workflow reference: dot-notation scope + denyFields, behaviorally pinned by
+`node/tests/devAgentWorkflow.test.ts`), `docker/`.
 
 Python (`python/examples/`): `langchain_example.py`, `crewai_example.py`,
 `stream_example.py`, `doctor_example.py`.
@@ -65,8 +67,9 @@ ls node/examples python/examples
 ## 5. Test and build commands (verifier-owned)
 
 ```bash
+cd node && npm ci          # clean clone: install the locked dependency set first
+cd node && npm run build   # tsc build of dist/ — required before tests (one suite runs the built bin-shim)
 cd node && npm test        # vitest suite (shield/filter/doctor/fullMode/...)
-cd node && npm run build   # tsc build of dist/
 cd node && npm run lint
 ```
 
