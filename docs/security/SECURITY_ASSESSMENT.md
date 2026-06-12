@@ -1,8 +1,13 @@
 # Security Assessment — aegis-trust
 
-- **Assessment date:** 2026-06-10
+- **Assessment date:** 2026-06-10 (S002 baseline); **re-assessed 2026-06-11 (S1005 — since renumbered to S006, §5 status + §6 delta)**
 - **Executor:** sprint S002 executor agent (Claude Code), recorded in
-  `~/agent-ops/beads/aegis-trust/sprints/sprint_002.md`
+  `~/agent-ops/beads/aegis-trust/sprints/sprint_002.md`; S1005 re-assessment in
+  `~/agent-ops/beads/aegis-trust/sprints/sprint_006.md` (formerly
+  `sprint_1005.md`: the T-040 sprint renumber on 2026-06-11 mapped aegis-trust
+  S1002–S1005 → S003–S006, receipt in agent-ops
+  `_shared/logs/sprint_renumber.jsonl`; S002 ids in this document are unchanged.
+  "S1005" below is kept as the historical label of the sprint now filed as S006)
 - **Scope:** dependency supply chain (Python + Node), secrets hygiene
   (full git history), CI/CD pipeline controls, access-control implementation
   inventory
@@ -69,13 +74,57 @@ identified; all findings were dependency- or process-level).
 
 ## 5. Accepted risks (with owner and review deadline)
 
-| ID | Risk | Why accepted now | Review by |
-|---|---|---|---|
-| S002-AR-1 | **Merge-time fail-open**: `audit-gate` is not part of the `ci-gate` required status check, so a red audit does not block merges until the operator adds `audit-gate` to branch protection. The workflow itself is fail-closed at *build* level only (cross-review round-2 P1) | Branch-protection changes are an operator (repo-admin) action outside agent authority and outside this sprint's no-push boundary; workflow + weekly schedule already surface findings | S003 (next security-family sprint) — operator adds `audit-gate` to required checks |
-| S002-AR-2 | Node/TypeScript sources are outside the org-level ship-readiness AC verifier glob patterns (`.rs`/`.py` only) | Verifier-side limitation, not a repo defect; node parity is covered in-repo by tests and `version-parity.yml` | S003 |
-| S002-AR-3 | `python/.venv` fixes (idna/pip) are dev-machine-local state, not committed artifacts | The package declares no vulnerable pin (`httpx>=0.23,<1.0`); CI `audit.yml` resolves fresh on every run and fails closed, covering both consumers and CI | continuous (audit.yml) |
+| ID | Risk | Why accepted now | Review by | Status |
+|---|---|---|---|---|
+| S002-AR-1 | **Merge-time fail-open**: `audit-gate` is not part of the `ci-gate` required status check, so a red audit does not block merges until the operator adds `audit-gate` to branch protection. The workflow itself is fail-closed at *build* level only (cross-review round-2 P1) | Branch-protection changes are an operator (repo-admin) action outside agent authority and outside this sprint's no-push boundary; workflow + weekly schedule already surface findings | next security-family sprint after S006 (this deadline pre-dated the T-040 renumber as "S003"; the first security-family sprint ran as S1005, now filed S006) — operator adds `audit-gate` to required checks | **S1005: reviewed — still open, operator action queued.** Branch protection at review time (`gh api .../branches/main/protection`): `required_status_checks.contexts=["ci-gate"]`, `strict=false`, `enforce_admins=true`. `audit-gate` confirmed absent. Concrete PATCH command packaged for the operator (exception `ex-20260611T014004Z-…-1ee18443`); execution remains repo-admin, outside agent authority. |
+| S002-AR-2 | Node/TypeScript sources are outside the org-level ship-readiness AC verifier glob patterns (`.rs`/`.py` only) | Verifier-side limitation, not a repo defect; node parity is covered in-repo by tests and `version-parity.yml` | resolved in S1005 (now S006; deadline pre-dated the T-040 renumber as "S003") | **S1005: resolved as a verifier-side decision (beads D-065).** The org ship-readiness AC glob (`**/src/*.rs`, `**/api/*.py`, `**/src/*.py`, `**/src/**/*.py`) structurally cannot see `.ts`. Node AC substance is real (`node/src/client.ts`, `shield.ts`) and exercised by `node/tests/{shield,client,fullGate}.test.ts` in `ci.yml` node-test; THREAT_MODEL §2.5 records the Python/Node parity suites. Extending the glob to `.ts` is an `agent-ops` governance-layer change (panel-gated, cross-project) handed off as a follow-up; not a repo defect. |
+| S002-AR-3 | `python/.venv` fixes (idna/pip) are dev-machine-local state, not committed artifacts | The package declares no vulnerable pin (`httpx>=0.23,<1.0`); CI `audit.yml` resolves fresh on every run and fails closed, covering both consumers and CI | continuous (audit.yml) | **S1005: hardened.** The committed `python/uv.lock` was found pinning the vulnerable `idna 3.11` and `pip 26.1.1`; the fix is now a committed lockfile upgrade (idna→3.18, pip→26.1.2), not dev-local state. The `httpx>=0.23,<1.0` consumer-side argument still holds; AR-3 remains continuous via `audit.yml`. |
 
-## 6. Maintenance rule
+## 6. S1005 security-family delta (re-assessment)
+
+- **Assessment date:** 2026-06-11 (sprint S1005 — now filed as S006 after the T-040 renumber — aegis-trust's first security-family sprint)
+- **Method:** identical evidence discipline to §1 — command + tool version + exit code + committed raw log under `evidence/`.
+
+### 6.1 Dependency / secrets re-scan (README rule: every security-family sprint)
+
+| Layer | Tool (version) | Command | Before | After | Exit (after) |
+|---|---|---|---|---|---|
+| Python deps | pip-audit 2.10.0 | `python/.venv/bin/pip-audit --strict` | 1 (idna 3.11, CVE-2026-45409) → then `uv sync` from the stale lockfile re-surfaced pip 26.1.1 (PYSEC-2026-196) | **0** | 0 |
+| Node deps | npm audit (npm 10.9.4, node 22.22.1) | `npm audit --audit-level=low` (in `node/`) | 0 | **0** | 0 |
+| Secrets (git history) | gitleaks 8.30.1 | `gitleaks detect --config .gitleaks.toml --no-banner --redact` | 0 leaks (139 commits) | 0 leaks | 0 |
+
+Raw logs: [`evidence/s1005-pip-audit-before.log`](evidence/s1005-pip-audit-before.log),
+[`evidence/s1005-pip-audit-after.log`](evidence/s1005-pip-audit-after.log),
+[`evidence/s1005-npm-audit.log`](evidence/s1005-npm-audit.log),
+[`evidence/s1005-gitleaks.log`](evidence/s1005-gitleaks.log).
+
+### 6.2 New finding this pass
+
+| ID | Severity | Component | Finding | Disposition |
+|---|---|---|---|---|
+| S1005-DEP-1 | medium | python (committed `uv.lock`) | The committed lockfile pinned `idna 3.11` (CVE-2026-45409) and `pip 26.1.1` (PYSEC-2026-196), and was **stale** vs `pyproject.toml` (declared `jsonschema>=4.21` was unlocked; `uv 0.5.30 lock --locked` failed at HEAD). S002-AR-3 assumed only dev-local drift; the *committed artifact* itself carried vulnerable pins. | **Fixed** — `uv.lock` regenerated (idna→3.18, pip→26.1.2, jsonschema + transitive deps locked). `pip-audit --strict` exit 0 after; `uv 0.5.30 lock --locked` exit 0 (lockfile now consistent with `pyproject.toml`, matching the `audit.yml` resolution path). |
+
+### 6.3 @shield LITE-mode boundary — adversarial pass
+
+THREAT_MODEL §1's four LITE-boundary statements were mechanically exercised by
+[`python/tests/adversarial/test_redteam_S1005_lite_boundary.py`](../../python/tests/adversarial/test_redteam_S1005_lite_boundary.py)
+(6 tests, all passing): three positive protections (minimum-disclosure
+filtering; exception-payload fail-closed; conversion-failure fail-closed) and
+two documentation-honesty guards proving the *negative* non-claims still hold —
+the unwrapped handler is reachable via `__wrapped__` and the decorator is
+monkey-patchable in-process. The latter two confirm the documented "LITE does
+not defend a hostile host; use FULL" boundary remains truthful. No over-claim
+found in README / SECURITY.md / THREAT_MODEL relative to the tested behaviour.
+
+### 6.4 THREAT_MODEL re-validation (cadence)
+
+THREAT_MODEL.md §2 mitigation→test rows were checked for test-file existence
+(all present) and the model re-validated per its §4 cadence. No new enforcement
+point was added this sprint and no gateway contract (`schemas/v0`) changed, so
+the STRIDE structure is unchanged; the model's "Last updated" stamp is advanced
+to S1005 and the §2.x test references re-confirmed live.
+
+## 7. Maintenance rule
 
 This document is regenerated only from real tool runs (command + version +
 exit code + committed raw log). Hand-written claims without a matching

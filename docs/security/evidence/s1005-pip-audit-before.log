@@ -1,0 +1,4 @@
+Found 1 known vulnerability in 1 package
+Name Version ID             Fix Versions
+---- ------- -------------- ------------
+idna 3.11    CVE-2026-45409 3.15
