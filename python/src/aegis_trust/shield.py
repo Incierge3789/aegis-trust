@@ -225,6 +225,8 @@ def _get_client() -> AegisClient:
 # without per-call probes.
 _DETECT_MODE_TTL_S = 60.0
 _detected_mode_ts: float = 0.0
+# S015 P-38: warn-once flag for "AEGIS_URL set but resolved to LITE".
+_lite_despite_url_warned: bool = False
 
 
 def _user_intends_full() -> bool:
@@ -269,6 +271,25 @@ def _detect_mode() -> Mode:
         # avoids unnecessary /check-access traffic from no-token AUTO
         # callers (parity with node client.ts detectMode).
         if not _user_intends_full():
+            # S015 P-38 (confirmed live): an explicit AEGIS_URL pointing at a
+            # dev host (e.g. a localhost sidecar gateway) with no AEGIS_TOKEN
+            # resolves to LITE and the gateway is NEVER consulted — shield()
+            # filters locally only. That is the documented intent-first matrix,
+            # but it is silent, so an operator who stood up a gateway cannot
+            # tell it is being bypassed. Make it loud (warn once). Behaviour is
+            # unchanged. Parity with node client.ts detectMode.
+            global _lite_despite_url_warned
+            explicit_url = (
+                os.environ.get("AEGIS_URL") or os.environ.get("AEGIS_BASE_URL") or ""
+            ).strip()
+            if explicit_url and not _lite_despite_url_warned:
+                _lite_despite_url_warned = True
+                logger.warning(
+                    "shield: AEGIS_URL is set but mode resolved to LITE — no Full "
+                    "intent (dev-host URL and no AEGIS_TOKEN). The gateway at this "
+                    "URL will NOT be consulted; shield() filters locally only. Set "
+                    "AEGIS_TOKEN (or AEGIS_MODE=full) to use the gateway."
+                )
             _detected_mode = Mode.LITE
         else:
             client = _get_client()
@@ -1605,10 +1626,12 @@ def reset() -> None:
     behave identically across both SDKs.
     """
     global _client, _detected_mode, _detected_mode_ts, _base_url_alias_warned
+    global _lite_despite_url_warned
     _client = None
     _detected_mode = None
     _detected_mode_ts = 0.0
     _base_url_alias_warned = False
+    _lite_despite_url_warned = False
 
 
 def refresh_token() -> None:

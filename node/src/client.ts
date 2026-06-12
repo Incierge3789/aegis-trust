@@ -64,7 +64,19 @@ function auditError(detail: string): AegisAuditError {
 const DEFAULT_BASE_URL = "https://localhost:8443/api/v1";
 const HEALTH_TIMEOUT_MS = 2_000;
 const API_TIMEOUT_MS = 10_000;
-const ACCESS_CACHE_TTL_MS = 30_000;
+// Allow-decision cache TTL. An allow is cached so repeated identical calls do
+// not re-hit the gateway. The window is also a fail-open exposure: a gateway
+// that goes down or a policy that revokes access is not seen until the entry
+// expires (S015 P-27, confirmed live). Operators who need policy changes to
+// take effect immediately can set AEGIS_ACCESS_CACHE_TTL_MS=0 to disable the
+// cache (every call re-consults the gateway), trading latency for zero stale
+// window. Deny is never cached regardless. Default 30s.
+const ACCESS_CACHE_TTL_MS = ((): number => {
+  const raw = process.env.AEGIS_ACCESS_CACHE_TTL_MS;
+  if (raw === undefined || raw.trim() === "") return 30_000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 30_000;
+})();
 
 export interface AegisClientOptions {
   readonly baseUrl?: string;
@@ -693,6 +705,7 @@ let _moduleClient: AegisClient | null = null;
 let _detectedMode: "lite" | "full" | null = null;
 let _detectedModeTs = 0;
 let _baseUrlAliasWarned = false;
+let _liteDespiteUrlWarned = false;
 
 // Mode detection cache TTL — parity with PyPI shield.py `_DETECT_MODE_TTL_S = 60.0`.
 // AEGIS_MODE=auto re-probes the backend every `_DETECT_MODE_TTL_MS` ms so
@@ -784,6 +797,22 @@ export async function detectMode(): Promise<"lite" | "full"> {
   // "auto + no Full intent → Lite" and is corrected here. Mirrors PyPI
   // shield.py _detect_mode intent-first variant.
   if (!userIntendsFull()) {
+    // S015 P-38 (confirmed live): an explicit AEGIS_URL pointing at a dev host
+    // (e.g. a localhost sidecar gateway) with no AEGIS_TOKEN resolves to LITE
+    // and the gateway is NEVER consulted — shield() filters locally only. That
+    // is the documented intent-first matrix, but it is silent, so an operator
+    // who stood up a gateway cannot tell it is being bypassed. Make it loud
+    // (fail-loud): warn once. Behaviour is unchanged.
+    const explicitUrl = (process.env.AEGIS_URL || process.env.AEGIS_BASE_URL || "").trim();
+    if (explicitUrl && !_liteDespiteUrlWarned) {
+      _liteDespiteUrlWarned = true;
+      console.warn(
+        "aegis-trust: AEGIS_URL is set but mode resolved to LITE — no Full intent "
+          + "(dev-host URL and no AEGIS_TOKEN). The gateway at this URL will NOT be "
+          + "consulted; shield() filters locally only. Set AEGIS_TOKEN (or "
+          + "AEGIS_MODE=full) to use the gateway.",
+      );
+    }
     _detectedMode = "lite";
     _detectedModeTs = nowMs;
     return _detectedMode;
@@ -813,4 +842,5 @@ export function resetModuleClient(): void {
   _detectedMode = null;
   _detectedModeTs = 0;
   _baseUrlAliasWarned = false;
+  _liteDespiteUrlWarned = false;
 }

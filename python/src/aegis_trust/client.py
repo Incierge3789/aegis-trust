@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import logging
+import os
 import time
 import warnings
 from typing import Any, Callable, Literal
@@ -34,7 +35,29 @@ logger = logging.getLogger("aegis")
 _DEFAULT_BASE_URL = "https://localhost:8443/api/v1"
 _HEALTH_TIMEOUT = 2.0
 _API_TIMEOUT = 10.0
-_ACCESS_CACHE_TTL_S = 30.0  # TTL for allow decisions.
+
+
+def _resolve_access_cache_ttl() -> float:
+    """TTL (seconds) for cached allow decisions.
+
+    The cache spares repeated identical calls a gateway round-trip, but the
+    window is also a fail-open exposure: a gateway that goes down or a policy
+    that revokes access is not seen until the entry expires (S015 P-27,
+    confirmed live). Set ``AEGIS_ACCESS_CACHE_TTL_S=0`` to disable the cache so
+    every call re-consults the gateway (zero stale window, higher latency).
+    Deny is never cached regardless. Default 30s.
+    """
+    raw = os.environ.get("AEGIS_ACCESS_CACHE_TTL_S")
+    if raw is None or raw.strip() == "":
+        return 30.0
+    try:
+        n = float(raw)
+    except ValueError:
+        return 30.0
+    return n if n >= 0 else 30.0
+
+
+_ACCESS_CACHE_TTL_S = _resolve_access_cache_ttl()
 
 # Pluggable metrics callback. The SDK does not import any specific metrics
 # library so users (or this process's other code) own the registry —

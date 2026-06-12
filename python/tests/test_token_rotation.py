@@ -192,3 +192,27 @@ def test_set_token_inside_loop_schedules_close():
         )
 
     asyncio.run(runner())
+
+
+def test_access_cache_ttl_env_resolution(monkeypatch):
+    # S015 P-27: AEGIS_ACCESS_CACHE_TTL_S lets operators close the stale-allow
+    # window (set 0 to disable the cache). Bad/empty values fall back to 30s.
+    from aegis_trust.client import _resolve_access_cache_ttl
+
+    monkeypatch.setenv("AEGIS_ACCESS_CACHE_TTL_S", "0")
+    assert _resolve_access_cache_ttl() == 0.0
+    monkeypatch.setenv("AEGIS_ACCESS_CACHE_TTL_S", "garbage")
+    assert _resolve_access_cache_ttl() == 30.0
+    monkeypatch.delenv("AEGIS_ACCESS_CACHE_TTL_S", raising=False)
+    assert _resolve_access_cache_ttl() == 30.0
+
+
+def test_ttl_zero_yields_no_stale_allow(monkeypatch):
+    # With the cache disabled, a remembered allow is immediately expired, so a
+    # policy revocation / gateway-down is never masked by a stale allow.
+    import aegis_trust.client as cmod
+
+    monkeypatch.setattr(cmod, "_ACCESS_CACHE_TTL_S", 0.0)
+    c = AegisClient(token="t")
+    c._remember_allow("p", ["name"], epoch_at_request=c._token_epoch)
+    assert not c._cached_allow("p", ["name"])

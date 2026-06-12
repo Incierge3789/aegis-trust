@@ -20,6 +20,33 @@ function mockFetch(impl: typeof fetch): void {
   globalThis.fetch = impl as unknown as typeof fetch;
 }
 
+describe("allow-cache window (S015 P-27)", () => {
+  it("caches an allow — a 2nd identical authorize skips the network", async () => {
+    let n = 0;
+    mockFetch(async () => {
+      n++;
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1", token: "t" });
+    expect(await c.authorize("p", ["name"])).toBe(true);
+    expect(await c.authorize("p", ["name"])).toBe(true);
+    // The 2nd call was served from cache (this is the documented 30s window;
+    // AEGIS_ACCESS_CACHE_TTL_MS=0 disables it — exercised in the live e2e).
+    expect(n).toBe(1);
+  });
+  it("never caches a deny — each denied authorize re-hits the gateway", async () => {
+    let n = 0;
+    mockFetch(async () => {
+      n++;
+      return new Response(JSON.stringify({ allowed: false }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1", token: "t" });
+    expect(await c.authorize("p", ["name"])).toBe(false);
+    expect(await c.authorize("p", ["name"])).toBe(false);
+    expect(n).toBe(2);
+  });
+});
+
 describe("isDevHost", () => {
   it("recognises localhost variants", () => {
     expect(isDevHost("http://localhost:8443")).toBe(true);
