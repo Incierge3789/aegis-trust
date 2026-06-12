@@ -40,6 +40,22 @@ def test_check_access_single_scope_sent_as_string():
     assert captured["body"]["scope"] == "name"
 
 
+def test_check_access_always_sends_required_tool_name():
+    # The gateway's CheckAccessRequest requires a non-Option `tool_name`. Omit
+    # it and the body is 422 → every FULL authorize fail-closes, so a FULL gate
+    # can never grant against a live gateway (S015 live bug). Pin that the field
+    # is always present with the default placeholder.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"allowed": True})
+
+    c = _client_with_transport(handler)
+    c.check_access("p", ["name"])
+    assert captured["body"]["tool_name"] == "shielded_call"
+
+
 def test_check_access_empty_scope_omits_field():
     captured = {}
 

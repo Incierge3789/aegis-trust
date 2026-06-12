@@ -355,6 +355,24 @@ describe("checkAccess scope contract (CSR-03 fix)", () => {
     expect(calls).toBe(0);
   });
 
+  it("always sends required `tool_name` (gateway 422 → fail-closed otherwise; S015 live bug)", async () => {
+    // The gateway's CheckAccessRequest requires a non-Option `tool_name`. If the
+    // SDK omits it the body is 422 → every FULL authorize fail-closes, so
+    // shield() FULL can never grant against a live gateway. Pin that the field
+    // is always present (default placeholder), and that an explicit toolName is
+    // forwarded as the audit label.
+    const captured: { body: string }[] = [];
+    mockFetch(async (_input, init) => {
+      captured.push({ body: String(init?.body) });
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await c.checkAccess("p", ["name"]);
+    expect(JSON.parse(captured[0]!.body).tool_name).toBe("shielded_call");
+    await c.authorizeDetailed("p", ["name"], "fetchProfile");
+    expect(JSON.parse(captured[1]!.body).tool_name).toBe("fetchProfile");
+  });
+
   it("checkAccessBody still omits scope for >1 (defensive; gate denies first)", async () => {
     // checkAccessBody is private; assert behaviour via checkAccess (non-gate).
     const captured: { body: string }[] = [];

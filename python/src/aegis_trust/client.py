@@ -206,7 +206,9 @@ class AegisClient:
             return False
 
     @staticmethod
-    def _check_access_body(purpose: str, scope: list[str]) -> dict[str, Any]:
+    def _check_access_body(
+        purpose: str, scope: list[str], tool_name: str = "shielded_call"
+    ) -> dict[str, Any]:
         """Build the ``/check-access`` request body.
 
         Contract fix (CSR-03): the gateway's ``CheckAccessRequest.scope`` field
@@ -236,8 +238,19 @@ class AegisClient:
 
         NOTE: ``/check-boundary`` correctly uses ``scope: list[str]`` and does
         NOT route through here.
+
+        ``tool_name`` is a REQUIRED (non-Option) field on the gateway's
+        ``CheckAccessRequest`` (aegis_gateway ``rest.rs``). Omitting it makes the
+        gateway reject the body with 422 -> fail-closed deny on EVERY FULL
+        authorize, so a FULL gate can never grant against a live gateway. It is
+        an audit LABEL only (it does not affect the allow/deny decision — that is
+        JWT subject + purpose + scope). (Found by the S015 live SDK<->gateway
+        e2e; same class as the Doctor-v1 ``agent_id`` always-BLOCK bug.)
         """
-        body: dict[str, Any] = {"purpose": purpose}
+        body: dict[str, Any] = {
+            "purpose": purpose,
+            "tool_name": tool_name or "shielded_call",
+        }
         if len(scope) == 1:
             body["scope"] = scope[0]
         return body

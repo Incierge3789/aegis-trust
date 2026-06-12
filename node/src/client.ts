@@ -342,8 +342,20 @@ export class AegisClient {
   private static checkAccessBody(
     purpose: string,
     scope: ReadonlyArray<string>,
+    toolName: string,
   ): Record<string, unknown> {
-    const body: Record<string, unknown> = { purpose };
+    // `tool_name` is a REQUIRED (non-Option) field on the gateway's
+    // CheckAccessRequest (aegis_gateway rest.rs). Omitting it makes the gateway
+    // reject the body with 422 → fail-closed deny on EVERY FULL authorize, so
+    // shield() FULL can never grant against a live gateway. It is an audit
+    // LABEL only (it does not affect the allow/deny decision — that is JWT
+    // subject + purpose + scope), so sending the wrapped function's name is the
+    // honest value. (Found by the S015 live SDK↔gateway e2e; same class as the
+    // Doctor-v1 agent_id always-BLOCK bug.)
+    const body: Record<string, unknown> = {
+      purpose,
+      tool_name: toolName && toolName.length > 0 ? toolName : "shielded_call",
+    };
     if (scope.length === 1) {
       body.scope = scope[0];
     }
@@ -353,9 +365,10 @@ export class AegisClient {
   async checkAccess(
     purpose: string,
     scope: ReadonlyArray<string>,
+    toolName: string = "shielded_call",
   ): Promise<{ allowed: boolean } & Record<string, unknown>> {
     const resp = await this.req("POST", "/check-access", {
-      body: AegisClient.checkAccessBody(purpose, scope),
+      body: AegisClient.checkAccessBody(purpose, scope, toolName),
     });
     if (!resp.ok) throw httpError("check-access", resp.status);
     return (await resp.json()) as { allowed: boolean };
@@ -390,6 +403,7 @@ export class AegisClient {
   async authorizeDetailed(
     purpose: string,
     scope: ReadonlyArray<string>,
+    toolName: string = "shielded_call",
   ): Promise<AuthzResult> {
     // Review finding B: the gateway's /check-access scope is a single
     // Option<String>. A >1-scope request cannot be expressed faithfully, and
@@ -408,7 +422,7 @@ export class AegisClient {
     let resp: Response;
     try {
       resp = await this.req("POST", "/check-access", {
-        body: AegisClient.checkAccessBody(purpose, scope),
+        body: AegisClient.checkAccessBody(purpose, scope, toolName),
       });
     } catch {
       emitMetric("check-access", t0, 0);
