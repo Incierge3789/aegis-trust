@@ -43,6 +43,7 @@ mypy --strict src/aegis_trust
 ```bash
 cd node
 npm install
+npm run build          # required before tests: one suite runs the built bin-shim (dist/cli.js)
 npm test               # vitest
 npx tsc --noEmit       # type check (strict)
 ```

@@ -20,6 +20,10 @@ pip install aegis-trust        # Python 3.10+
 (The two packages version-track each other; see
 [`LITE_ARTIFACTS_AND_METADATA.md`](./LITE_ARTIFACTS_AND_METADATA.md) §1.)
 
+> **ESM-only (Node):** the package ships `import` conditions only. CJS
+> `require("aegis-trust")` is rejected with `ERR_PACKAGE_PATH_NOT_EXPORTED` —
+> use `import` (or dynamic `import()` from CJS).
+
 ## 1. Shield a data accessor (embed parity)
 
 Node — from the package README (30-Second Quickstart, `node/README.md`) and
