@@ -1,6 +1,25 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.3] - 2026-06-12
+
+### Fixed — live SDK↔gateway integration (found by a real end-to-end against aegis-core)
+- `shield()` FULL no longer fail-closes against a live gateway: the SDK now sends the
+  required `tool_name` on `/check-access` (previously omitted → HTTP 422 → every FULL
+  authorize denied). `tool_name` is an audit label only; the allow/deny decision remains
+  the JWT subject + purpose + scope.
+- Two fail-open gaps closed. An explicit dev-host `AEGIS_URL` with no `AEGIS_TOKEN` now
+  **warns** instead of silently resolving to LITE (the configured gateway was being
+  bypassed). The allow-decision cache can be disabled with `AEGIS_ACCESS_CACHE_TTL_MS=0`
+  to remove the ~30s stale-allow window after a policy change or gateway outage (deny is
+  never cached either way).
+- Install friction: a pathless base URL (`host:port` with no `/api/v1`) is now
+  auto-completed to `…/api/v1` with a one-time warning, instead of returning 404 on
+  every call.
+
+### Added — MCP e2e runners wired into CI
+- `node-test` now runs `npm run e2e:mcp` (both `run_end_to_end.mjs` and
+  `run_dev_agent_workflow.mjs`) so every PR mechanically verifies the agent → shield →
+  audit chain. `run_end_to_end.mjs` uses a fresh per-run audit dir (idempotent reruns).
 
 ### Added — dev-agent workflow e2e proof
 - `tests/mcp/run_dev_agent_workflow.mjs` — dev-agent → shield → audit end-to-end

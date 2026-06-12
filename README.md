@@ -57,7 +57,7 @@ console.log(getCustomer("C-001"));
 
 ## Status
 
-- **Python**: `aegis-trust==0.9.2` on PyPI — `pip install aegis-trust`. v1.0.0 GA pending 5-oracle readability review + verifier coverage uplift.
+- **Python**: `aegis-trust==0.9.3` on PyPI — `pip install aegis-trust`. v1.0.0 GA pending 5-oracle readability review + verifier coverage uplift.
 - **TypeScript**: `aegis-trust@0.9.2` on npm — `npm install aegis-trust`. Version-locked with the Python SDK at the same number.
 - **License**: MIT (see [`LICENSE`](LICENSE); `python/LICENSE` is identical, byte-for-byte).
 - **API versioning**: `Aegis-Api-Version: 2026-05-18` (dated header).
