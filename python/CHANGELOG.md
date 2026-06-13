@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.9.3] - 2026-06-12
+## [0.9.3] - 2026-06-13
 
 ### Fixed — live SDK↔gateway integration (found by a real end-to-end against aegis-core)
 - `shield()` FULL no longer fail-closes against a live gateway: the SDK now sends the
@@ -17,6 +17,13 @@
 - Install friction: a pathless base URL (`host:port` with no `/api/v1`) is now
   auto-completed to `…/api/v1` with a one-time warning, instead of returning 404 on
   every call.
+
+### Added — LlamaIndex adapter
+- `to_llamaindex_tool` (`aegis_trust.adapters`): binds a `shielded_tool()` to a LlamaIndex
+  `FunctionTool` via the injected `FunctionTool.from_defaults` factory (no LlamaIndex
+  dependency; the tool's schema maps to LlamaIndex's `fn_schema` key). Runnable example
+  `examples/llamaindex_example.py` + `tests/test_adapters.py` coverage. Brings LlamaIndex
+  to parity with the existing LangChain / CrewAI adapters.
 
 ## [0.9.2] - 2026-06-05
 

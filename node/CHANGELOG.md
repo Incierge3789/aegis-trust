@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.3] - 2026-06-12
+## [0.9.3] - 2026-06-13
 
 ### Fixed — live SDK↔gateway integration (found by a real end-to-end against aegis-core)
 - `shield()` FULL no longer fail-closes against a live gateway: the SDK now sends the
@@ -20,6 +20,13 @@
 - `node-test` now runs `npm run e2e:mcp` (both `run_end_to_end.mjs` and
   `run_dev_agent_workflow.mjs`) so every PR mechanically verifies the agent → shield →
   audit chain. `run_end_to_end.mjs` uses a fresh per-run audit dir (idempotent reruns).
+
+### Added — LlamaIndex.TS adapter
+- `toLlamaIndexTool` (`aegis-trust/adapters`): binds a `shieldedTool()` to a LlamaIndex
+  `FunctionTool` via the injected `FunctionTool.from` factory (no LlamaIndex dependency;
+  the tool's schema maps to LlamaIndex's `parameters` key). Runnable example
+  `examples/llamaindexExample.ts` + `tests/adapters.test.ts` coverage. Brings LlamaIndex
+  to parity with the existing LangChain / CrewAI / Vercel adapters.
 
 ### Added — dev-agent workflow e2e proof
 - `tests/mcp/run_dev_agent_workflow.mjs` — dev-agent → shield → audit end-to-end

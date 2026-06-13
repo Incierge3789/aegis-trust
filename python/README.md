@@ -105,7 +105,7 @@ def get_customer(customer_id: str) -> dict:
 
 Every MCP tool call now returns only the fields within the declared `scope` for its `purpose` — fields outside the scope are removed before the tool result reaches the agent (LITE-mode field reduction; `purpose` is a declared context label, not a local authorization decision).
 
-### LangChain / CrewAI adapters (`aegis_trust.adapters`)
+### LangChain / CrewAI / LlamaIndex adapters (`aegis_trust.adapters`)
 
 Dedicated binders for the major agent frameworks. `shielded_tool()` declares a
 shielded data accessor once (shield filtering + serialization baked in); each
@@ -150,6 +150,22 @@ billing_lookup = shielded_tool(
 
 support_agent = Agent(role="...", tools=[to_crewai_tool(BaseTool, support_lookup)])
 billing_agent = Agent(role="...", tools=[to_crewai_tool(BaseTool, billing_lookup)])
+```
+
+LlamaIndex — bind to a `FunctionTool` (`FunctionTool.from_defaults` is injected,
+so the SDK takes no dependency on LlamaIndex):
+
+```python
+from llama_index.core.tools import FunctionTool
+from aegis_trust.adapters import shielded_tool, to_llamaindex_tool
+
+customer_lookup = shielded_tool(
+    name="customer_lookup", description="Look up a customer for support.",
+    purpose="customer_support", scope=["name", "issue"],
+    handler=lambda customer_id: db.get(customer_id),
+)
+li_tool = to_llamaindex_tool(FunctionTool.from_defaults, customer_lookup)
+# hand `li_tool` to a FunctionAgent / ReActAgent
 ```
 
 The shield filters the **return value**, not the arguments — validate and

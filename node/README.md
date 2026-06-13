@@ -34,7 +34,7 @@ await getCustomer("C-001");
 
 The agent never sees `email` or `card`. No config files. No middleware. One wrapper.
 
-Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffic (LangChain.js, CrewAI, Vercel AI SDK, MCP, Mastra). When procurement asks *"will your AI read our customer data?"*, the answer is the line above.
+Built for TypeScript / Node.js engineers wiring AI agents into enterprise traffic (LangChain.js, CrewAI, LlamaIndex.TS, Vercel AI SDK, MCP, Mastra). When procurement asks *"will your AI read our customer data?"*, the answer is the line above.
 
 - **Fail-closed (data path)**: on a denied authorization, a filter exception, or any other internal error on the data path, `shield` returns an empty value — never leaked data, exceptions, or tracebacks.
 - **Whitelist (`scope`)** or **blacklist (`deny_fields`)**: the agent sees only — or all-but — the listed fields; a `trace_id` from `withTraceContext()` propagates end-to-end into a local audit log.
@@ -193,6 +193,27 @@ await generateText({
 ```
 
 The schema key defaults to `inputSchema` (AI SDK v5+); pass `toVercelTool(t, { schemaKey: "parameters" })` for v4 and earlier. Runnable example: [`examples/vercelAiExample.ts`](examples/vercelAiExample.ts).
+
+### LlamaIndex.TS — filter PII out of tool returns
+
+```typescript
+import { FunctionTool } from "llamaindex";
+import { shieldedTool, toLlamaIndexTool } from "aegis-trust/adapters";
+
+const customerLookup = shieldedTool<{ id: string }>({
+  name: "customer_lookup",
+  description: "Look up a customer by ID",
+  purpose: "support",
+  scope: ["name", "issue"],
+  handler: async ({ id }) => db.fetch(id),
+});
+
+// `FunctionTool.from` is dependency-injected — no LlamaIndex import in the SDK.
+const lookupTool = toLlamaIndexTool(FunctionTool.from, customerLookup);
+// hand `lookupTool` to a FunctionAgent / ReActAgent
+```
+
+The shielded tool's schema (if set) binds to LlamaIndex's `parameters` key. Runnable example: [`examples/llamaindexExample.ts`](examples/llamaindexExample.ts).
 
 ### Streaming — filter each record as it arrives (record-boundary, LITE only)
 
