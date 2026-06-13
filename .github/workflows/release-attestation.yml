@@ -39,7 +39,7 @@
 #   - Block B Phase 2 (SDK 本体 artifact pack + cosign sign + Release attach): ✅ wired (sprint_010)
 #   - Block C (npm Trusted Publisher OIDC publish + provenance + dist-tag): ✅ wired
 #     (T-011-11, line 363+, `if: tag push only` gated, requires npm ≥11.5.1)
-#   - PyPI Trusted Publisher OIDC publish: ✅ wired (publish-pypi-trusted-publisher job, tag-push-only); PEP 740 attestations deferred until repo public
+#   - PyPI Trusted Publisher OIDC publish: ✅ wired (publish-pypi-trusted-publisher job, tag-push-only); PEP 740 attestations ✅ enabled (repo public 2026-06-13)
 #   - Reproducible build verification: deferred (audit/integrity 系)
 #
 # References:
@@ -513,24 +513,20 @@ jobs:
         with:
           node-version: '24'
 
-      - name: npm publish via Trusted Publisher OIDC (no --provenance, private-repo constraint)
-        # --provenance is intentionally OMITTED here. npm registry rejects
-        # provenance from private GitHub repositories:
-        #   literal 422 on run 26353466944 2026-05-24:
-        #     "Unsupported GitHub Actions source repository visibility:
-        #      'private'. Only public source repositories are supported
-        #      when publishing with provenance."
-        # aegis-trust is PRIVATE per F-050 mandate (repo public flip
-        # requires explicit Giri authorization, blocked until
-        # productization quality evidence is in).
-        # Trusted Publisher OIDC token-free publish still works WITHOUT
-        # provenance (no token / no OTP / no recovery code consumed).
-        # Customer-side provenance verification is available via
-        # `cosign verify-blob` against the GitHub Release attached .tgz
-        # (Block B Phase 2 above). Only the npm-side `npm audit
-        # signatures` feed is missing until the repo flips to public.
-        # Re-enable: add `--provenance` back to the npm publish command
-        # the same day the repo goes public.
+      - name: npm publish via Trusted Publisher OIDC (--provenance, public repo)
+        # --provenance is ENABLED: aegis-trust is now a PUBLIC repository
+        # (gh repo view → visibility=PUBLIC, 2026-06-13), so the npm registry
+        # accepts the sigstore provenance bundle. The earlier omission was a
+        # private-repo constraint — npm 422'd provenance from private repos
+        # ("Unsupported GitHub Actions source repository visibility: 'private'.
+        # Only public source repositories are supported when publishing with
+        # provenance.", run 26353466944 2026-05-24). That constraint is gone
+        # now the repo is public. The github-hosted runner + id-token: write
+        # (this job) supply the OIDC identity the provenance attestation binds
+        # to. Customer-side: `npm audit signatures` now verifies the published
+        # tarball's provenance in addition to the cosign verify-blob path
+        # (Block B Phase 2). Token-free Trusted Publisher OIDC is unchanged
+        # (no token / OTP / recovery code consumed).
         working-directory: tarball
         run: |
           set -euo pipefail
@@ -548,8 +544,8 @@ jobs:
             ls -la
             exit 1
           fi
-          echo "[npm] publishing $TGZ with --tag $DIST_TAG --access public (OIDC, no --provenance, private repo)"
-          npm publish "$TGZ" --tag "$DIST_TAG" --access public
+          echo "[npm] publishing $TGZ with --tag $DIST_TAG --access public --provenance (OIDC, public repo)"
+          npm publish "$TGZ" --tag "$DIST_TAG" --access public --provenance
 
       - name: npm dist-tag verify (pre-release leaves latest alone)
         # Pre-release versions (-rc, -beta, -alpha) are NOT promoted to latest
@@ -609,7 +605,7 @@ jobs:
         with:
           packages-dir: dist
           skip-existing: true       # version-lock: a tag whose PyPI version already exists is a no-op, not a failure
-          attestations: false       # mirror npm --provenance: deferred while repo is private; re-enable on public flip
+          attestations: true        # PEP 740 attestations: re-enabled now the repo is public (visibility=PUBLIC, 2026-06-13), mirroring npm --provenance
 
   # === Site registry-sync notify job (github-hosted) =================================
   # Runs ONLY on tag push, ONLY after BOTH publish jobs succeed (needs: = all must
