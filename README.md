@@ -2,16 +2,16 @@
 
 **The trust layer for AI agents.** Declare *purpose* + *scope*; the SDK enforces what data the agent can see. Local-first, fail-closed.
 
-- **Python**: [`pip install aegis-trust`](https://pypi.org/project/aegis-trust/) — `0.9.2` — source in [`python/`](python/)
-- **TypeScript / Node**: [`npm install aegis-trust`](https://www.npmjs.com/package/aegis-trust) — `0.9.2` — source in [`node/`](node/)
+- **Python**: [`pip install aegis-trust`](https://pypi.org/project/aegis-trust/) — `0.9.3` — source in [`python/`](python/)
+- **TypeScript / Node**: [`npm install aegis-trust`](https://www.npmjs.com/package/aegis-trust) — `0.9.3` — source in [`node/`](node/)
 
-> **Release `0.9.2`** — published to both npm (`npm install aegis-trust`) and
+> **Release `0.9.3`** — published to both npm (`npm install aegis-trust`) and
 > PyPI (`pip install aegis-trust`); the two SDKs are version-locked at the same
 > number. This is a **pre-1.0 (0.x) release**: the public API may still change
 > before v1.0 — see [Alpha limitations](#alpha-limitations-read-before-adopting)
 > for what does not work yet. Release artifacts (npm tarball, Python wheel +
 > sdist) are cosign-signed (keyless Sigstore, Rekor public log) and attached to
-> the GitHub Release `v0.9.2`. The prior `0.9.0-rc3` (release-integrity incident
+> the GitHub Release `v0.9.3`. The prior `0.9.0-rc3` (release-integrity incident
 > F-054) remains npm-deprecated and version-scoped.
 
 ## For AI agents
