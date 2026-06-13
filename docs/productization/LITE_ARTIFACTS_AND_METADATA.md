@@ -9,8 +9,8 @@ truth.
 
 | Artifact | Registry | Name | Version (at writing) | License |
 |---|---|---|---|---|
-| Node SDK | npm | `aegis-trust` | 0.9.2 | MIT |
-| Python SDK | PyPI | `aegis-trust` | 0.9.2 | MIT |
+| Node SDK | npm | `aegis-trust` | 0.9.3 | MIT |
+| Python SDK | PyPI | `aegis-trust` | 0.9.3 | MIT |
 
 **Verify (one command, all sources):**
 
