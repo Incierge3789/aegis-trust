@@ -62,7 +62,7 @@ parity.
 
 | Claim | Evidence |
 |---|---|
-| Both packages are versioned together (0.9.2 at the time of writing) | `node/package.json`, `node/VERSION`, `node/src/index.ts`, `python/pyproject.toml` |
+| Both packages are versioned together (0.9.3 at the time of writing) | `node/package.json`, `node/VERSION`, `node/src/index.ts`, `python/pyproject.toml` |
 | Version parity is machine-checked across local sources, the git tag, and the live registries by one command | `npm run parity` (from `node/`; `scripts/version-parity.mjs`); offline form: `npm run parity -- --offline` |
 | Framework adapters exist on both sides where the ecosystem exists (LangChain, CrewAI; plus Vercel AI SDK / MCP / streaming on Node) | `node/examples/` (`langchainExample.ts`, `crewaiExample.ts`, `vercelAiExample.ts`, `mcpTool.ts`, `streamExample.ts`); `python/examples/` (`langchain_example.py`, `crewai_example.py`, `stream_example.py`) |
 | Versioning follows a written doctrine (SemVer + schema versions + stability levels + deprecation policy) | `node/docs/VERSIONING.md` |
