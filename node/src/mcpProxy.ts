@@ -224,8 +224,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
   return {
     policy: opts.policy,
-    agentId: opts["agent-id"] || "mcp-host",
-    sessionId: opts["session-id"] || null,
+    agentId: opts["agent-id"] || process.env.AEGIS_AGENT_ID || "mcp-host",
+    sessionId: opts["session-id"] || process.env.AEGIS_SESSION_ID || null,
     auditPath: opts["audit-path"] || null,
     serverCmd,
   };

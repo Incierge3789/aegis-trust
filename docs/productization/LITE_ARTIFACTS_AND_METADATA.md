@@ -58,10 +58,13 @@ Node (`node/examples/`): `quickstart.ts`, `asyncExample.ts`,
 `mcpTool.ts`, `mcpEndToEnd.ts`, `streamExample.ts`, `doctorExample.ts`,
 `sandboxDemo.ts`, `cryptoWallet.ts`, `devAgentWorkflow.ts` (dev-agent
 workflow reference: dot-notation scope + denyFields, behaviorally pinned by
-`node/tests/devAgentWorkflow.test.ts`), `docker/`.
+`node/tests/devAgentWorkflow.test.ts`), `mcpProxyDemo.ts` (agent on the tool
+path: minimized tool output through `aegis-mcp-proxy`), `llmContextLeak.ts`
+(nested over-disclosure before/after), `docker/`.
 
 Python (`python/examples/`): `langchain_example.py`, `crewai_example.py`,
-`stream_example.py`, `doctor_example.py`.
+`stream_example.py`, `doctor_example.py`, `mcp_proxy_demo.py` (agent tool-path
+proxy), `llm_context_leak.py` (nested over-disclosure before/after).
 
 **Verify (existence):**
 
