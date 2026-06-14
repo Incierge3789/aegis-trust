@@ -1,9 +1,13 @@
-# shield-proxy host registration (Claude Code / codex / agy)
+# shield-proxy host registration (Claude Code / Cursor / codex / agy)
 
-The proxy wraps any MCP server command: replace the server command with
-`python3 -m aegis_trust.mcp_proxy --policy <policy> --agent-id <host> -- <original command>`.
-The host needs no other change; tool results arrive already minimized and
-every call lands in the canonical audit stream (`enforcement_point=mcp_proxy`).
+`pip install aegis-trust` installs the `aegis-mcp-proxy` command (equivalently
+`python3 -m aegis_trust.mcp_proxy`). The proxy wraps any MCP server command:
+replace the server command with
+`aegis-mcp-proxy --policy <policy> --agent-id <host> -- <original command>`.
+The host needs no other change; tool results arrive already minimized and every
+call lands in the canonical audit stream (`enforcement_point=mcp_proxy`). This
+is how an agent on the tool path sees only policy-permitted fields — host
+unmodified, fail-closed on unknown tools.
 
 ## Claude Code (`.mcp.json` / `claude mcp add`)
 
@@ -11,9 +15,8 @@ every call lands in the canonical audit stream (`enforcement_point=mcp_proxy`).
 {
   "mcpServers": {
     "crm": {
-      "command": "python3",
+      "command": "aegis-mcp-proxy",
       "args": [
-        "-m", "aegis_trust.mcp_proxy",
         "--policy", "/etc/aegis/policy.json",
         "--agent-id", "claude-code",
         "--", "node", "/opt/crm/mcp-server.js"
@@ -24,7 +27,24 @@ every call lands in the canonical audit stream (`enforcement_point=mcp_proxy`).
 ```
 
 CLI equivalent:
-`claude mcp add crm -- python3 -m aegis_trust.mcp_proxy --policy /etc/aegis/policy.json --agent-id claude-code -- node /opt/crm/mcp-server.js`
+`claude mcp add crm -- aegis-mcp-proxy --policy /etc/aegis/policy.json --agent-id claude-code -- node /opt/crm/mcp-server.js`
+
+## Cursor (`.cursor/mcp.json`, same stdio shape)
+
+```json
+{
+  "mcpServers": {
+    "crm": {
+      "command": "aegis-mcp-proxy",
+      "args": [
+        "--policy", "/etc/aegis/policy.json",
+        "--agent-id", "cursor",
+        "--", "node", "/opt/crm/mcp-server.js"
+      ]
+    }
+  }
+}
+```
 
 ## codex (`~/.codex/config.toml`)
 

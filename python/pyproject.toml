@@ -49,6 +49,11 @@ dependencies = []
 
 [project.scripts]
 aegis = "aegis_trust.cli:cli_entry"
+# The MCP process-boundary proxy: point any MCP host (Claude Code, Cursor,
+# codex, agy, ...) at this instead of the raw server and every tool result is
+# minimized by policy before the agent's model sees it (host unmodified). The
+# proxy already self-identifies as `aegis-mcp-proxy`; wire it as a real command.
+aegis-mcp-proxy = "aegis_trust.mcp_proxy:main"
 
 [project.urls]
 Homepage = "https://github.com/Incierge3789/aegis-trust"
