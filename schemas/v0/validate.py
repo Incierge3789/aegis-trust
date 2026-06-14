@@ -24,8 +24,18 @@ except ImportError:
 HERE = Path(__file__).resolve().parent
 POLICY_SCHEMA = json.loads((HERE / "aegis-policy.v0.schema.json").read_text())
 EVENT_SCHEMA = json.loads((HERE / "aegis-audit-event.v0.schema.json").read_text())
+IDENTITY_SCHEMA = json.loads((HERE / "aegis-identity.v0.schema.json").read_text())
 
 failures: list[str] = []
+
+
+def schema_for(example_name: str) -> dict:
+    """Route an example file to its contract by filename prefix."""
+    if example_name.startswith("policy."):
+        return POLICY_SCHEMA
+    if example_name.startswith("identity."):
+        return IDENTITY_SCHEMA
+    return EVENT_SCHEMA
 
 
 def check(name: str, schema: dict, doc: dict, expect_valid: bool) -> None:
@@ -42,13 +52,14 @@ def check(name: str, schema: dict, doc: dict, expect_valid: bool) -> None:
 # --- positive: all examples validate ---
 for path in sorted((HERE / "examples").glob("*.json")):
     doc = json.loads(path.read_text())
-    schema = POLICY_SCHEMA if path.name.startswith("policy.") else EVENT_SCHEMA
-    check(f"example:{path.name}", schema, doc, expect_valid=True)
+    check(f"example:{path.name}", schema_for(path.name), doc, expect_valid=True)
 
 policy = json.loads((HERE / "examples" / "policy.sales-agent.example.json").read_text())
 event = json.loads((HERE / "examples" / "event.sdk-access.example.json").read_text())
 egress = json.loads((HERE / "examples" / "event.mcp-proxy-egress-deny.example.json").read_text())
 mismatch = json.loads((HERE / "examples" / "event.gateway-identity-mismatch.example.json").read_text())
+identity = json.loads((HERE / "examples" / "identity.static-key.example.json").read_text())
+identity_core = json.loads((HERE / "examples" / "identity.core-issued.example.json").read_text())
 
 # --- negative: policy invariants ---
 bad = copy.deepcopy(policy)
@@ -107,6 +118,27 @@ check("event:no-unknown-fields", EVENT_SCHEMA, bad, expect_valid=False)
 bad = copy.deepcopy(mismatch)
 bad["integrity"]["prev_hash"] = "nothex"
 check("event:integrity-hash-format", EVENT_SCHEMA, bad, expect_valid=False)
+
+# --- negative: principal identity invariants ---
+bad = copy.deepcopy(identity)
+bad["assurance"] = "core_issued"  # core_issued without auth_sub/issuer/not_after
+check("identity:core_issued-requires-binding", IDENTITY_SCHEMA, bad, expect_valid=False)
+
+bad = copy.deepcopy(identity)
+bad["auth_sub"] = "smuggled"  # static_key must carry no authoritative subject
+check("identity:static_key-carries-no-subject", IDENTITY_SCHEMA, bad, expect_valid=False)
+
+bad = copy.deepcopy(identity_core)
+del bad["not_after"]  # half-bound identity (auth_sub/issuer without expiry)
+check("identity:no-half-bound-identity", IDENTITY_SCHEMA, bad, expect_valid=False)
+
+bad = copy.deepcopy(identity)
+bad["identity_schema_version"] = 1
+check("identity:version-pinned-v0", IDENTITY_SCHEMA, bad, expect_valid=False)
+
+bad = copy.deepcopy(identity)
+bad["api_key"] = "sk-secret"  # secrets / product-local fields must never appear
+check("identity:no-unknown-fields", IDENTITY_SCHEMA, bad, expect_valid=False)
 
 print()
 if failures:

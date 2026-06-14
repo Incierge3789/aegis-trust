@@ -29,8 +29,9 @@ the live registry versions, normalized PEP 440-style. Exit 0 = full parity.
 |---|---|---|
 | Policy schema | `schemas/v0/aegis-policy.v0.schema.json` | The one policy document shape shared by every enforcement point (SDK in-process, proxy, gateway) |
 | Audit event schema | `schemas/v0/aegis-audit-event.v0.schema.json` | The one audit-event shape emitted across enforcement points |
+| Identity schema | `schemas/v0/aegis-identity.v0.schema.json` | The one principal-identity shape: WHO a PEP resolved, and how strongly bound (static_key → core_issued) |
 | Design notes | `schemas/v0/DESIGN.md` | Why one contract, three enforcement points |
-| Validator | `schemas/v0/validate.py` | Validates policy/audit documents against the v0 schemas |
+| Validator | `schemas/v0/validate.py` | Validates policy/audit/identity documents against the v0 schemas |
 | Examples | `schemas/v0/examples/` | Known-good documents |
 
 ## 3. SDK source layout

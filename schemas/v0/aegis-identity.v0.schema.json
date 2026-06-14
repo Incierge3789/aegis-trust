@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisagentcontrol.com/schemas/v0/aegis-identity.v0.schema.json",
+  "title": "Aegis Principal Identity v0",
+  "description": "Canonical cross-PEP principal identity record: WHO an enforcement point resolved for a request, and HOW strongly that identity is bound. This is the identity analog of aegis-audit-event.v0 and the same shape used in that event's principal block. It models the LITE-to-FULL identity upgrade path explicitly via the assurance tier: static_key = an api-key→agent_id lookup (advisory self-identification, no cryptographic subject), core_issued = a Core-issued, signed, time-bound token whose auth_sub is the authoritative subject. Field names are snake_case. Secrets (the api key, the raw token) are NEVER part of this record (AO-005).",
+  "type": "object",
+  "required": ["identity_schema_version", "agent_id", "assurance"],
+  "additionalProperties": false,
+  "properties": {
+    "identity_schema_version": {
+      "description": "Canonical identity record schema version. Independent of each product's internal identity store version. Readers treat unknown higher versions as unverifiable, not as v0.",
+      "type": "integer",
+      "const": 0
+    },
+    "agent_id": {
+      "description": "Advisory self-identification (e.g. claude_code, kujouai). Always present. MUST NOT be treated as authoritative when a stronger binding exists; auth_sub supersedes it.",
+      "type": "string",
+      "minLength": 1
+    },
+    "auth_sub": {
+      "description": "Authoritative cryptographically-bound subject. Present iff assurance=core_issued. This is the identity authorization decisions should bind to once available.",
+      "type": "string",
+      "minLength": 1
+    },
+    "assurance": {
+      "description": "Binding strength. static_key = api-key→agent_id lookup (advisory only; no crypto subject; what AegisBase does today). core_issued = a Core-issued signed token (aegis-identity issuance) whose auth_sub is authoritative and whose lifetime is bounded by not_after.",
+      "type": "string",
+      "enum": ["static_key", "core_issued"]
+    },
+    "issuer": {
+      "description": "Who issued the authoritative identity (e.g. aegis-core). Present iff assurance=core_issued.",
+      "type": "string",
+      "minLength": 1
+    },
+    "not_after": {
+      "description": "RFC3339 UTC expiry of the authoritative identity. Present iff assurance=core_issued; static keys do not expire (an operational weakness this contract makes visible).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "key_fingerprint": {
+      "description": "Optional NON-SECRET fingerprint of the resolving credential (e.g. a truncated hash of the api key id), for forensics. MUST NOT be the key itself or anything that could recover it (AO-005).",
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "assurance": { "const": "core_issued" } } },
+      "then": { "required": ["auth_sub", "issuer", "not_after"] }
+    },
+    {
+      "if": { "properties": { "assurance": { "const": "static_key" } } },
+      "then": {
+        "description": "Static keys carry no authoritative subject, issuer, or expiry.",
+        "not": { "anyOf": [
+          { "required": ["auth_sub"] },
+          { "required": ["issuer"] },
+          { "required": ["not_after"] }
+        ] }
+      }
+    }
+  ]
+}
