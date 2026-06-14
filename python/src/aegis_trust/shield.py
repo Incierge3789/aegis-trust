@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 from aegis_trust.errors import AegisConfigError, AegisValidationError, aegis_docs_url
 from aegis_trust.history import record_if_enabled
-from aegis_trust.types import IngestEntry, Mode, PolicySyncEntry
+from aegis_trust.types import IngestEntry, Mode, PolicySyncEntry, ShieldResult
 
 if TYPE_CHECKING:
     # FULL/gateway-mode only. Importing AegisClient at runtime pulls the
@@ -1162,6 +1162,95 @@ def shield(
         return wrapper  # type: ignore[return-value]
 
     return decorator
+
+
+def wrap(
+    value: Any,
+    *,
+    purpose: str,
+    scope: list[str] | None = None,
+    deny_fields: list[str] | None = None,
+) -> ShieldResult:
+    """Filter a value directly and report what was removed (Node SDK parity: ``wrap``).
+
+    Where :func:`shield` is a decorator over an accessor, ``wrap`` filters an
+    already-materialized value in-process and returns a :class:`ShieldResult`
+    whose ``filtered_keys`` names the dot-notation paths that were stripped — the
+    ergonomic way to *observe* and verify LITE filtering in Python (closes the
+    Node-only ``wrap()``/``filteredKeys`` observability gap). It reuses the exact
+    filtering primitives :func:`shield` uses, so behaviour is identical by
+    construction. LITE-only: no gateway call is made.
+
+    ``scope`` (whitelist) and ``deny_fields`` (blacklist) are mutually exclusive;
+    minimum disclosure requires at least one. An explicit ``scope=[]`` discloses
+    nothing and is valid.
+    """
+    if not isinstance(purpose, str) or not purpose:
+        raise AegisValidationError(
+            "wrap: purpose must be a non-empty string.",
+            code="aegis.wrap.purpose.required",
+            remediation='Pass a non-empty string to `purpose`, e.g. "customer_support".',
+            docs_url=aegis_docs_url("aegis.wrap.purpose.required"),
+        )
+    if scope is not None and deny_fields is not None:
+        raise AegisValidationError(
+            "wrap: scope and deny_fields are mutually exclusive. "
+            "Use scope (whitelist) OR deny_fields (blacklist), not both.",
+            code="aegis.wrap.spec.conflict",
+            remediation="Pass either `scope` (whitelist) or `deny_fields` (blacklist), never both.",
+            docs_url=aegis_docs_url("aegis.wrap.spec.conflict"),
+        )
+    scope_provided = scope is not None
+    deny = deny_fields if deny_fields is not None else []
+    if not scope_provided and len(deny) == 0:
+        raise AegisValidationError(
+            "wrap: either scope or deny_fields is required (minimum disclosure). "
+            "An empty spec would return the value unfiltered.",
+            code="aegis.wrap.spec.required",
+            remediation=(
+                "Pass `scope` (whitelist) or `deny_fields` (blacklist). An empty "
+                "spec returns all data unfiltered."
+            ),
+            docs_url=aegis_docs_url("aegis.wrap.spec.required"),
+        )
+    if scope is not None and not isinstance(scope, list):
+        raise TypeError("scope must be a list of strings")
+    if scope is not None and not all(isinstance(f, str) for f in scope):
+        raise TypeError("scope elements must all be strings")
+    if deny_fields is not None and not isinstance(deny_fields, list):
+        raise TypeError("deny_fields must be a list of strings")
+    if deny_fields is not None and not all(isinstance(f, str) for f in deny_fields):
+        raise TypeError("deny_fields elements must all be strings")
+    if deny_fields is not None and len(deny_fields) == 0:
+        raise AegisValidationError(
+            "wrap: deny_fields must not be empty (minimum disclosure). "
+            "An empty deny list hides nothing.",
+            code="aegis.wrap.deny_fields.empty",
+            remediation="Provide at least one field path in `deny_fields`, or use `scope` instead.",
+            docs_url=aegis_docs_url("aegis.wrap.deny_fields.empty"),
+        )
+    for path in scope or []:
+        _validate_field_path(path)
+    for path in deny:
+        _validate_field_path(path)
+
+    # Normalize once so filter + diff observe the same shape (mirrors _shield_lite).
+    normalized = _freeze_single_pass(_to_filterable(value))
+    if deny_fields is not None:
+        deny_tree = _parse_paths(list(deny_fields), broader_wins=True)
+        filtered = _deny_filter_result(normalized, deny_tree)
+        used_scope: list[str] = []
+    else:
+        scope_tree = _parse_paths(list(scope or []))
+        filtered = _filter_result(normalized, scope_tree)
+        used_scope = list(scope or [])
+    return ShieldResult(
+        data=filtered,
+        mode=Mode.LITE,
+        purpose=purpose,
+        scope=used_scope,
+        filtered_keys=_diff_keys(normalized, filtered),
+    )
 
 
 def _shield_deny(

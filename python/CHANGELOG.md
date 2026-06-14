@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added — `wrap()` reaches Node↔Python parity (closes the last named LITE API gap)
+- New public `wrap(value, *, purpose, scope=, deny_fields=)` returning the
+  `ShieldResult` dataclass (`data`, `mode`, `purpose`, `scope`, `filtered_keys`).
+  It filters a value in-process and reports which dot-notation paths were removed
+  — the Python analog of the Node SDK's `wrap()`/`filteredKeys`. Reuses the same
+  filtering primitives as `@shield`, so behaviour is identical by construction.
+- A **shared cross-SDK conformance corpus** (`conformance/filter_parity.v0.json`)
+  is now executed by both SDKs (`python/tests/test_filter_parity_corpus.py`,
+  `node/tests/filterParityCorpus.test.ts`). Both must produce the same `data` and
+  removed-key set, so a Node↔Python filtering divergence fails CI in both
+  ecosystems instead of drifting silently.
+
 ### Changed — LITE is now dependency-free (lower adoption friction)
 - `pip install aegis-trust` pulls **no runtime dependencies**. The in-process
   `@shield` filtering path (LITE) imports nothing beyond the standard library.
