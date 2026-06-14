@@ -1,14 +1,15 @@
 // shield-proxy end-to-end tests (Node) — mirror of python/tests/test_mcp_proxy.py.
 // Real subprocess, real stdio framing: a fake MCP server returns an over-broad
-// record; the proxy must deliver only the policy scope to the host, block
-// unknown tools without forwarding, and emit canonical v0 audit events. Same
-// spec as the Python proxy test => cross-SDK parity for the enforcement point.
+// record; the proxy must deliver only the policy scope to the host (for both
+// tools/call AND resources/read), block unknown tools without forwarding, and
+// emit schema-valid canonical v0 audit events. Same spec as the Python proxy
+// test => cross-SDK parity for the enforcement point.
 //
 // Requests are written in one batch and all responses collected after the proxy
-// exits (matched by JSON-RPC id), rather than interactive round-trips — robust
-// across test-runner stdio scheduling.
+// exits (matched by JSON-RPC id), robust across test-runner stdio scheduling.
 
 import { describe, expect, it } from "vitest";
+import Ajv2020 from "ajv/dist/2020.js";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +17,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PROXY = fileURLToPath(new URL("../dist/mcpProxy.js", import.meta.url));
+const EVENT_SCHEMA = JSON.parse(
+  readFileSync(new URL("../../schemas/v0/aegis-audit-event.v0.schema.json", import.meta.url), "utf8"),
+);
 
 const FAKE_SERVER = `
 import { createInterface } from "node:readline";
@@ -30,6 +34,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     seen.push(msg.params.name);
     result = { structuredContent: RECORD,
       content: [{ type: "text", text: JSON.stringify(RECORD) }, { type: "text", text: "plain note" }] };
+  } else if (msg.method === "resources/read") {
+    result = { contents: [{ uri: msg.params.uri, text: JSON.stringify(RECORD) }] };
   } else if (msg.method === "tools/seen") {
     result = { calls: seen };
   } else {
@@ -43,7 +49,11 @@ const POLICY = {
   policy_schema_version: 0,
   policy_id: "proxy-test-policy",
   purposes: { customer_data: { scope: ["name", "company"] } },
-  tools: { query_business_data: "customer_data", "tools/seen": "customer_data" },
+  tools: {
+    query_business_data: "customer_data",
+    "tools/seen": "customer_data",
+    "resources/read": "customer_data",
+  },
   defaults: { unknown_tool: "block" },
 };
 
@@ -52,6 +62,7 @@ const REQUESTS = [
   { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "query_business_data", arguments: {} } },
   { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "exfiltrate_everything", arguments: {} } },
   { jsonrpc: "2.0", id: 4, method: "tools/seen", params: { name: "tools/seen" } },
+  { jsonrpc: "2.0", id: 5, method: "resources/read", params: { uri: "file://customer/acme" } },
 ];
 
 function runProxy(): Promise<{ byId: Map<number, Record<string, unknown>>; events: Array<Record<string, unknown>> }> {
@@ -89,7 +100,7 @@ function runProxy(): Promise<{ byId: Map<number, Record<string, unknown>>; event
 }
 
 describe("shield-proxy (Node) — MCP enforcement point", () => {
-  it("minimizes a mapped tool result and blocks an unknown tool", { timeout: 20000 }, async () => {
+  it("minimizes mapped tool + resource results and blocks an unknown tool", { timeout: 20000 }, async () => {
     const { byId, events } = await runProxy();
 
     // non-gated traffic passes through untouched
@@ -107,14 +118,23 @@ describe("shield-proxy (Node) — MCP enforcement point", () => {
     expect(br.isError).toBe(true);
     expect(br.content[0].text).toContain("unknown_tool");
 
-    // the server never saw the blocked tool (tools/seen result is scope-filtered,
-    // but exfiltrate_everything must not appear anywhere upstream)
+    // the server never saw the blocked tool
     expect(JSON.stringify(byId.get(4)!.result)).not.toContain("exfiltrate_everything");
 
-    // canonical audit: an allow (the mapped call) and a deny (the unknown tool)
+    // resources/read is a sibling data path on the same boundary — also minimized
+    const res = byId.get(5)!.result as { contents: Array<{ text: string }> };
+    expect(JSON.parse(res.contents[0].text)).toEqual({ name: "ACME", company: "ACME Inc" });
+
+    // canonical audit: allow (mapped calls) + deny (unknown tool), every event
+    // carries the enforcement point, AND every event is schema-valid v0.
     const summary = events.map((e) => [e.enforcement_point, e.decision]);
     expect(summary).toContainEqual(["mcp_proxy", "allow"]);
     expect(summary).toContainEqual(["mcp_proxy", "deny"]);
     expect(events.every((e) => e.enforcement_point === "mcp_proxy")).toBe(true);
+
+    const validate = new Ajv2020({ strict: false }).compile(EVENT_SCHEMA);
+    for (const e of events) {
+      expect(validate(e), JSON.stringify(validate.errors)).toBe(true);
+    }
   });
 });

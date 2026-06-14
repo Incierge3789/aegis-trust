@@ -28,6 +28,33 @@ export interface CanonicalPurpose {
   readonly name: string;
   readonly scope?: string[];
   readonly denyFields?: string[];
+  readonly destinationsAllow?: string[];
+  readonly destinationsDeny?: string[];
+  readonly maxLevel?: string;
+  readonly legalBasis?: string;
+  readonly retentionDays?: number;
+}
+
+const MAX_LEVELS = new Set([
+  "public",
+  "operational",
+  "pii",
+  "financial",
+  "confidential",
+  "critical",
+]);
+const LEGAL_BASES = new Set([
+  "consent",
+  "contract",
+  "legal_obligation",
+  "vital_interests",
+  "public_task",
+  "legitimate_interests",
+]);
+
+export interface RoleRule {
+  readonly allow_purposes?: string[];
+  readonly deny_purposes?: string[];
 }
 
 function cfgErr(message: string, code: string): AegisConfigError {
@@ -59,6 +86,7 @@ export class CanonicalPolicy {
     readonly policyId: string | null,
     readonly purposes: Record<string, CanonicalPurpose>,
     readonly tools: Record<string, string> = {},
+    readonly roles: Record<string, RoleRule> = {},
   ) {}
 
   // Explicit declaration wins; else the tools map; else null (caller blocks).
@@ -66,6 +94,26 @@ export class CanonicalPolicy {
     const name = declaredPurpose || this.tools[toolName];
     if (!name) return null;
     return this.purposes[name] ?? null;
+  }
+
+  // Role layer (advisory outside the gateway). Unknown role => allowed (the
+  // purpose/tool layer above is always enforced). Parity with role_allows.
+  roleAllows(role: string, purpose: string): boolean {
+    const rule = this.roles[role];
+    if (!rule) return true;
+    if (rule.allow_purposes !== undefined) return rule.allow_purposes.includes(purpose);
+    if (rule.deny_purposes !== undefined) return !rule.deny_purposes.includes(purpose);
+    return true;
+  }
+
+  // Egress check (v0). Fail-closed: a purpose with no destinations block permits
+  // no egress at all. Parity with CanonicalPurpose.destination_allowed.
+  destinationAllowed(purpose: CanonicalPurpose, destination: string): boolean {
+    if (purpose.destinationsAllow !== undefined)
+      return purpose.destinationsAllow.includes(destination);
+    if (purpose.destinationsDeny !== undefined)
+      return !purpose.destinationsDeny.includes(destination);
+    return false;
   }
 
   // Minimize `data` under the purpose's rule. Reuses wrap() (corpus-verified,
@@ -122,11 +170,66 @@ function parsePurpose(name: string, raw: unknown): CanonicalPurpose {
       "aegis.canonical.denyFields.empty",
     );
   }
+  const maxLevel = o.max_level;
+  if (maxLevel !== undefined && (typeof maxLevel !== "string" || !MAX_LEVELS.has(maxLevel))) {
+    throw cfgErr(`Purpose '${name}': invalid max_level '${String(maxLevel)}'`, "aegis.canonical.maxLevel.invalid");
+  }
+  const legalBasis = o.legal_basis;
+  if (legalBasis !== undefined && (typeof legalBasis !== "string" || !LEGAL_BASES.has(legalBasis))) {
+    throw cfgErr(`Purpose '${name}': invalid legal_basis '${String(legalBasis)}'`, "aegis.canonical.legalBasis.invalid");
+  }
+  const retentionDays = o.retention_days;
+  if (retentionDays !== undefined && (typeof retentionDays !== "number" || !Number.isInteger(retentionDays) || retentionDays < 1)) {
+    throw cfgErr(`Purpose '${name}': retention_days must be a positive integer`, "aegis.canonical.retentionDays.invalid");
+  }
+  const [destAllow, destDeny] = parseDestinations(name, o.destinations);
   return {
     name,
     scope: hasScope ? [...(o.scope as string[])] : undefined,
     denyFields: hasDeny ? [...(o.deny_fields as string[])] : undefined,
+    destinationsAllow: destAllow,
+    destinationsDeny: destDeny,
+    maxLevel: typeof maxLevel === "string" ? maxLevel : undefined,
+    legalBasis: typeof legalBasis === "string" ? legalBasis : undefined,
+    retentionDays: typeof retentionDays === "number" ? retentionDays : undefined,
   };
+}
+
+// Egress destinations: exactly one of allow/deny; lists of non-empty strings;
+// deny must not be empty. Parity with canonical.py _parse_destinations.
+function parseDestinations(
+  name: string,
+  raw: unknown,
+): [string[] | undefined, string[] | undefined] {
+  if (raw === undefined || raw === null) return [undefined, undefined];
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw cfgErr(`Purpose '${name}': destinations must be a mapping`, "aegis.canonical.destinations.notMapping");
+  }
+  const d = raw as Record<string, unknown>;
+  const allow = d.allow;
+  const deny = d.deny;
+  if ((allow === undefined) === (deny === undefined)) {
+    throw cfgErr(
+      `Purpose '${name}': destinations requires exactly one of allow/deny`,
+      "aegis.canonical.destinations.allowDenyConflict",
+    );
+  }
+  for (const [key, values] of [["allow", allow], ["deny", deny]] as const) {
+    if (values === undefined) continue;
+    if (!Array.isArray(values) || values.some((v) => typeof v !== "string" || !v)) {
+      throw cfgErr(
+        `Purpose '${name}': destinations.${key} must be a list of non-empty strings`,
+        "aegis.canonical.destinations.notList",
+      );
+    }
+  }
+  if (Array.isArray(deny) && deny.length === 0) {
+    throw cfgErr(`Purpose '${name}': destinations.deny must not be empty`, "aegis.canonical.destinations.denyEmpty");
+  }
+  return [
+    allow === undefined ? undefined : [...(allow as string[])],
+    deny === undefined ? undefined : [...(deny as string[])],
+  ];
 }
 
 // Load + validate an aegis-policy v0 document (JSON). YAML, like Python's pyyaml
@@ -184,6 +287,33 @@ export function loadCanonicalPolicy(path: string): CanonicalPolicy {
     }
   }
 
+  const rolesRaw = (o.roles ?? {}) as unknown;
+  const roles: Record<string, RoleRule> = {};
+  if (typeof rolesRaw !== "object" || rolesRaw === null || Array.isArray(rolesRaw)) {
+    throw cfgErr("'roles' must be a mapping", "aegis.canonical.roles.notMapping");
+  }
+  for (const [roleName, rule] of Object.entries(rolesRaw as Record<string, unknown>)) {
+    if (typeof rule !== "object" || rule === null || Array.isArray(rule)) {
+      throw cfgErr(`Role '${roleName}' must be a mapping`, "aegis.canonical.roles.notMapping");
+    }
+    const rr = rule as Record<string, unknown>;
+    const allow = rr.allow_purposes;
+    const deny = rr.deny_purposes;
+    if ((allow === undefined) === (deny === undefined)) {
+      throw cfgErr(
+        `Role '${roleName}': exactly one of allow_purposes/deny_purposes required`,
+        "aegis.canonical.roles.allowDenyConflict",
+      );
+    }
+    if (Array.isArray(deny) && deny.length === 0) {
+      throw cfgErr(`Role '${roleName}': deny_purposes must not be empty`, "aegis.canonical.roles.denyEmpty");
+    }
+    roles[roleName] = {
+      allow_purposes: Array.isArray(allow) ? (allow as string[]) : undefined,
+      deny_purposes: Array.isArray(deny) ? (deny as string[]) : undefined,
+    };
+  }
+
   const defaults = o.defaults;
   if (typeof defaults === "object" && defaults !== null && !Array.isArray(defaults)) {
     for (const [key, value] of Object.entries(defaults as Record<string, unknown>)) {
@@ -203,6 +333,7 @@ export function loadCanonicalPolicy(path: string): CanonicalPolicy {
     typeof o.policy_id === "string" ? o.policy_id : null,
     purposes,
     toolsRaw as Record<string, string>,
+    roles,
   );
 }
 
