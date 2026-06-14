@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — Node↔Python parity: the MCP process-boundary proxy now ships on Node too
+- New `aegis-mcp-proxy` command (bin) and `src/mcpProxy.ts`: a stdio MCP proxy
+  that sits between any MCP host (Claude Code, Cursor, codex, agy) and any MCP
+  server — host unmodified — minimizing every `tools/call` result to policy
+  before the model sees it, blocking unmapped tools fail-closed, and emitting
+  canonical v0 audit events. Faithful port of the Python proxy; the Node proxy
+  test mirrors the Python one (same spec = cross-SDK parity for the enforcement
+  point).
+- New `src/canonical.ts`: aegis-policy v0 loader + aegis-audit-event v0 emitter.
+  Filtering reuses the corpus-verified `wrap()`, so the proxy minimizes data
+  identically to the Python proxy and the in-process SDK.
+- New examples `mcpProxyDemo.ts` (agent-on-tool-path before/after) and
+  `llmContextLeak.ts` (nested over-disclosure proof) — Node mirrors of the
+  Python examples.
+
 ## [0.9.3] - 2026-06-13
 
 ### Fixed — live SDK↔gateway integration (found by a real end-to-end against aegis-core)
