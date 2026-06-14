@@ -42,10 +42,10 @@ classifiers = [
     "Framework :: Pytest",
     "Typing :: Typed",
 ]
-dependencies = [
-    "httpx>=0.23,<1.0",
-    "attrs>=22.2,<27.0",
-]
+# LITE in-process filtering (the quickstart `@shield` path) is dependency-free:
+# `pip install aegis-trust` pulls nothing. The gateway/FULL deps (httpx, attrs)
+# moved to the `full` extra below — install them only to connect a gateway.
+dependencies = []
 
 [project.scripts]
 aegis = "aegis_trust.cli:cli_entry"
@@ -61,6 +61,13 @@ Changelog = "https://github.com/Incierge3789/aegis-trust/blob/main/python/CHANGE
 # Patent licensing: contact@aegisagentcontrol.com
 
 [project.optional-dependencies]
+# FULL / gateway mode: AegisClient → aegis-core REST + the generated client.
+# LITE in-process filtering needs none of this, so it is opt-in.
+#   pip install 'aegis-trust[full]'
+full = [
+    "httpx>=0.23,<1.0",
+    "attrs>=22.2,<27.0",
+]
 yaml = [
     "pyyaml>=6.0",
 ]
@@ -84,6 +91,10 @@ dev = [
     "sqlalchemy>=2",
     # canonical contract v0: schema harness must run (not skip) in CI
     "jsonschema>=4.21",
+    # FULL/gateway extra is now opt-in (not a core dep); CI still exercises the
+    # client + generated-client + FULL-mode tests, so pull it explicitly here.
+    "httpx>=0.23,<1.0",
+    "attrs>=22.2,<27.0",
 ]
 
 [project.entry-points."pytest11"]
