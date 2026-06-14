@@ -1,32 +1,46 @@
 # aegis-trust
 
-**The trust layer for AI agents.** Declare *purpose* + *scope*; the SDK enforces what data the agent can see. Local-first, fail-closed.
+**The trust layer for AI agents.** Put it on your agent's tool path (MCP proxy) or wrap a data accessor in-process (SDK) — declare *purpose* + *scope*, and only the data that purpose allows reaches the agent. Local-first, fail-closed.
 
 - **Python**: [`pip install aegis-trust`](https://pypi.org/project/aegis-trust/) — `0.9.3` — source in [`python/`](python/)
 - **TypeScript / Node**: [`npm install aegis-trust`](https://www.npmjs.com/package/aegis-trust) — `0.9.3` — source in [`node/`](node/)
 
-> **Release `0.9.3`** — published to both npm (`npm install aegis-trust`) and
-> PyPI (`pip install aegis-trust`); the two SDKs are version-locked at the same
-> number. This is a **pre-1.0 (0.x) release**: the public API may still change
-> before v1.0 — see [Alpha limitations](#alpha-limitations-read-before-adopting)
-> for what does not work yet. Release artifacts (npm tarball, Python wheel +
-> sdist) are cosign-signed (keyless Sigstore, Rekor public log) and attached to
-> the GitHub Release `v0.9.3`. The prior `0.9.0-rc3` (release-integrity incident
-> F-054) remains npm-deprecated and version-scoped.
+## Put aegis-trust on your agent's tool path (Claude Code / Cursor / any MCP host)
 
-## For AI agents
+Point your MCP host at `aegis-mcp-proxy` instead of the raw server — **no change
+to the agent or the server.** Every tool result is minimized to your policy
+before it can enter the model's context, logs, or downstream tool calls; tools
+the policy does not map are blocked fail-closed; every call lands in a canonical
+audit stream.
 
-Machine-readable product surface, generated from live registry facts (never
-hand-edited; a CI guard rejects any drift from the generated content):
+```json
+// .mcp.json — wrap any MCP server with the proxy
+{
+  "mcpServers": {
+    "crm": {
+      "command": "aegis-mcp-proxy",
+      "args": ["--policy", "policy.json", "--agent-id", "claude-code",
+               "--", "node", "/opt/crm/mcp-server.js"]
+    }
+  }
+}
+```
 
-- Manifest: <https://aegisagentcontrol.com/aegis.json>
-- Site guide: <https://aegisagentcontrol.com/llms.txt>
-- Quickstart with expected output: <https://aegisagentcontrol.com/quickstart>
+See it in 30 seconds — the same tool call, with and without the proxy on the path:
 
-Package-level guides: [`python/llms.txt`](python/llms.txt) · [`node/llms.txt`](node/llms.txt).
+```bash
+pip install aegis-trust
+python python/examples/mcp_proxy_demo.py
+# WITHOUT proxy: {name, company, email, ssn, card_number}   ← secrets in the agent's context
+# WITH proxy:    {name, company}                            ← stripped at the process boundary
+# unmapped tool: BLOCKED (fail-closed) — never even runs
+```
 
-Both snippets below are **self-contained and run as written** (LITE mode, no
-gateway, no token). The literal record stands in for your real data source.
+Host registration for Cursor / codex / agy: [`schemas/v0/mcp-hosts.md`](schemas/v0/mcp-hosts.md).
+
+## Or shield a data accessor in-process (SDK)
+
+Both snippets are **self-contained and run as written** (LITE mode, no gateway, no token):
 
 ```python
 from aegis_trust import shield
@@ -54,6 +68,48 @@ const getCustomer = shield({ purpose: "customer_support", scope: ["name", "issue
 console.log(getCustomer("C-001"));
 // → { name: "Tanaka Taro", issue: "Login problem" } — email/ssn stripped before the agent sees it
 ```
+
+`wrap()` reports what was filtered; [`python/examples/llm_context_leak.py`](python/examples/llm_context_leak.py)
+shows why a hand-rolled 5-line allowlist leaks on nested data and this does not.
+
+## What this is — and what it is not
+
+The proxy and the SDK run **in your own infrastructure** and minimize what an
+agent receives. That is a **data-minimization / blast-radius layer for agents
+you operate** — not a sandbox against a hostile in-process attacker (in-process
+code can always bypass an in-process filter; LITE never claims otherwise). The
+threat it removes is the common one: sensitive fields *accidentally* riding into
+the model, its logs, and downstream tool calls.
+
+Enforcement against an **untrusted** caller — cryptographic identity, a real
+trust boundary, tamper-evident audit — is **FULL mode** (the aegis-core
+gateway). The same `purpose`/`scope` policy drives all three forms (proxy, SDK,
+gateway): you raise the enforcement strength **without rewriting policy**. The
+claim ceiling and never-claims live in
+[`docs/productization/LITE_CLAIMS.md`](docs/productization/LITE_CLAIMS.md).
+
+## For AI agents
+
+Machine-readable product surface, generated from live registry facts (never
+hand-edited; a CI guard rejects any drift from the generated content):
+
+- Manifest: <https://aegisagentcontrol.com/aegis.json>
+- Site guide: <https://aegisagentcontrol.com/llms.txt>
+- Quickstart with expected output: <https://aegisagentcontrol.com/quickstart>
+
+Package-level guides: [`python/llms.txt`](python/llms.txt) · [`node/llms.txt`](node/llms.txt).
+
+## Release & supply chain
+
+> **Release `0.9.3`** — published to both npm (`npm install aegis-trust`) and
+> PyPI (`pip install aegis-trust`); the two SDKs are version-locked at the same
+> number. This is a **pre-1.0 (0.x) release**: the public API may still change
+> before v1.0 — see [Alpha limitations](#alpha-limitations-read-before-adopting)
+> for what does not work yet. Release artifacts (npm tarball, Python wheel +
+> sdist) are cosign-signed (keyless Sigstore, Rekor public log), carry npm
+> provenance + PyPI PEP 740 attestations, and are attached to the GitHub Release
+> `v0.9.3`. The prior `0.9.0-rc3` (release-integrity incident F-054) remains
+> npm-deprecated and version-scoped.
 
 ## Status
 
