@@ -1,0 +1,8 @@
+{
+  "identity_schema_version": 0,
+  "agent_id": "kujouai",
+  "assurance": "core_issued",
+  "auth_sub": "urn:aegis:agent:kujouai#9f",
+  "issuer": "aegis-core",
+  "not_after": "2026-12-31T23:59:59Z"
+}
