@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stringify as yamlStringify } from "yaml";
 
 import { loadCanonicalPolicy } from "../src/canonical.js";
 
@@ -44,6 +45,14 @@ describe("canonical.ts — load + validation parity", () => {
     expect(pol.destinationAllowed(pol.purposes.billing, "webhook:slack")).toBe(true);
     expect(pol.destinationAllowed(pol.purposes.billing, "llm:openai")).toBe(false);
     expect(pol.destinationAllowed(pol.purposes.customer_data, "anything")).toBe(false); // no block => deny
+  });
+
+  it("loads a YAML policy (parity with python pyyaml extra)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aegis-canon-yaml-"));
+    const p = join(dir, "policy.yaml");
+    writeFileSync(p, yamlStringify(GOOD));
+    const pol = loadCanonicalPolicy(p);
+    expect(pol.purposeForTool("query")?.name).toBe("customer_data");
   });
 
   const REJECTED: Array<[string, unknown]> = [
