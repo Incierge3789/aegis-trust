@@ -6,6 +6,7 @@
 // byte-for-byte) and canonical v0 event emission.
 
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -232,15 +233,30 @@ function parseDestinations(
   ];
 }
 
-// Load + validate an aegis-policy v0 document (JSON). YAML, like Python's pyyaml
-// extra, is an optional follow-on; the proxy's documented format is policy.json.
+// Load + validate an aegis-policy v0 document (JSON or YAML). YAML support, like
+// Python's optional pyyaml extra, is opt-in: it needs the `yaml` package
+// installed (npm install yaml); absent it, a .yaml/.yml path raises an
+// actionable error rather than silently failing — parity with canonical.py.
 export function loadCanonicalPolicy(path: string): CanonicalPolicy {
   const text = readFileSync(path, "utf8");
   let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    throw cfgErr("Canonical policy must be valid JSON", "aegis.canonical.topLevel.notJson");
+  if (path.endsWith(".yaml") || path.endsWith(".yml")) {
+    let YAML: { parse(s: string): unknown };
+    try {
+      YAML = createRequire(import.meta.url)("yaml") as { parse(s: string): unknown };
+    } catch {
+      throw cfgErr(
+        "the 'yaml' package is required for YAML policy documents (npm install yaml)",
+        "aegis.canonical.yamlMissing",
+      );
+    }
+    raw = YAML.parse(text);
+  } else {
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      throw cfgErr("Canonical policy must be valid JSON", "aegis.canonical.topLevel.notJson");
+    }
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw cfgErr("Canonical policy must be a mapping", "aegis.canonical.topLevel.notMapping");
