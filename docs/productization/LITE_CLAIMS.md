@@ -32,16 +32,14 @@ returns only the fields the purpose allows.
 | The minimum-disclosure rule is shared: an empty spec (no `scope`, no deny list) is refused rather than passing data through | `node/src/shield.ts:625-632` ("parity with shield()/Python") |
 | Deny-path edge cases fail closed the same way in both SDKs (e.g. scalar where a deny path was expected, prototype-member handling) | `node/src/filter.ts:129`, `node/src/filter.ts:228` (parity comments bind the Node behavior to the Python reference); test suites `node/tests/shield.test.ts`, `python/tests/` |
 | AUTO does not silently degrade: with FULL intent configured but the gateway unreachable, `shield()` denies rather than falling back to LITE | `node/src/client.ts:761-795` and the Python `shield.py` parity (fail-closed FULL) |
+| `wrap(value, options)` exists in **both** SDKs: a direct value filter returning a `ShieldResult` (`data`, `mode`, `purpose`, `scope`, removed-key list — Node `filteredKeys` / Python `filtered_keys`) | Node `node/src/shield.ts:612`; Python `python/src/aegis_trust/shield.py` (`wrap`) → `python/src/aegis_trust/types.py` `ShieldResult` |
+| The LITE filtering of `wrap()` produces **identical output across SDKs** (same `data` and same removed-key SET), guaranteed by a shared conformance corpus rather than hand-mirrored tests: both SDKs run the same vectors | `conformance/filter_parity.v0.json`, run by `node/tests/filterParityCorpus.test.ts` and `python/tests/test_filter_parity_corpus.py` (a divergence fails CI in both ecosystems) |
 
-**Node-only today (named parity gap, roadmap):** Node additionally provides
-`wrap(value, options)`, a direct value filter that returns
-`ShieldResult { data, mode, purpose, scope, filteredKeys }`
-(`node/src/shield.ts:612`, `node/src/types.ts:23-29`; note the camelCase
-`filteredKeys`; behavior pinned by `node/tests/shield.test.ts:131-138`).
-Python has **no equivalent full-result helper yet**: the `ShieldResult`
-dataclass in `python/src/aegis_trust/types.py` is defined but not returned by
-any current API. We track this as a parity gap rather than claiming it works
-on both sides.
+(Previously `wrap()`/`ShieldResult` was a Node-only named parity gap. Closed:
+Python now ships `wrap()` returning the `ShieldResult` dataclass, and the shared
+conformance corpus pins both SDKs to identical filtering. The only intentional
+difference is `filtered_keys` ordering — Node returns encounter order, Python
+sorted; both report the same SET, so it is compared order-independently.)
 
 **Customer-side:** choosing purposes/scopes that match your data model;
 deciding which accessors to wrap.
@@ -69,9 +67,10 @@ parity.
 
 **Roadmap:** any surface that exists in one SDK but not the other is treated
 as a parity gap and tracked; it is not silently claimed as present on both.
-Known named gap at the time of writing: the `wrap()`/`ShieldResult`
-full-result helper (Node-only; see §1). The boundary-receipt passthrough
-exists on **both** sides (see §3).
+The `wrap()`/`ShieldResult` full-result helper was the last named gap and is now
+closed — present on **both** sides and pinned by a shared conformance corpus
+(see §1). The boundary-receipt passthrough also exists on both sides (see §3).
+No named LITE API parity gap remains at the time of writing.
 
 **Never-claim:** "the SDKs are identical byte-for-byte." Parity means the
 public contract and deny semantics track each other, with Python canonical.

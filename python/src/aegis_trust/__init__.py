@@ -15,7 +15,7 @@
 #     from aegis_trust.trace import trace_context, new_trace_id, get_trace_context
 #     from aegis_trust.history import HistoryStore  # .record_idempotent(key=..., ...)
 #
-from aegis_trust.shield import shield
+from aegis_trust.shield import ShieldResult, shield, wrap
 from aegis_trust.errors import (
     AegisError,
     AegisValidationError,
@@ -35,6 +35,8 @@ from aegis_trust.trace import (
 
 __all__ = [
     "shield",
+    "wrap",
+    "ShieldResult",
     "AegisError",
     "AegisValidationError",
     "AegisConfigError",

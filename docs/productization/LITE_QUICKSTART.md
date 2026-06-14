@@ -75,11 +75,21 @@ const res = wrap(rawUser, { purpose: "show_profile", scope: ["name", "email"] })
 // res.filteredKeys → ["id", "ssn", ...]
 ```
 
-`wrap()`/`ShieldResult` is **Node-only today** (a named parity gap — see
-[`LITE_CLAIMS.md`](./LITE_CLAIMS.md) §1). In Python, observe filtering by
-comparing the wrapped accessor's output with the raw accessor's output. See
-`node/examples/denyFieldsExample.ts` / `dotNotationExample.ts` for deny-path
-and nested-path behavior.
+Python has the same `wrap()`:
+
+```python
+from aegis_trust import wrap
+
+res = wrap(raw_user, purpose="show_profile", scope=["name", "email"])
+# res.data          → {"name": ..., "email": ...}
+# res.filtered_keys → ["id", "ssn", ...]  (Node: filteredKeys)
+```
+
+`wrap()`/`ShieldResult` now ships in **both** SDKs, and both run the same
+filtering conformance corpus (`conformance/filter_parity.v0.json`), so the
+filtered `data` and removed-key set are identical across Node and Python — a
+divergence fails CI in both. See `node/examples/denyFieldsExample.ts` /
+`dotNotationExample.ts` for deny-path and nested-path behavior.
 
 Either way this is an **in-process result, not evidence**: in LITE there is
 no `decision_id` and no integrity-checkable record (see

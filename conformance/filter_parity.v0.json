@@ -1,0 +1,96 @@
+{
+  "$comment": "Cross-SDK LITE filtering conformance corpus. BOTH the Node and Python SDKs execute these exact vectors (node/tests/filterParityCorpus.test.ts, python/tests/test_filter_parity_corpus.py) through their public `wrap()` API and must produce identical `data` plus the same SET of `filtered_keys` (order-independent; Node returns encounter order, Python sorted). A divergence here means the two SDKs protect data differently for the same input — a cross-SDK security-parity regression — and fails CI. This is the drift-proof foundation that hand-mirrored per-SDK tests cannot guarantee. Inputs are plain JSON (no ORM/Pydantic shapes) so the corpus is language-neutral.",
+  "version": 0,
+  "cases": [
+    {
+      "id": "scope-whitelist-basic",
+      "doc": "scope keeps only listed top-level keys; everything else removed",
+      "purpose": "p",
+      "scope": ["name"],
+      "input": {"name": "Aria", "email": "a@x.com", "ssn": "123-45-6789"},
+      "expected_data": {"name": "Aria"},
+      "expected_filtered_keys": ["email", "ssn"]
+    },
+    {
+      "id": "scope-whitelist-multi",
+      "doc": "multiple scope fields kept",
+      "purpose": "p",
+      "scope": ["name", "email"],
+      "input": {"name": "Aria", "email": "a@x.com", "ssn": "123-45-6789"},
+      "expected_data": {"name": "Aria", "email": "a@x.com"},
+      "expected_filtered_keys": ["ssn"]
+    },
+    {
+      "id": "scope-empty-discloses-nothing",
+      "doc": "explicit scope:[] is a maximally-restrictive whitelist (fail-closed)",
+      "purpose": "p",
+      "scope": [],
+      "input": {"name": "Aria", "ssn": "123-45-6789"},
+      "expected_data": {},
+      "expected_filtered_keys": ["name", "ssn"]
+    },
+    {
+      "id": "deny-fields-basic",
+      "doc": "deny_fields removes listed keys, keeps the rest",
+      "purpose": "p",
+      "deny_fields": ["ssn"],
+      "input": {"name": "Aria", "email": "a@x.com", "ssn": "123-45-6789"},
+      "expected_data": {"name": "Aria", "email": "a@x.com"},
+      "expected_filtered_keys": ["ssn"]
+    },
+    {
+      "id": "scope-dot-notation-nested",
+      "doc": "dot-notation keeps a nested field, drops its siblings",
+      "purpose": "p",
+      "scope": ["name", "profile.age"],
+      "input": {"name": "Aria", "profile": {"age": 30, "ssn": "123-45-6789"}},
+      "expected_data": {"name": "Aria", "profile": {"age": 30}},
+      "expected_filtered_keys": ["profile.ssn"]
+    },
+    {
+      "id": "deny-dot-notation-nested",
+      "doc": "dot-notation deny removes only the nested field",
+      "purpose": "p",
+      "deny_fields": ["profile.ssn"],
+      "input": {"name": "Aria", "profile": {"age": 30, "ssn": "123-45-6789"}},
+      "expected_data": {"name": "Aria", "profile": {"age": 30}},
+      "expected_filtered_keys": ["profile.ssn"]
+    },
+    {
+      "id": "scope-list-of-dicts-dot-notation",
+      "doc": "dot-notation scope filters each element of a list-of-dicts",
+      "purpose": "p",
+      "scope": ["users.name"],
+      "input": {"users": [{"name": "Aria", "ssn": "1"}, {"name": "Ben", "ssn": "2"}]},
+      "expected_data": {"users": [{"name": "Aria"}, {"name": "Ben"}]},
+      "expected_filtered_keys": ["users.ssn"]
+    },
+    {
+      "id": "scope-bare-leaf-over-list-of-dicts-drops",
+      "doc": "fail-closed: a bare leaf scope over a list-of-dicts drops the whole key",
+      "purpose": "p",
+      "scope": ["users"],
+      "input": {"users": [{"name": "Aria", "ssn": "1"}]},
+      "expected_data": {},
+      "expected_filtered_keys": ["users"]
+    },
+    {
+      "id": "scope-bare-leaf-over-mapping-drops",
+      "doc": "fail-closed: a bare leaf scope over a nested object drops the whole key",
+      "purpose": "p",
+      "scope": ["config"],
+      "input": {"config": {"api_key": "secret"}},
+      "expected_data": {},
+      "expected_filtered_keys": ["config"]
+    },
+    {
+      "id": "scope-nested-path-on-scalar-drops",
+      "doc": "fail-closed: a nested scope path over a scalar value drops the key",
+      "purpose": "p",
+      "scope": ["profile.age"],
+      "input": {"profile": "not-an-object"},
+      "expected_data": {},
+      "expected_filtered_keys": ["profile"]
+    }
+  ]
+}
