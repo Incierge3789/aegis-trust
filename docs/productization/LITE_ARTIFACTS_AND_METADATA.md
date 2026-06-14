@@ -12,6 +12,10 @@ truth.
 | Node SDK | npm | `aegis-trust` | 0.9.3 | MIT |
 | Python SDK | PyPI | `aegis-trust` | 0.9.3 | MIT |
 
+Both LITE installs are **dependency-free**. The Python gateway/FULL path is an
+opt-in extra: `pip install 'aegis-trust[full]'` (adds `httpx`, `attrs`). LITE
+in-process filtering pulls no runtime dependencies.
+
 **Verify (one command, all sources):**
 
 ```bash

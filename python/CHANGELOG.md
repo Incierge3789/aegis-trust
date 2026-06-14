@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed — LITE is now dependency-free (lower adoption friction)
+- `pip install aegis-trust` pulls **no runtime dependencies**. The in-process
+  `@shield` filtering path (LITE) imports nothing beyond the standard library.
+- The gateway/FULL dependencies (`httpx`, `attrs`) moved to an opt-in extra:
+  install `pip install 'aegis-trust[full]'` to connect a gateway (FULL/AUTO
+  mode). `AegisClient` is imported lazily, so LITE never loads them.
+- Driving FULL mode without the extra now raises a machine-parseable
+  `AegisConfigError` (`code=aegis.client.gateway_extra_missing`) pointing at
+  `pip install 'aegis-trust[full]'`, instead of a raw `ModuleNotFoundError`.
+- **Migration:** if you use FULL/AUTO mode (a gateway URL or `AEGIS_TOKEN`),
+  add the `[full]` extra. Pure LITE users need no change.
+
 ## [0.9.3] - 2026-06-13
 
 ### Fixed — live SDK↔gateway integration (found by a real end-to-end against aegis-core)

@@ -3,7 +3,8 @@
 **The trust layer for AI agents.** One decorator declares the purpose; the SDK enforces what data the agent is allowed to see. Local-first AI agent data access control — no infrastructure, no telemetry.
 
 ```bash
-pip install aegis-trust
+pip install aegis-trust            # LITE: zero runtime dependencies
+# pip install 'aegis-trust[full]'  # add only to connect a gateway (FULL mode)
 ```
 
 [![PyPI version](https://img.shields.io/pypi/v/aegis-trust.svg)](https://pypi.org/project/aegis-trust/)

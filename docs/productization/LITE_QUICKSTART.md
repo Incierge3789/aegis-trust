@@ -12,10 +12,16 @@ ships in this repository.
 ## 0. Install
 
 ```bash
-npm install aegis-trust        # Node 18+
+npm install aegis-trust        # Node 18+ — zero runtime dependencies
 # or
-pip install aegis-trust        # Python 3.10+
+pip install aegis-trust        # Python 3.10+ — zero runtime dependencies (LITE)
 ```
+
+Both LITE installs are **dependency-free**: the in-process filtering path in
+§1–§2 pulls nothing. Only the gateway/FULL path (§4) needs more — on Python,
+`pip install 'aegis-trust[full]'` adds the gateway client deps (`httpx`,
+`attrs`); driving FULL without it raises an actionable `AegisConfigError`
+(`code=aegis.client.gateway_extra_missing`), never a bare `ModuleNotFoundError`.
 
 (The two packages version-track each other; see
 [`LITE_ARTIFACTS_AND_METADATA.md`](./LITE_ARTIFACTS_AND_METADATA.md) §1.)

@@ -19,12 +19,19 @@ import time as _time
 from collections import deque
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
-from aegis_trust.client import AegisClient
-from aegis_trust.errors import AegisValidationError, aegis_docs_url
+from aegis_trust.errors import AegisConfigError, AegisValidationError, aegis_docs_url
 from aegis_trust.history import record_if_enabled
 from aegis_trust.types import IngestEntry, Mode, PolicySyncEntry
+
+if TYPE_CHECKING:
+    # FULL/gateway-mode only. Importing AegisClient at runtime pulls the
+    # optional gateway dependencies (httpx, attrs) into the import graph; the
+    # real import is deferred into _get_client() so a LITE-only install
+    # (`pip install aegis-trust`) carries no runtime dependencies and the
+    # in-process filtering path never touches httpx.
+    from aegis_trust.client import AegisClient
 
 logger = logging.getLogger("aegis")
 
@@ -211,6 +218,28 @@ def _resolve_base_url() -> str:
 def _get_client() -> AegisClient:
     global _client
     if _client is None:
+        # Deferred import: FULL/gateway mode is the only path that needs the
+        # gateway client (and its httpx/attrs deps). A LITE-only install never
+        # reaches here. If the caller drives FULL without the gateway extra,
+        # surface a machine-parseable, actionable error rather than a raw
+        # ModuleNotFoundError.
+        try:
+            from aegis_trust.client import AegisClient
+        except ModuleNotFoundError as exc:
+            missing = (exc.name or "").split(".")[0]
+            if missing in ("httpx", "attrs"):
+                code = "aegis.client.gateway_extra_missing"
+                raise AegisConfigError(
+                    "FULL/gateway mode needs the optional gateway dependencies "
+                    f"(missing: {missing!r}). LITE in-process filtering needs "
+                    "none of them. Install the gateway extra:\n"
+                    "    pip install 'aegis-trust[full]'",
+                    code=code,
+                    remediation="Install the gateway extra: pip install 'aegis-trust[full]'.",
+                    docs_url=aegis_docs_url(code),
+                    cause=exc,
+                ) from exc
+            raise
         base_url = _resolve_base_url()
         _client = AegisClient(
             base_url=base_url,
