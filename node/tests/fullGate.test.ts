@@ -277,3 +277,34 @@ it("FULL grant invokes the protected function exactly once", async () => {
   expect(calls).toBe(1); // authorized → function ran once, after the gate
   expect(out).toEqual({ name: "A" });
 });
+
+// S017 H10 ─────────────────────────────────────────────────────
+it("FULL fails closed when ingest reports partial acceptance (ingested<sent)", async () => {
+  // Contract-valid 200, but the gateway durably committed ZERO of the entries
+  // sent: the audit record never landed. FULL is audit-before-release, so the
+  // filtered data must NOT be released. Previously `ingested >= 0` parsed as
+  // success and the data was released = fail-OPEN on audit completeness.
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/health")) return new Response("ok", { status: 200 });
+    if (url.includes("/check-access")) {
+      return new Response(JSON.stringify({ allowed: true }), { status: 200 });
+    }
+    if (url.includes("/shield/ingest")) {
+      return new Response(
+        JSON.stringify({ data: { ingested: 0, audit_seq_start: 0, audit_seq_end: 0 } }),
+        { status: 200 },
+      );
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  fullEnv();
+
+  const getUser = shield({ purpose: "support", scope: ["name"], mode: Mode.FULL })(
+    async (_: unknown) => ({ name: "A", ssn: "X" }),
+  );
+  const out = await getUser(1);
+
+  // Audit incomplete → data withheld → type-shaped empty mirroring the dict.
+  expect(out).toEqual({});
+});

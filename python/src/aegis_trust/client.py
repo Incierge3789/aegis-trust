@@ -682,6 +682,28 @@ class AegisClient:
             self._max_audit_seq = parsed.audit_seq_end
         return parsed
 
+    @staticmethod
+    def _require_full_acceptance(parsed: IngestResponse, expected: int) -> None:
+        """FULL mode is audit-before-release: the gateway must durably accept
+        ALL entries before the @shield path releases the filtered data.
+
+        A contract-valid ``200 {"ingested": 0, ...}`` (or any
+        ``ingested < expected``) means at least one audit record was NOT durably
+        committed — releasing the data anyway is a fail-OPEN on audit
+        completeness (AO-003). Raise so the ``_shield_full`` try/except returns
+        the type-shaped empty (fail-closed) instead of leaking.
+
+        Only ``ingested == expected`` is asserted: the ``audit_seq_*`` window is
+        gateway-assigned and not contracted to equal the batch size (a valid
+        response can carry ``ingested == 1`` with a wider seq range), so a
+        window-size check would risk fail-closing a legitimate ingest.
+        """
+        if parsed.ingested != expected:
+            raise ValueError(
+                f"ingest: partial acceptance ({parsed.ingested}/{expected}) — "
+                "audit incomplete, failing closed"
+            )
+
     def ingest(self, entries: list[IngestEntry]) -> IngestResponse:
         """Send @shield block records to the Aegis enterprise backend (POST /shield/ingest)."""
         t0 = time.monotonic()
@@ -690,7 +712,9 @@ class AegisClient:
         )
         _emit_metric("shield.ingest", t0, resp.status_code)
         resp.raise_for_status()
-        return self._record_seq(self._parse_ingest_body(resp.json()))
+        parsed = self._parse_ingest_body(resp.json())
+        self._require_full_acceptance(parsed, len(entries))
+        return self._record_seq(parsed)
 
     async def aingest(self, entries: list[IngestEntry]) -> IngestResponse:
         """Async variant of :meth:`ingest`. Uses :class:`httpx.AsyncClient`
@@ -702,7 +726,9 @@ class AegisClient:
         )
         _emit_metric("shield.ingest", t0, resp.status_code)
         resp.raise_for_status()
-        return self._record_seq(self._parse_ingest_body(resp.json()))
+        parsed = self._parse_ingest_body(resp.json())
+        self._require_full_acceptance(parsed, len(entries))
+        return self._record_seq(parsed)
 
     # ── audit chain verification (AO-004) ───────────────────────────
     @staticmethod

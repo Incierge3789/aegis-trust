@@ -428,6 +428,32 @@ def _parse_paths(fields: list[str], *, broader_wins: bool = False) -> dict[str, 
     return tree
 
 
+def _flat_key_hits_deny_leaf(key: str, path_tree: dict[str, Any]) -> bool:
+    """Whether a flattened data key (a key literally containing dots) is denied
+    by a nested deny ``path_tree``.
+
+    Fail-closed for flattened-key APIs: ``deny_fields=["card.cvv"]`` parses to
+    ``{"card": {"cvv": {}}}``. A top-level key LITERALLY named ``"card.cvv"``
+    is not in that tree, so the un-fixed deny loop KEPT it and leaked it
+    (fail-OPEN on deny). Here we re-interpret the flattened key against the
+    deny tree: split on ``.`` and walk; if any prefix lands on a leaf (a denied
+    node), the key is denied. This also means ``deny_fields=["profile"]`` drops
+    a flattened ``"profile.ssn"`` (everything under a denied node), matching the
+    intent of a denylist. Scope (allow-list) needs no analogue — an unmatched
+    literal key is simply not allow-listed (already fail-closed).
+    """
+    if "." not in key:
+        return False
+    node: Any = path_tree
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+        if node == {}:
+            return True
+    return False
+
+
 # Duck-type probes shared between _is_record_like and _to_filterable so the
 # two cannot drift: if a new shape is added to the normalization pipeline,
 # the leak-detection guard auto-tracks it.
@@ -704,6 +730,10 @@ def _deny_filter_dict(
     result: dict[str, Any] = {}
     for k, v in data.items():
         if k not in path_tree:
+            # Flattened-key APIs: a literal "card.cvv" data key is denied by a
+            # nested deny path "card.cvv" (S017 H1 fail-open fix).
+            if isinstance(k, str) and _flat_key_hits_deny_leaf(k, path_tree):
+                continue
             result[k] = v
             continue
         subtree = path_tree[k]
@@ -1648,7 +1678,11 @@ def _diff_keys(original: Any, filtered: Any) -> list[str]:
     """Return keys removed by filtering as dot-notation paths."""
     removed: set[str] = set()
     _collect_removed(original, filtered, "", removed)
-    return sorted(removed)
+    # sort by str(): a non-string top-level key (e.g. an int dict key) produces
+    # a non-string path, and `sorted` of mixed str/int raises TypeError — that
+    # crash propagated out of the public wrap() API (the @shield path caught it
+    # and fail-closed). Sorting by the string form keeps the order total.
+    return sorted(removed, key=str)
 
 
 _COLLECT_REMOVED_MAX_DEPTH = 128
@@ -1684,7 +1718,7 @@ def _collect_removed(
         _path_seen = _path_seen | {oid}
     if isinstance(original, dict) and isinstance(filtered, dict):
         for k in original:
-            path = f"{prefix}.{k}" if prefix else k
+            path = f"{prefix}.{k}" if prefix else str(k)
             if k not in filtered:
                 removed.add(path)
             elif isinstance(original[k], dict) and isinstance(filtered[k], dict):

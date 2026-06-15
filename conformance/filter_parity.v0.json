@@ -91,6 +91,42 @@
       "input": {"profile": "not-an-object"},
       "expected_data": {},
       "expected_filtered_keys": ["profile"]
+    },
+    {
+      "id": "deny-flattened-dotted-key",
+      "doc": "S017 H1: deny_fields=['card.cvv'] removes a top-level key LITERALLY named 'card.cvv' (flattened-key API), not only a nested card->cvv. Was fail-OPEN (leaked).",
+      "purpose": "p",
+      "deny_fields": ["card.cvv"],
+      "input": {"card.cvv": "999", "name": "a"},
+      "expected_data": {"name": "a"},
+      "expected_filtered_keys": ["card.cvv"]
+    },
+    {
+      "id": "deny-subtree-drops-flattened-child",
+      "doc": "S017 H1: deny_fields=['profile'] also drops a flattened 'profile.ssn' child key (everything under a denied node).",
+      "purpose": "p",
+      "deny_fields": ["profile"],
+      "input": {"profile.ssn": "S", "name": "a"},
+      "expected_data": {"name": "a"},
+      "expected_filtered_keys": ["profile.ssn"]
+    },
+    {
+      "id": "scope-proto-key-kept",
+      "doc": "S017 H8/H9: an explicitly-scoped '__proto__' key is kept as ordinary data (parity: Python keeps it; Node must store it as an own property, not the prototype).",
+      "purpose": "p",
+      "scope": ["__proto__", "name"],
+      "input": {"__proto__": "x", "name": "a"},
+      "expected_data": {"__proto__": "x", "name": "a"},
+      "expected_filtered_keys": []
+    },
+    {
+      "id": "scope-proto-key-removed-and-reported",
+      "doc": "S017 H8/H9: an out-of-scope '__proto__' key is removed AND reported in filtered_keys (Node previously under-reported it = silent audit gap).",
+      "purpose": "p",
+      "scope": ["name"],
+      "input": {"__proto__": "x", "name": "a"},
+      "expected_data": {"name": "a"},
+      "expected_filtered_keys": ["__proto__"]
     }
   ]
 }

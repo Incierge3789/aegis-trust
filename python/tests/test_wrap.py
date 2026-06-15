@@ -66,3 +66,40 @@ def test_wrap_deny_fields_empty_invalid() -> None:
 def test_wrap_invalid_field_path() -> None:
     with pytest.raises(AegisValidationError):
         wrap({"a": 1}, purpose="p", scope=["a..b"])
+
+
+# ── S017 adversarial-sweep regressions ───────────────────────────────
+
+
+def test_wrap_mixed_type_keys_do_not_crash() -> None:
+    """S017 H5: a payload mixing string and non-string dict keys, where at least
+    one key is filtered out, used to raise an uncaught TypeError from
+    `sorted(removed)` (str vs int) — it propagated out of the public wrap() API
+    (the @shield decorator path caught it and fail-closed). The removed-key
+    paths are now sorted by their string form, so wrap() no longer crashes.
+    """
+    res = wrap({1: "x", "name": "a", "ssn": "S"}, purpose="p", scope=["name"])
+    assert res.data == {"name": "a"}
+    # both the int key and ssn are reported as removed (as strings, sorted)
+    assert res.filtered_keys == ["1", "ssn"]
+
+
+def test_wrap_deny_flattened_dotted_key_is_removed() -> None:
+    """S017 H1: deny_fields=['card.cvv'] must remove a top-level key LITERALLY
+    named 'card.cvv' (flattened-key API), not only a nested card->cvv. This was
+    fail-OPEN: the literal key was kept and leaked, with no warning.
+    """
+    res = wrap({"card.cvv": "999", "name": "a"}, purpose="p", deny_fields=["card.cvv"])
+    assert res.data == {"name": "a"}
+    assert res.filtered_keys == ["card.cvv"]
+
+
+def test_wrap_deny_nested_still_works() -> None:
+    """S017 H1 guard: the nested deny interpretation is unchanged — a nested
+    card->cvv is still removed while siblings are kept."""
+    res = wrap(
+        {"card": {"cvv": "9", "num": "1"}, "name": "a"},
+        purpose="p",
+        deny_fields=["card.cvv"],
+    )
+    assert res.data == {"card": {"num": "1"}, "name": "a"}

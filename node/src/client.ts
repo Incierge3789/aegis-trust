@@ -580,6 +580,25 @@ export class AegisClient {
     return parsed;
   }
 
+  // FULL mode is audit-before-release: the gateway must durably accept ALL
+  // entries before the shield path releases the filtered data. A contract-valid
+  // `200 {ingested: 0, ...}` (or any ingested < expected) means at least one
+  // audit record was NOT committed — releasing anyway is a fail-OPEN on audit
+  // completeness (AO-003). Throw so the FULL gate fails closed instead of
+  // leaking. Only `ingested === expected` is asserted: the audit_seq_* window
+  // is gateway-assigned and not contracted to equal the batch size, so a
+  // window-size check would risk fail-closing a legitimate ingest. S017 H10.
+  private static requireFullAcceptance(
+    parsed: IngestResponse,
+    expected: number,
+  ): void {
+    if (parsed.ingested !== expected) {
+      throw ingestError(
+        `partial acceptance (${parsed.ingested}/${expected}) — audit incomplete, failing closed`,
+      );
+    }
+  }
+
   async ingest(entries: ReadonlyArray<IngestEntry>): Promise<IngestResponse> {
     const t0 = performance.now();
     const resp = await this.req("POST", "/shield/ingest", {
@@ -587,7 +606,9 @@ export class AegisClient {
     });
     emitMetric("shield.ingest", t0, resp.status);
     if (!resp.ok) throw httpError("shield/ingest", resp.status);
-    return this.recordSeq(AegisClient.parseIngestBody(await resp.json()));
+    const parsed = AegisClient.parseIngestBody(await resp.json());
+    AegisClient.requireFullAcceptance(parsed, entries.length);
+    return this.recordSeq(parsed);
   }
 
   // ── audit/verify ──────────────────────────────────────

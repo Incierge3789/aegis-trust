@@ -150,3 +150,57 @@ def test_ingest_public_api_raises_on_malformed():
                 )
             ]
         )
+
+
+# ── S017 H10: partial / zero durable acceptance must fail closed ──────
+
+
+def test_shield_fails_closed_on_partial_ingest():
+    """S017 H10: a contract-valid 200 with `ingested: 0` (gateway durably
+    committed ZERO of the entries sent) is a partial acceptance — the audit
+    record never landed, so FULL mode must NOT release the filtered data. It
+    previously parsed as success (`ingested >= 0`) and released = fail-OPEN.
+    """
+    from aegis_trust.shield import _get_client
+
+    client = _get_client()
+    client._httpx = httpx.Client(
+        base_url=client._base_url,
+        transport=_transport_with_body(
+            {"data": {"ingested": 0, "audit_seq_start": 0, "audit_seq_end": 0}}
+        ),
+        headers={},
+        timeout=httpx.Timeout(10.0),
+    )
+
+    @shield(purpose="support", scope=["name"])
+    def get_record() -> dict:
+        return {"name": "alice", "ssn": "123"}
+
+    assert get_record() == {}
+
+
+def test_ingest_public_api_raises_on_partial_acceptance():
+    """AegisClient.ingest() raises when fewer entries were durably accepted than
+    were sent (audit incomplete), so the FULL gate fails closed."""
+    client = AegisClient()
+    client._httpx = httpx.Client(
+        base_url=client._base_url,
+        transport=_transport_with_body(
+            {"data": {"ingested": 0, "audit_seq_start": 0, "audit_seq_end": 0}}
+        ),
+        headers={},
+        timeout=httpx.Timeout(10.0),
+    )
+    with pytest.raises(ValueError, match="partial acceptance"):
+        client.ingest(
+            [
+                IngestEntry(
+                    function="f",
+                    purpose="p",
+                    scope=["s"],
+                    blocked_fields=[],
+                    timestamp="2026-04-14T00:00:00Z",
+                )
+            ]
+        )
