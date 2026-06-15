@@ -55,6 +55,25 @@ export function parsePaths(
   return tree;
 }
 
+// Whether a flattened data key (one literally containing dots) is denied by a
+// nested deny `pathTree`. Fail-closed for flattened-key APIs: denyFields=
+// ["card.cvv"] parses to { card: { cvv: {} } }; a top-level key LITERALLY named
+// "card.cvv" is not in that tree, so the un-fixed deny loop KEPT it and leaked
+// it (fail-OPEN on deny). Re-interpret the flattened key: split on "." and
+// walk; if any prefix lands on a leaf (a denied node), the key is denied. This
+// also means denyFields=["profile"] drops a flattened "profile.ssn". Scope
+// needs no analogue (an unmatched literal key is already fail-closed). S017 H1.
+export function flatKeyHitsDenyLeaf(key: string, pathTree: PathTree): boolean {
+  if (!key.includes(".")) return false;
+  let node: PathTree = pathTree;
+  for (const part of key.split(".")) {
+    if (!Object.prototype.hasOwnProperty.call(node, part)) return false;
+    node = node[part]!;
+    if (Object.keys(node).length === 0) return true;
+  }
+  return false;
+}
+
 function countDots(s: string): number {
   let n = 0;
   for (const ch of s) if (ch === ".") n++;

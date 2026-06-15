@@ -1,4 +1,25 @@
 import type { PathTree } from "./types.js";
+import { flatKeyHitsDenyLeaf } from "./paths.js";
+
+// Assign an OWN, enumerable data property even when `key` is "__proto__".
+// Plain `obj["__proto__"] = v` invokes the inherited prototype SETTER instead
+// of creating data: the explicitly-scoped "__proto__" field is silently
+// dropped (diverging from Python, which keeps it as an ordinary key) AND hidden
+// from the audit diff (under-reported removed key). defineProperty stores it as
+// real, enumerable data with no prototype pollution, so Object.keys/entries and
+// the diff all see it — parity with Python. S017 H8/H9.
+function safeSet(
+  obj: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Object.defineProperty(obj, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
 
 // ── Shape probes ──────────────────────────────────────────
 
@@ -58,7 +79,7 @@ export function freezeSinglePass(data: unknown): unknown {
   if (isPlainObject(data)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(data)) {
-      out[k] = freezeSinglePass(v);
+      safeSet(out, k, freezeSinglePass(v));
     }
     return out;
   }
@@ -94,7 +115,7 @@ export function toFilterable(data: unknown): unknown {
     // Class instance → copy own enumerable string-keyed props.
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(data as object)) {
-      out[k] = (data as Record<string, unknown>)[k];
+      safeSet(out, k, (data as Record<string, unknown>)[k]);
     }
     return out;
   }
@@ -142,14 +163,14 @@ export function filterDict(
         continue;
       }
       if (isTraversable(v)) {
-        result[k] = materialize(v);
+        safeSet(result, k, materialize(v));
       } else {
-        result[k] = v;
+        safeSet(result, k, v);
       }
     } else if (isPlainObject(v)) {
-      result[k] = filterDict(v, subtree, warn);
+      safeSet(result, k, filterDict(v, subtree, warn));
     } else if (isTraversable(v)) {
-      result[k] = materialize(v).map((item) => filterResult(item, subtree, warn));
+      safeSet(result, k, materialize(v).map((item) => filterResult(item, subtree, warn)));
     } else {
       // subtree expects nested access but value is scalar — drop fail-closed.
       warn(
@@ -189,7 +210,10 @@ export function denyFilterDict(
     // hasOwnProperty, not `k in pathTree` (prototype-member parity with the
     // scope path above). S015 P0.
     if (!Object.prototype.hasOwnProperty.call(pathTree, k)) {
-      result[k] = v;
+      // Flattened-key APIs: a literal "card.cvv" data key is denied by a nested
+      // deny path "card.cvv" (S017 H1 fail-open fix).
+      if (flatKeyHitsDenyLeaf(k, pathTree)) continue;
+      safeSet(result, k, v);
       continue;
     }
     const subtree = pathTree[k]!;
@@ -199,9 +223,9 @@ export function denyFilterDict(
       continue;
     }
     if (isPlainObject(v)) {
-      result[k] = denyFilterDict(v, subtree, warn);
+      safeSet(result, k, denyFilterDict(v, subtree, warn));
     } else if (isTraversable(v)) {
-      result[k] = materialize(v).map((item) => denyFilterResult(item, subtree, warn));
+      safeSet(result, k, materialize(v).map((item) => denyFilterResult(item, subtree, warn)));
     } else {
       // Scalar where nested deny expected — drop fail-closed (S022 R2).
       warn(
@@ -264,7 +288,7 @@ export function diffKeys(original: unknown, filtered: unknown, prefix = ""): str
     const fObj = isPlainObject(f) ? f : {};
     for (const [k, ov] of Object.entries(o)) {
       const path = prefix ? `${prefix}.${k}` : k;
-      if (!(k in fObj)) {
+      if (!Object.prototype.hasOwnProperty.call(fObj, k)) {
         out.push(path);
         continue;
       }
