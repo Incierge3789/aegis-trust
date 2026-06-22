@@ -153,14 +153,17 @@ export function toReceipt(
 /** Build a Core-VERIFIED {@link BoundaryReceipt} from a Core decision + the
  *  Evidence Aegis Core issued for it.
  *
- *  Structural fail-closed (the §7 contract-pin condition): `coreVerified` is set
- *  `true` **only** when `evidence` is a well-formed {@link CoreDecisionEvidenceInput}
- *  (a non-empty `decision_id` AND `integrity_checkable_at`). Anything missing /
- *  partial / not a real Core Evidence object yields the LITE-local receipt
- *  (`coreVerified=false`, `evidenceMode="local"`). There is NO path that sets
- *  `coreVerified=true` without Core-issued, integrity-checkable Evidence — LITE
- *  cannot self-assert Core's authority. The receipt carries `decisionId` +
- *  `integrityCheckableAt`, so the claim is CHECKABLE, never self-proving. */
+ *  `coreVerified=true` means: Core ISSUED Evidence for this decision, CHECKABLE by
+ *  a third party at `integrityCheckableAt`. It is NOT a cryptographic proof the
+ *  SDK performed — consumers MUST verify at `integrityCheckableAt` before trusting
+ *  the flag (the linkage is the minimum needed FOR that verification, not a
+ *  self-proof). This is a low-level primitive: it TRUSTS that `evidence` is the
+ *  real Core Evidence from a {@link BoundaryDecisionView}. The fabrication-
+ *  resistant source — where `evidence` can only come from an actual /check-boundary
+ *  response — is {@link checkWithCoreReceipt}; prefer it. Fail-closed: a missing /
+ *  partial Evidence object (no non-empty `decision_id` AND `integrity_checkable_at`)
+ *  yields the LITE-local receipt (`coreVerified=false`); LITE never self-asserts
+ *  Core's authority. */
 export function toCoreVerifiedReceipt(
   decision: BoundaryDecision,
   evidence: CoreDecisionEvidenceInput | null | undefined,

@@ -151,8 +151,13 @@ class BoundaryReceipt:
 
 def to_core_verified_receipt(decision, evidence, *, receipt_id, enforcement_status="PENDING"):
     # Core-VERIFIED receipt (parity with Node toCoreVerifiedReceipt, §7 pin).
-    # core_verified True ONLY with non-empty decision_id AND integrity_checkable_at;
-    # otherwise fail-closed to LITE-local. Receipt carries the linkage = CHECKABLE.
+    # core_verified=True means Core ISSUED Evidence, CHECKABLE at
+    # integrity_checkable_at — NOT a proof the SDK performed; consumers MUST verify
+    # there before trusting the flag (the linkage is the minimum needed FOR
+    # verification). Low-level primitive: TRUSTS that `evidence` is the real Core
+    # Evidence from a BoundaryDecisionView. The fabrication-resistant source is
+    # check_with_core_receipt (evidence only from a real /check-boundary response);
+    # prefer it. Fail-closed: missing/partial -> LITE-local (core_verified=False).
     lite = decision.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
 
     def _get(obj, key):
