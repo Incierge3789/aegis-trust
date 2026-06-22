@@ -27,6 +27,7 @@ from aegis_trust.doctor.types import (
     DOCTOR_SCHEMA_VERSION,
     ActionPlan,
     BoundaryDecision,
+    BoundaryReceipt,
     BoundaryOutcome,
     TrustContext,
 )
@@ -190,7 +191,7 @@ async def check_with_core_receipt(
     enforcement_status: str = "PENDING",
     client: "AegisClient | None" = None,
     context: "TrustContext | None" = None,
-):
+) -> "tuple[BoundaryDecision, BoundaryReceipt]":
     """Core round-trip -> (decision, Core-verified receipt) from the REAL Core
     Evidence on the response (never caller-supplied). Safe path: core_verified
     only from an actual /check-boundary response (parity with Node

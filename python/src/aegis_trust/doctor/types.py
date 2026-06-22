@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from typing import Any
 
 DOCTOR_SCHEMA_VERSION = 1
 
@@ -150,8 +151,12 @@ class BoundaryReceipt:
 
 
 def to_core_verified_receipt(
-    decision, evidence, *, receipt_id, enforcement_status="PENDING"
-):
+    decision: BoundaryDecision,
+    evidence: object | None,
+    *,
+    receipt_id: str,
+    enforcement_status: str = "PENDING",
+) -> BoundaryReceipt:
     # Core-VERIFIED receipt (parity with Node toCoreVerifiedReceipt, §7 pin).
     # core_verified=True means Core ISSUED Evidence, CHECKABLE at
     # integrity_checkable_at — NOT a proof the SDK performed; consumers MUST verify
@@ -164,7 +169,7 @@ def to_core_verified_receipt(
         receipt_id=receipt_id, enforcement_status=enforcement_status
     )
 
-    def _get(obj, key):
+    def _get(obj: object, key: str) -> Any:
         # Accept the SDK's CoreDecisionEvidence dataclass AND the raw snake_case
         # wire dict (codex P2: the FULL path returns the dataclass, not a dict).
         if obj is None:
