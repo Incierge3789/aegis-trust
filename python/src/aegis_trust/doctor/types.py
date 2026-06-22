@@ -12,7 +12,7 @@ There is no Core dependency and no LLM in this path.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 DOCTOR_SCHEMA_VERSION = 1
@@ -119,6 +119,16 @@ class BoundaryDecision:
 
 
 @dataclass(frozen=True)
+class CoreEvidenceLink:
+    # Verifiable linkage to Aegis Core Evidence (present iff core_verified).
+    # Parity with Node CoreEvidenceLink; makes the receipt CHECKABLE.
+    decision_id: str
+    enforced_by: str
+    integrity_checkable_at: str
+    recorded_at: str
+
+
+@dataclass(frozen=True)
 class BoundaryReceipt:
     """A locally-verifiable record of a boundary decision. ``evidence_mode`` is
     ``local`` and ``core_verified`` is False until Core issues formal Evidence —
@@ -135,4 +145,30 @@ class BoundaryReceipt:
     enforcement_status: str = "PENDING"
     evidence_mode: str = "local"
     core_verified: bool = False
+    core_evidence: "CoreEvidenceLink | None" = None
     schema_version: int = DOCTOR_SCHEMA_VERSION
+
+
+def to_core_verified_receipt(decision, evidence, *, receipt_id, enforcement_status="PENDING"):
+    # Core-VERIFIED receipt (parity with Node toCoreVerifiedReceipt, §7 pin).
+    # core_verified True ONLY with non-empty decision_id AND integrity_checkable_at;
+    # otherwise fail-closed to LITE-local. Receipt carries the linkage = CHECKABLE.
+    lite = decision.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
+    e = evidence or {}
+    did = e.get("decision_id") if isinstance(e, dict) else None
+    integ = e.get("integrity_checkable_at") if isinstance(e, dict) else None
+    if not (isinstance(did, str) and did and isinstance(integ, str) and integ):
+        return lite
+    eb = e.get("enforced_by")
+    ra = e.get("recorded_at")
+    return replace(
+        lite,
+        evidence_mode="core",
+        core_verified=True,
+        core_evidence=CoreEvidenceLink(
+            decision_id=did,
+            enforced_by=eb if isinstance(eb, str) else "",
+            integrity_checkable_at=integ,
+            recorded_at=ra if isinstance(ra, str) else "",
+        ),
+    )
