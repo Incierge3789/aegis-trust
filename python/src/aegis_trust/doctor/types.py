@@ -12,8 +12,9 @@ There is no Core dependency and no LLM in this path.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
+from typing import Any
 
 DOCTOR_SCHEMA_VERSION = 1
 
@@ -119,6 +120,16 @@ class BoundaryDecision:
 
 
 @dataclass(frozen=True)
+class CoreEvidenceLink:
+    # Verifiable linkage to Aegis Core Evidence (present iff core_verified).
+    # Parity with Node CoreEvidenceLink; makes the receipt CHECKABLE.
+    decision_id: str
+    enforced_by: str
+    integrity_checkable_at: str
+    recorded_at: str
+
+
+@dataclass(frozen=True)
 class BoundaryReceipt:
     """A locally-verifiable record of a boundary decision. ``evidence_mode`` is
     ``local`` and ``core_verified`` is False until Core issues formal Evidence —
@@ -135,4 +146,58 @@ class BoundaryReceipt:
     enforcement_status: str = "PENDING"
     evidence_mode: str = "local"
     core_verified: bool = False
+    core_evidence: "CoreEvidenceLink | None" = None
     schema_version: int = DOCTOR_SCHEMA_VERSION
+
+
+def to_core_verified_receipt(
+    decision: BoundaryDecision,
+    evidence: object | None,
+    *,
+    receipt_id: str,
+    enforcement_status: str = "PENDING",
+) -> BoundaryReceipt:
+    # Core-VERIFIED receipt (parity with Node toCoreVerifiedReceipt, §7 pin).
+    # core_verified=True means Core ISSUED Evidence, CHECKABLE at
+    # integrity_checkable_at — NOT a proof the SDK performed; consumers MUST verify
+    # there before trusting the flag (the linkage is the minimum needed FOR
+    # verification). Low-level primitive: TRUSTS that `evidence` is the real Core
+    # Evidence from a BoundaryDecisionView. The fabrication-resistant source is
+    # check_with_core_receipt (evidence only from a real /check-boundary response);
+    # prefer it. Fail-closed: missing/partial -> LITE-local (core_verified=False).
+    lite = decision.to_receipt(
+        receipt_id=receipt_id, enforcement_status=enforcement_status
+    )
+
+    def _get(obj: object, key: str) -> Any:
+        # Accept the SDK's CoreDecisionEvidence dataclass AND the raw snake_case
+        # wire dict (codex P2: the FULL path returns the dataclass, not a dict).
+        if obj is None:
+            return None
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    did = _get(evidence, "decision_id")
+    integ = _get(evidence, "integrity_checkable_at")
+    # Non-empty AFTER strip (cursor P2: whitespace-only is not a real id / URL).
+    if not (
+        isinstance(did, str)
+        and did.strip()
+        and isinstance(integ, str)
+        and integ.strip()
+    ):
+        return lite
+    eb = _get(evidence, "enforced_by")
+    ra = _get(evidence, "recorded_at")
+    return replace(
+        lite,
+        evidence_mode="core",
+        core_verified=True,
+        core_evidence=CoreEvidenceLink(
+            decision_id=did,
+            enforced_by=eb if isinstance(eb, str) else "",
+            integrity_checkable_at=integ,
+            recorded_at=ra if isinstance(ra, str) else "",
+        ),
+    )

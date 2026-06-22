@@ -11,13 +11,15 @@
 
 export { check } from "./check.js";
 // Doctor v1 — Core-backed async entry point (POST /check-boundary, fail-closed).
-export { checkWithCore } from "./checkWithCore.js";
-export type { CheckWithCoreOptions } from "./checkWithCore.js";
-export { BoundaryOutcome, DOCTOR_SCHEMA_VERSION, scopeForShield, toReceipt } from "./types.js";
+export { checkWithCore, checkWithCoreReceipt } from "./checkWithCore.js";
+export type { CheckWithCoreOptions, CoreVerifiedResult } from "./checkWithCore.js";
+export { BoundaryOutcome, DOCTOR_SCHEMA_VERSION, scopeForShield, toReceipt, toCoreVerifiedReceipt } from "./types.js";
 export type {
   ActionPlan,
   BoundaryDecision,
   BoundaryReceipt,
+  CoreDecisionEvidenceInput,
+  CoreEvidenceLink,
   TrustContext,
 } from "./types.js";
 export type { ActionRule, LocalPolicy, PurposeRule } from "./policy.js";

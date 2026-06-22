@@ -11,7 +11,7 @@ enforcement and formal Evidence remain Aegis Core's responsibility.
 """
 
 from aegis_trust.doctor.check import check
-from aegis_trust.doctor.check_with_core import check_with_core
+from aegis_trust.doctor.check_with_core import check_with_core, check_with_core_receipt
 from aegis_trust.doctor.policy import ActionRule, LocalPolicy, PurposeRule
 from aegis_trust.doctor.types import (
     DOCTOR_SCHEMA_VERSION,
@@ -19,17 +19,22 @@ from aegis_trust.doctor.types import (
     BoundaryDecision,
     BoundaryOutcome,
     BoundaryReceipt,
+    CoreEvidenceLink,
     TrustContext,
+    to_core_verified_receipt,
 )
 
 __all__ = [
     "check",
     "check_with_core",
+    "check_with_core_receipt",
     "ActionPlan",
     "BoundaryDecision",
     "BoundaryOutcome",
     "BoundaryReceipt",
     "TrustContext",
+    "CoreEvidenceLink",
+    "to_core_verified_receipt",
     "LocalPolicy",
     "PurposeRule",
     "ActionRule",

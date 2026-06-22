@@ -161,3 +161,10 @@ include = [
     "/pyproject.toml",
     "/VERSION",
 ]
+
+[tool.uv]
+# Security: force the transitive msgpack (via cachecontrol) to the patched
+# release. msgpack 1.1.2 has GHSA-6v7p-g79w-8964 (fixed in 1.2.1); it is a
+# dev/CI-tool transitive dep (not used by the aegis-trust runtime). Pin to clear
+# the pip-audit fail-closed gate.
+override-dependencies = ["msgpack>=1.2.1"]
