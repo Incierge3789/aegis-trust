@@ -63,6 +63,28 @@ export interface BoundaryDecision {
   readonly schemaVersion: number;
 }
 
+/** The verifiable Evidence Aegis Core issues for a FULL decision. Carrying it
+ *  makes a receipt CHECKABLE against Core (third party verifies at
+ *  `integrityCheckableAt`) rather than self-asserting — the minimum a LITE
+ *  receipt needs to honestly say Core verified the decision. Mirrors the
+ *  `CoreDecisionEvidence` wire shape without coupling doctor -> client. */
+export interface CoreEvidenceLink {
+  readonly decisionId: string;
+  readonly enforcedBy: string;
+  readonly integrityCheckableAt: string;
+  readonly recordedAt: string;
+}
+
+/** The raw Core decision evidence as it arrives on `BoundaryDecisionView.evidence`
+ *  (snake_case wire shape). Accepted by {@link toCoreVerifiedReceipt}; a partial
+ *  or absent object fails closed to a LITE-local receipt. */
+export interface CoreDecisionEvidenceInput {
+  readonly decision_id?: unknown;
+  readonly enforced_by?: unknown;
+  readonly integrity_checkable_at?: unknown;
+  readonly recorded_at?: unknown;
+}
+
 /** A locally-verifiable record of a boundary decision. `evidenceMode` is `local` and `coreVerified` is false until Core issues formal Evidence — LITE must never claim Core's authority. */
 export interface BoundaryReceipt {
   readonly receiptId: string;
@@ -76,6 +98,9 @@ export interface BoundaryReceipt {
   readonly enforcementStatus: string;
   readonly evidenceMode: string;
   readonly coreVerified: boolean;
+  /** Verifiable linkage to Aegis Core's Evidence — present iff `coreVerified`.
+   *  `null` for a LITE-local receipt (LITE never carries Core authority). */
+  readonly coreEvidence: CoreEvidenceLink | null;
   readonly schemaVersion: number;
 }
 
@@ -120,6 +145,45 @@ export function toReceipt(
     enforcementStatus: opts.enforcementStatus ?? "PENDING",
     evidenceMode: "local",
     coreVerified: false,
+    coreEvidence: null,
     schemaVersion: DOCTOR_SCHEMA_VERSION,
+  };
+}
+
+/** Build a Core-VERIFIED {@link BoundaryReceipt} from a Core decision + the
+ *  Evidence Aegis Core issued for it.
+ *
+ *  Structural fail-closed (the §7 contract-pin condition): `coreVerified` is set
+ *  `true` **only** when `evidence` is a well-formed {@link CoreDecisionEvidenceInput}
+ *  (a non-empty `decision_id` AND `integrity_checkable_at`). Anything missing /
+ *  partial / not a real Core Evidence object yields the LITE-local receipt
+ *  (`coreVerified=false`, `evidenceMode="local"`). There is NO path that sets
+ *  `coreVerified=true` without Core-issued, integrity-checkable Evidence — LITE
+ *  cannot self-assert Core's authority. The receipt carries `decisionId` +
+ *  `integrityCheckableAt`, so the claim is CHECKABLE, never self-proving. */
+export function toCoreVerifiedReceipt(
+  decision: BoundaryDecision,
+  evidence: CoreDecisionEvidenceInput | null | undefined,
+  opts: { readonly receiptId: string; readonly enforcementStatus?: string },
+): BoundaryReceipt {
+  const lite = toReceipt(decision, opts);
+  const e = evidence;
+  const verified =
+    e != null
+    && typeof e.decision_id === "string"
+    && e.decision_id.length > 0
+    && typeof e.integrity_checkable_at === "string"
+    && e.integrity_checkable_at.length > 0;
+  if (!verified) return lite; // fail-closed to LITE-local
+  return {
+    ...lite,
+    evidenceMode: "core",
+    coreVerified: true,
+    coreEvidence: {
+      decisionId: e!.decision_id as string,
+      enforcedBy: typeof e!.enforced_by === "string" ? (e!.enforced_by as string) : "",
+      integrityCheckableAt: e!.integrity_checkable_at as string,
+      recordedAt: typeof e!.recorded_at === "string" ? (e!.recorded_at as string) : "",
+    },
   };
 }
