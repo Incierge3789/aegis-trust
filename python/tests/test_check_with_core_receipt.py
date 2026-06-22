@@ -7,7 +7,12 @@ from aegis_trust.doctor.types import ActionPlan, BoundaryOutcome
 
 
 def _plan():
-    return ActionPlan(purpose="draft_reply", action_type="read", data_requested=["name"], destinations=[])
+    return ActionPlan(
+        purpose="draft_reply",
+        action_type="read",
+        data_requested=["name"],
+        destinations=[],
+    )
 
 
 def _view(with_evidence: bool):

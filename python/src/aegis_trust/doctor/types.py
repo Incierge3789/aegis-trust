@@ -149,7 +149,9 @@ class BoundaryReceipt:
     schema_version: int = DOCTOR_SCHEMA_VERSION
 
 
-def to_core_verified_receipt(decision, evidence, *, receipt_id, enforcement_status="PENDING"):
+def to_core_verified_receipt(
+    decision, evidence, *, receipt_id, enforcement_status="PENDING"
+):
     # Core-VERIFIED receipt (parity with Node toCoreVerifiedReceipt, §7 pin).
     # core_verified=True means Core ISSUED Evidence, CHECKABLE at
     # integrity_checkable_at — NOT a proof the SDK performed; consumers MUST verify
@@ -158,7 +160,9 @@ def to_core_verified_receipt(decision, evidence, *, receipt_id, enforcement_stat
     # Evidence from a BoundaryDecisionView. The fabrication-resistant source is
     # check_with_core_receipt (evidence only from a real /check-boundary response);
     # prefer it. Fail-closed: missing/partial -> LITE-local (core_verified=False).
-    lite = decision.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
+    lite = decision.to_receipt(
+        receipt_id=receipt_id, enforcement_status=enforcement_status
+    )
 
     def _get(obj, key):
         # Accept the SDK's CoreDecisionEvidence dataclass AND the raw snake_case
@@ -172,7 +176,12 @@ def to_core_verified_receipt(decision, evidence, *, receipt_id, enforcement_stat
     did = _get(evidence, "decision_id")
     integ = _get(evidence, "integrity_checkable_at")
     # Non-empty AFTER strip (cursor P2: whitespace-only is not a real id / URL).
-    if not (isinstance(did, str) and did.strip() and isinstance(integ, str) and integ.strip()):
+    if not (
+        isinstance(did, str)
+        and did.strip()
+        and isinstance(integ, str)
+        and integ.strip()
+    ):
         return lite
     eb = _get(evidence, "enforced_by")
     ra = _get(evidence, "recorded_at")

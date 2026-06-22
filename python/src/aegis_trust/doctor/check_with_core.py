@@ -216,7 +216,9 @@ async def check_with_core_receipt(
         )
         if view.outcome not in _OUTCOME_MAP:
             d = _fail_closed(plan.purpose, "CORE_MALFORMED_RESPONSE")
-            return d, d.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
+            return d, d.to_receipt(
+                receipt_id=receipt_id, enforcement_status=enforcement_status
+            )
         decision = _map_view(view, plan)
         receipt = to_core_verified_receipt(
             decision,
@@ -227,7 +229,11 @@ async def check_with_core_receipt(
         return decision, receipt
     except ValueError:
         d = _fail_closed(plan.purpose, "CORE_MALFORMED_RESPONSE")
-        return d, d.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
+        return d, d.to_receipt(
+            receipt_id=receipt_id, enforcement_status=enforcement_status
+        )
     except Exception:
         d = _fail_closed(plan.purpose, "CORE_UNAVAILABLE")
-        return d, d.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
+        return d, d.to_receipt(
+            receipt_id=receipt_id, enforcement_status=enforcement_status
+        )

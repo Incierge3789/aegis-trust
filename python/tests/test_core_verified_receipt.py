@@ -38,7 +38,9 @@ def test_fail_closed_no_evidence():
 
 
 def test_fail_closed_missing_decision_id():
-    r = to_core_verified_receipt(_decision(), {**GOOD, "decision_id": ""}, receipt_id="r3")
+    r = to_core_verified_receipt(
+        _decision(), {**GOOD, "decision_id": ""}, receipt_id="r3"
+    )
     assert r.core_verified is False
     assert r.core_evidence is None
 
