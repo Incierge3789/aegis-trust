@@ -64,3 +64,73 @@ describe("toCoreVerifiedReceipt — §7 contract-pin: coreVerified only from Cor
     expect(r.evidenceMode).toBe("local");
   });
 });
+
+import { checkWithCoreReceipt } from "../src/doctor/index.js";
+import type { ActionPlan } from "../src/doctor/index.js";
+import type { AegisClient, BoundaryDecisionView } from "../src/index.js";
+
+function viewWithEvidence(withEvidence: boolean): BoundaryDecisionView {
+  return {
+    source: "CORE",
+    outcome: "PROTECTED",
+    purpose_label: "draft_reply",
+    allowed_fields: ["name"],
+    withheld_fields: ["email_body"],
+    reason_code: "ok",
+    reason_label: "ok",
+    evidence_available: withEvidence,
+    evidence: withEvidence
+      ? {
+          decision_id: "core-dec-1",
+          policy: "p",
+          enforced_by: "Aegis Core",
+          integrity_checkable_at: "https://core/evidence/core-dec-1",
+          recorded_at: "2026-06-22T00:00:00Z",
+        }
+      : null,
+  };
+}
+
+function stubClient(view: BoundaryDecisionView | "throw"): AegisClient {
+  return {
+    checkBoundary: async () => {
+      if (view === "throw") throw new Error("network");
+      return view;
+    },
+  } as unknown as AegisClient;
+}
+
+const aPlan: ActionPlan = {
+  purpose: "draft_reply",
+  dataRequested: ["name"],
+  destinations: [],
+} as unknown as ActionPlan;
+
+describe("checkWithCoreReceipt — coreVerified bound to a real Core round-trip (§7 P1)", () => {
+  it("VERIFIED: Core response carries evidence → receipt.coreVerified=true", async () => {
+    const { receipt } = await checkWithCoreReceipt(aPlan, {
+      client: stubClient(viewWithEvidence(true)),
+      receiptId: "rc1",
+    });
+    expect(receipt.coreVerified).toBe(true);
+    expect(receipt.coreEvidence?.decisionId).toBe("core-dec-1");
+  });
+
+  it("FAIL-CLOSED: Core response without evidence → coreVerified=false (no fabrication)", async () => {
+    const { receipt } = await checkWithCoreReceipt(aPlan, {
+      client: stubClient(viewWithEvidence(false)),
+      receiptId: "rc2",
+    });
+    expect(receipt.coreVerified).toBe(false);
+    expect(receipt.coreEvidence).toBeNull();
+  });
+
+  it("FAIL-CLOSED: network error → BLOCK decision + LITE receipt", async () => {
+    const { decision, receipt } = await checkWithCoreReceipt(aPlan, {
+      client: stubClient("throw"),
+      receiptId: "rc3",
+    });
+    expect(decision.outcome).toBe(BoundaryOutcome.BLOCK);
+    expect(receipt.coreVerified).toBe(false);
+  });
+});

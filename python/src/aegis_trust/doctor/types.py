@@ -154,13 +154,23 @@ def to_core_verified_receipt(decision, evidence, *, receipt_id, enforcement_stat
     # core_verified True ONLY with non-empty decision_id AND integrity_checkable_at;
     # otherwise fail-closed to LITE-local. Receipt carries the linkage = CHECKABLE.
     lite = decision.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
-    e = evidence or {}
-    did = e.get("decision_id") if isinstance(e, dict) else None
-    integ = e.get("integrity_checkable_at") if isinstance(e, dict) else None
-    if not (isinstance(did, str) and did and isinstance(integ, str) and integ):
+
+    def _get(obj, key):
+        # Accept the SDK's CoreDecisionEvidence dataclass AND the raw snake_case
+        # wire dict (codex P2: the FULL path returns the dataclass, not a dict).
+        if obj is None:
+            return None
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    did = _get(evidence, "decision_id")
+    integ = _get(evidence, "integrity_checkable_at")
+    # Non-empty AFTER strip (cursor P2: whitespace-only is not a real id / URL).
+    if not (isinstance(did, str) and did.strip() and isinstance(integ, str) and integ.strip()):
         return lite
-    eb = e.get("enforced_by")
-    ra = e.get("recorded_at")
+    eb = _get(evidence, "enforced_by")
+    ra = _get(evidence, "recorded_at")
     return replace(
         lite,
         evidence_mode="core",

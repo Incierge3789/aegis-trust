@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 
 from aegis_trust.client import AegisClient, BoundaryDecisionView
+from aegis_trust.doctor.types import to_core_verified_receipt  # noqa: F401 (receipt bridge)
 from aegis_trust.doctor.types import (
     DOCTOR_SCHEMA_VERSION,
     ActionPlan,
@@ -180,3 +181,53 @@ async def check_with_core(
         # acquisition error, or mapping error -> fail-closed BLOCK.
         logger.warning("check_with_core: Core unavailable, fail-closed")
         return _fail_closed(plan.purpose, "CORE_UNAVAILABLE")
+
+
+async def check_with_core_receipt(
+    plan: ActionPlan,
+    *,
+    receipt_id: str,
+    enforcement_status: str = "PENDING",
+    client: "AegisClient | None" = None,
+    context: "TrustContext | None" = None,
+):
+    """Core round-trip -> (decision, Core-verified receipt) from the REAL Core
+    Evidence on the response (never caller-supplied). Safe path: core_verified
+    only from an actual /check-boundary response (parity with Node
+    checkWithCoreReceipt, closes §7 review P1). Fail-closed: error/malformed ->
+    BLOCK decision + LITE-local receipt."""
+    try:
+        if client is None:
+            from aegis_trust.shield import _get_client
+
+            client = _get_client()
+        destination = _resolve_destination(plan.destinations)
+        agent_id = context.agent_id if context is not None else None
+        environment = context.environment if context is not None else None
+        mode = context.mode if context is not None else None
+        view = await client.acheck_boundary(
+            plan.purpose,
+            list(plan.data_requested),
+            destination=destination,
+            agent_id=agent_id,
+            environment=environment,
+            mode=mode,
+            schema_version=plan.schema_version or DOCTOR_SCHEMA_VERSION,
+        )
+        if view.outcome not in _OUTCOME_MAP:
+            d = _fail_closed(plan.purpose, "CORE_MALFORMED_RESPONSE")
+            return d, d.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
+        decision = _map_view(view, plan)
+        receipt = to_core_verified_receipt(
+            decision,
+            getattr(view, "evidence", None),
+            receipt_id=receipt_id,
+            enforcement_status=enforcement_status,
+        )
+        return decision, receipt
+    except ValueError:
+        d = _fail_closed(plan.purpose, "CORE_MALFORMED_RESPONSE")
+        return d, d.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)
+    except Exception:
+        d = _fail_closed(plan.purpose, "CORE_UNAVAILABLE")
+        return d, d.to_receipt(receipt_id=receipt_id, enforcement_status=enforcement_status)

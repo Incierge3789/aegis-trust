@@ -171,9 +171,9 @@ export function toCoreVerifiedReceipt(
   const verified =
     e != null
     && typeof e.decision_id === "string"
-    && e.decision_id.length > 0
+    && e.decision_id.trim().length > 0
     && typeof e.integrity_checkable_at === "string"
-    && e.integrity_checkable_at.length > 0;
+    && e.integrity_checkable_at.trim().length > 0;
   if (!verified) return lite; // fail-closed to LITE-local
   return {
     ...lite,

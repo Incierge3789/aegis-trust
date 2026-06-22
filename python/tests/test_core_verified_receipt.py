@@ -55,3 +55,26 @@ def test_lite_to_receipt_unchanged():
     assert r.core_verified is False
     assert r.core_evidence is None
     assert r.evidence_mode == "local"
+
+
+class _EvidenceObj:
+    # Mirrors the SDK's CoreDecisionEvidence dataclass (attribute-shaped, not dict).
+    def __init__(self):
+        self.decision_id = "dec-9"
+        self.enforced_by = "Aegis Core"
+        self.integrity_checkable_at = "https://core/evidence/dec-9"
+        self.recorded_at = "2026-06-22T00:00:00Z"
+
+
+def test_verified_with_sdk_evidence_dataclass_not_dict():
+    # codex P2: the FULL path passes the dataclass, not a dict.
+    r = to_core_verified_receipt(_decision(), _EvidenceObj(), receipt_id="r6")
+    assert r.core_verified is True
+    assert r.core_evidence.decision_id == "dec-9"
+
+
+def test_fail_closed_whitespace_only():
+    bad = {**GOOD, "decision_id": "   ", "integrity_checkable_at": "   "}
+    r = to_core_verified_receipt(_decision(), bad, receipt_id="r7")
+    assert r.core_verified is False
+    assert r.core_evidence is None

@@ -21,8 +21,18 @@ import {
   type BoundaryDecisionView,
   type CoreBoundaryOutcome,
 } from "../client.js";
-import { BoundaryOutcome, DOCTOR_SCHEMA_VERSION } from "./types.js";
-import type { ActionPlan, BoundaryDecision, TrustContext } from "./types.js";
+import {
+  BoundaryOutcome,
+  DOCTOR_SCHEMA_VERSION,
+  toCoreVerifiedReceipt,
+  toReceipt,
+} from "./types.js";
+import type {
+  ActionPlan,
+  BoundaryDecision,
+  BoundaryReceipt,
+  TrustContext,
+} from "./types.js";
 
 // CORE policy marker — distinguishes a Core-authoritative decision from the
 // local-preview v0 (`local-preview-v1`).
@@ -194,5 +204,58 @@ export async function checkWithCore(
     // Network error / timeout / non-2xx (httpError) / client-acquisition error
     // / any mapping error → fail-closed BLOCK (findings E/G parity with Python).
     return failClosed(plan.purpose, "CORE_UNAVAILABLE");
+  }
+}
+
+/** The decision AND a Core-verified receipt, both from one /check-boundary round-trip. */
+export interface CoreVerifiedResult {
+  readonly decision: BoundaryDecision;
+  readonly receipt: BoundaryReceipt;
+}
+
+/**
+ * Core round-trip -> BOTH the {@link BoundaryDecision} and a Core-verified
+ * {@link BoundaryReceipt}, built from the REAL Core Evidence on the response
+ * (never caller-supplied). This is the SAFE path for a Core-verified receipt:
+ * `coreVerified` can only become true from an actual Core /check-boundary
+ * response, closing the "caller fabricates evidence" gap (§7 review P1). Same
+ * fail-closed contract as {@link checkWithCore}: any network error / non-2xx /
+ * malformed body -> BLOCK decision + LITE-local receipt (coreVerified=false).
+ */
+export async function checkWithCoreReceipt(
+  plan: ActionPlan,
+  opts: CheckWithCoreOptions & {
+    readonly receiptId: string;
+    readonly enforcementStatus?: string;
+  },
+): Promise<CoreVerifiedResult> {
+  const recOpts = {
+    receiptId: opts.receiptId,
+    enforcementStatus: opts.enforcementStatus,
+  };
+  const ctx = opts.context;
+  try {
+    const client = opts.client ?? getModuleClient();
+    const destination = resolveDestination(plan.destinations);
+    const view = await client.checkBoundary({
+      purpose: plan.purpose,
+      scope: [...plan.dataRequested],
+      destination,
+      agentId: ctx?.agentId,
+      environment: ctx?.environment,
+      mode: ctx?.mode,
+      schemaVersion: plan.schemaVersion ?? DOCTOR_SCHEMA_VERSION,
+    });
+    if (!isValidView(view)) {
+      const d = failClosed(plan.purpose, "CORE_MALFORMED_RESPONSE");
+      return { decision: d, receipt: toReceipt(d, recOpts) };
+    }
+    const decision = mapView(view, plan);
+    // view.evidence is the REAL Core Evidence (or null) -> coreVerified only if present.
+    const receipt = toCoreVerifiedReceipt(decision, view.evidence, recOpts);
+    return { decision, receipt };
+  } catch {
+    const d = failClosed(plan.purpose, "CORE_UNAVAILABLE");
+    return { decision: d, receipt: toReceipt(d, recOpts) };
   }
 }
