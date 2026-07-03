@@ -55,6 +55,7 @@ from aegis_trust.canonical import (
     ENFORCEMENT_MCP_PROXY,
     CanonicalEmitter,
     CanonicalPolicy,
+    CanonicalPurpose,
     load_canonical_policy,
 )
 
@@ -66,6 +67,62 @@ except Exception:  # pragma: no cover
 PROXY_RUNTIME = f"mcp-proxy/{_sdk_version}"
 
 
+class GatewayGate:
+    """FULL-mode per-call gate for the proxy path (the third PEP grows teeth).
+
+    LITE keeps today's behavior (local canonical filtering only). In FULL the
+    proxy consults the gateway BEFORE forwarding a gated call, so a policy
+    deny stops the tool from ever running — same fail-closed conventions as
+    ``@shield``: a gate error is a deny, never a pass-through.
+
+    Two gate kinds, EXPLICIT (never auto-probed — a silent up/downgrade of the
+    enforcement primitive is exactly the drift Aegis refuses):
+
+    - ``check-access``: the ``@shield``-parity purpose gate (POST
+      /check-access) — works against every live gateway today. Scope-form
+      purposes are checked one scope per call (the client fail-closes
+      multi-scope requests, finding B).
+    - ``tool-call``: the AI-native per-tool-call gate (POST /tool-call,
+      AI_NATIVE_V1_CONTRACT.md) — role-keyed tool whitelist + chain-witnessed
+      decision. Requires a boundary that serves the AI-native family.
+    """
+
+    def __init__(self, client: Any, kind: str, owner: str) -> None:
+        if kind not in ("check-access", "tool-call"):
+            raise ValueError(f"unknown gate kind {kind!r}")
+        self.client = client
+        self.kind = kind
+        self.owner = owner
+
+    def check(self, tool: str, purpose: CanonicalPurpose) -> tuple[bool, str]:
+        """Returns (allowed, reason_code). Fail-closed on every error path."""
+        scope = list(purpose.scope or [])
+        if self.kind == "tool-call":
+            # tool_allowed() is fail-closed internally (transport / non-200 /
+            # malformed / non-passing / unledgered are all a deny).
+            allowed = self.client.tool_allowed(
+                tool, purpose.name, self.owner, fields=scope
+            )
+            return (True, "") if allowed else (False, "gateway_denied")
+        # check_access (not authorize): authorize() swallows transport errors
+        # into False, which would collapse "policy denied" and "gateway down"
+        # into one audit reason. Both are a deny — but an auditor/on-call needs
+        # to tell them apart, so the raising primitive + distinct reason codes.
+        try:
+            if scope:
+                granted = all(
+                    bool(self.client.check_access(purpose.name, [s]).get("allowed"))
+                    for s in scope
+                )
+            else:
+                granted = bool(
+                    self.client.check_access(purpose.name, []).get("allowed")
+                )
+        except Exception:
+            return False, "gateway_unavailable"
+        return (True, "") if granted else (False, "gateway_denied")
+
+
 class ShieldProxy:
     """JSON-RPC line proxy with tool-result minimization."""
 
@@ -75,11 +132,13 @@ class ShieldProxy:
         emitter: CanonicalEmitter,
         agent_id: str,
         session_id: str | None = None,
+        gate: GatewayGate | None = None,
     ) -> None:
         self.policy = policy
         self.emitter = emitter
         self.agent_id = agent_id
         self.session_id = session_id
+        self.gate = gate
         self._pending: dict[Any, dict[str, str]] = {}
         self._lock = threading.Lock()
 
@@ -139,6 +198,22 @@ class ShieldProxy:
                 blocked_fields=[],
             )
             return None, self._block_reply(msg.get("id"), operation, "unknown_tool")
+
+        if self.gate is not None:
+            allowed, reason = self.gate.check(operation, purpose)
+            if not allowed:
+                # FULL gate deny: the tool NEVER runs (pre-call, like @shield —
+                # side effects prevented, not just output discarded).
+                self.emitter.emit(
+                    principal=self._principal(),
+                    purpose=purpose.name,
+                    operation=operation,
+                    decision="deny",
+                    outcome="blocked",
+                    reason_code=reason,
+                    blocked_fields=[],
+                )
+                return None, self._block_reply(msg.get("id"), operation, reason)
 
         if msg.get("id") is not None:
             with self._lock:
@@ -280,6 +355,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--session-id", default=os.environ.get("AEGIS_SESSION_ID"))
     parser.add_argument("--audit-path", default=None, help="canonical event JSONL path")
     parser.add_argument(
+        "--gate",
+        choices=["check-access", "tool-call"],
+        default=os.environ.get("AEGIS_MCP_GATE", "check-access"),
+        help=(
+            "FULL-mode gate primitive (explicit, never auto-probed): "
+            "'check-access' = @shield-parity purpose gate (works on every live "
+            "gateway); 'tool-call' = AI-native per-tool-call gate "
+            "(AI_NATIVE_V1_CONTRACT.md; requires a boundary serving it)"
+        ),
+    )
+    parser.add_argument(
+        "--owner",
+        default=os.environ.get("AEGIS_OWNER"),
+        help="principal.owner for the tool-call gate (defaults to --agent-id)",
+    )
+    parser.add_argument(
         "server_cmd", nargs=argparse.REMAINDER, help="-- real MCP server command"
     )
     args = parser.parse_args(argv)
@@ -299,8 +390,31 @@ def main(argv: list[str] | None = None) -> int:
         path=args.audit_path,
         policy_id=policy.policy_id,
     )
+    # FULL-mode gate: armed only on explicit intent (AEGIS_MODE=full, or
+    # AEGIS_MODE=auto resolving FULL via the same detector @shield uses).
+    # Unset/lite keeps today's LITE-only proxy byte-for-byte.
+    gate = None
+    mode_env = os.environ.get("AEGIS_MODE", "").strip().lower()
+    if mode_env and mode_env != "lite":
+        from aegis_trust.shield import _detect_mode, _get_client
+        from aegis_trust.types import Mode
+
+        if _detect_mode() == Mode.FULL:
+            gate = GatewayGate(
+                _get_client(), args.gate, owner=args.owner or args.agent_id
+            )
+            print(
+                f"aegis-mcp-proxy: FULL gate armed ({args.gate}) — gateway consulted "
+                "before every gated call (deny = tool never runs, fail-closed)",
+                file=sys.stderr,
+            )
+
     proxy = ShieldProxy(
-        policy, emitter, agent_id=args.agent_id, session_id=args.session_id
+        policy,
+        emitter,
+        agent_id=args.agent_id,
+        session_id=args.session_id,
+        gate=gate,
     )
 
     server = subprocess.Popen(

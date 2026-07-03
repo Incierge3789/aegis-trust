@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added — MCP proxy FULL mode: the in-path gateway gate (third PEP grows teeth)
+- `aegis-mcp-proxy` (Node) mirrors the Python proxy's new FULL mode: explicit
+  `--gate check-access|tool-call`, pre-call gateway decision with fail-closed
+  outage handling (`gateway_denied` / `gateway_unavailable` audit reasons),
+  serialized async line handling so gateway latency cannot reorder host
+  traffic. LITE unchanged when `AEGIS_MODE` is unset.
+
+### Added — AI-native v1 wire floor: tool-call / capability lineage / streaming clients
+- New `AegisClient` methods against the FROZEN boundary contract
+  (`AI_NATIVE_V1_CONTRACT.md`, additive-only): `toolCall` (per-tool-call
+  boundary decision; refs and labels only), `toolAllowed` (fail-closed boolean
+  gate — transport error, non-200, malformed body, non-passing outcome, or an
+  UNLEDGERED decision are all a deny), `capabilityMint` (`CapabilityGrant`,
+  narrow-only lineage server-side), `capabilityRevoke`, `streamOpen`,
+  `streamHeartbeat` (`StreamStatus`; anything but `ok` means STOP),
+  `streamClose`. New error code `aegis.aiNative.responseShape`
+  (`AegisValidationError`). Types exported from the barrel. Python parity:
+  same wire bodies, same fail-closed rules, mirrored tests.
+
 ### Added — Node↔Python parity: the MCP process-boundary proxy now ships on Node too
 - New `aegis-mcp-proxy` command (bin) and `src/mcpProxy.ts`: a stdio MCP proxy
   that sits between any MCP host (Claude Code, Cursor, codex, agy) and any MCP

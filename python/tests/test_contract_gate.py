@@ -102,3 +102,54 @@ def test_no_secrets_literal_in_client():
     ]
     offenders = [p for p in patterns if re.search(p, text, re.IGNORECASE)]
     assert not offenders, f"possible credential literal in client.py: {offenders}"
+
+
+def _method_paths_in_client() -> set[tuple[str, str]]:
+    """Extract every (HTTP method, path literal) pair the client calls.
+
+    Same AST walk as `_string_paths_in_client`, keeping the method name —
+    the S233-era gap: path-only checking let /audit/verify (client GETs,
+    spec said post) and /audit-log (client POSTs, spec said get) drift
+    inverted through CI for multiple releases.
+    """
+    tree = ast.parse(CLIENT_PY.read_text())
+    pairs: set[tuple[str, str]] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not isinstance(func, ast.Attribute):
+            continue
+        if func.attr not in {"post", "get", "put", "patch", "delete"}:
+            continue
+        if not node.args:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            if first.value.startswith("/"):
+                pairs.add((func.attr, first.value))
+    return pairs
+
+
+def test_every_client_call_verb_matches_openapi_spec():
+    """Every (method, path) the client uses must be DECLARED with that verb.
+
+    Path-presence alone (the test above) cannot catch an inverted verb; this
+    closes that hole permanently.
+    """
+    spec = json.loads(OPENAPI_JSON.read_text())
+    spec_paths = spec.get("paths", {})
+    mismatches = []
+    for method, path in sorted(_method_paths_in_client()):
+        if path in ALLOWED_MISSING:
+            continue
+        declared = spec_paths.get(path, {})
+        if method not in declared:
+            mismatches.append(
+                f"{method.upper()} {path} (spec declares: "
+                f"{sorted(k for k in declared if k in {'get', 'post', 'put', 'patch', 'delete'})})"
+            )
+    assert not mismatches, (
+        "Contract verb drift — the SDK calls these endpoints with a verb the "
+        f"spec does not declare: {mismatches}"
+    )

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from aegis_trust._constants import AUDIT_SCHEMA_VERSION
 from aegis_trust.types import (
     AuditChainStatus,
+    CapabilityGrant,
     FieldStats,
     FunctionStats,
     IngestEntry,
@@ -28,6 +29,7 @@ from aegis_trust.types import (
     PolicySyncResponse,
     PurposeStats,
     ShieldStats,
+    StreamStatus,
 )
 
 logger = logging.getLogger("aegis")
@@ -799,6 +801,281 @@ class AegisClient:
         if self._async_httpx is not None:
             await self._async_httpx.aclose()
             self._async_httpx = None
+
+    # ── AI-native v1: tool-call / capability lineage / streaming ─────
+    # Wire contract: boundary-core docs/AI_NATIVE_V1_CONTRACT.md (frozen
+    # 2026-07-03, additive-only; /api/v1 base is the SDK-canonical form).
+    # These are the WIRE-FLOOR methods — the in-path interposition layer
+    # (MCP proxy / @guard_tool / delegate() / stream_session()) builds on
+    # them; application code should prefer that layer so the boundary sits
+    # IN the call path, not beside it.
+
+    #: Decision outcomes that permit the guarded action to proceed.
+    PASSING_OUTCOMES = ("PROTECTED", "ACCESS_REDUCED")
+
+    @staticmethod
+    def _require_decision(body: Any, op: str) -> dict[str, Any]:
+        """Fail-closed shape check for decision-bearing responses."""
+        if not isinstance(body, dict):
+            raise ValueError(f"{op}: body is not a dict")
+        decision = body.get("decision")
+        if not isinstance(decision, dict):
+            raise ValueError(f"{op}: 'decision' missing or not a dict")
+        if not isinstance(decision.get("outcome"), str):
+            raise ValueError(f"{op}: 'decision.outcome' missing")
+        if not isinstance(decision.get("ledgered"), bool):
+            raise ValueError(f"{op}: 'decision.ledgered' missing")
+        return body
+
+    @staticmethod
+    def _tool_call_body(
+        tool: str,
+        purpose: str,
+        owner: str,
+        *,
+        fields: list[str] | None,
+        session_id: str | None,
+        destination: str | None,
+        capability: str | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "tool": tool,
+            "purpose": purpose,
+            "owner": owner,
+            "fields": list(fields or []),
+        }
+        if session_id is not None:
+            payload["session_id"] = session_id
+        if destination is not None:
+            payload["destination"] = destination
+        if capability is not None:
+            payload["capability"] = capability
+        return payload
+
+    def tool_call(
+        self,
+        tool: str,
+        purpose: str,
+        owner: str,
+        *,
+        fields: list[str] | None = None,
+        session_id: str | None = None,
+        destination: str | None = None,
+        capability: str | None = None,
+    ) -> dict[str, Any]:
+        """Decide ONE tool invocation at the boundary (POST /tool-call).
+
+        Arguments never leave the caller — refs and labels only (INV-6).
+        Returns ``{"decision": ..., "enforcement": ...}``; a BLOCKED outcome
+        is still HTTP 200 — gate on ``decision["outcome"]`` being in
+        :data:`PASSING_OUTCOMES` AND ``decision["ledgered"]`` (or use
+        :meth:`tool_allowed`).
+        """
+        t0 = time.monotonic()
+        resp = self._get_httpx().post(
+            "/tool-call",
+            json=self._tool_call_body(
+                tool,
+                purpose,
+                owner,
+                fields=fields,
+                session_id=session_id,
+                destination=destination,
+                capability=capability,
+            ),
+        )
+        _emit_metric("tool_call", t0, resp.status_code)
+        resp.raise_for_status()
+        return self._require_decision(resp.json(), "tool-call")
+
+    async def atool_call(
+        self,
+        tool: str,
+        purpose: str,
+        owner: str,
+        *,
+        fields: list[str] | None = None,
+        session_id: str | None = None,
+        destination: str | None = None,
+        capability: str | None = None,
+    ) -> dict[str, Any]:
+        """Async variant of :meth:`tool_call` (the per-tool-call hot path)."""
+        t0 = time.monotonic()
+        resp = await self._get_async_httpx().post(
+            "/tool-call",
+            json=self._tool_call_body(
+                tool,
+                purpose,
+                owner,
+                fields=fields,
+                session_id=session_id,
+                destination=destination,
+                capability=capability,
+            ),
+        )
+        _emit_metric("tool_call", t0, resp.status_code)
+        resp.raise_for_status()
+        return self._require_decision(resp.json(), "tool-call")
+
+    def tool_allowed(
+        self,
+        tool: str,
+        purpose: str,
+        owner: str,
+        *,
+        fields: list[str] | None = None,
+        session_id: str | None = None,
+        destination: str | None = None,
+        capability: str | None = None,
+    ) -> bool:
+        """Fail-closed boolean gate over :meth:`tool_call` (authorize() parity):
+        any transport error, non-200, malformed body, non-passing outcome, or
+        unledgered decision is a deny."""
+        try:
+            body = self.tool_call(
+                tool,
+                purpose,
+                owner,
+                fields=fields,
+                session_id=session_id,
+                destination=destination,
+                capability=capability,
+            )
+        except Exception:
+            logger.warning("tool_allowed: request failed, fail-closed deny")
+            return False
+        decision = body["decision"]
+        return decision["outcome"] in self.PASSING_OUTCOMES and decision["ledgered"]
+
+    @staticmethod
+    def _parse_capability_grant(body: Any) -> CapabilityGrant:
+        if not isinstance(body, dict):
+            raise ValueError("capability/mint: body is not a dict")
+        token = body.get("capability")
+        cap_id = body.get("id")
+        exp = body.get("exp")
+        depth = body.get("depth")
+        root = body.get("root_delegator")
+        if not isinstance(token, str) or not token:
+            raise ValueError("capability/mint: 'capability' missing")
+        if not isinstance(cap_id, str) or not cap_id:
+            raise ValueError("capability/mint: 'id' missing")
+        if not isinstance(exp, int) or exp <= 0:
+            raise ValueError("capability/mint: 'exp' invalid")
+        if not isinstance(depth, int) or depth <= 0:
+            raise ValueError("capability/mint: 'depth' invalid")
+        if not isinstance(root, str) or not root:
+            raise ValueError("capability/mint: 'root_delegator' missing")
+        return CapabilityGrant(
+            capability=token, id=cap_id, exp=exp, depth=depth, root_delegator=root
+        )
+
+    def capability_mint(
+        self,
+        for_agent: str,
+        purposes: list[str],
+        *,
+        scope: list[str] | None = None,
+        tools: list[str] | None = None,
+        ttl_secs: int | None = None,
+        parent_capability: str | None = None,
+    ) -> CapabilityGrant:
+        """Mint a delegation capability (POST /capability/mint).
+
+        Root grants are bounded by the caller's role NOW; a child grant
+        (``parent_capability``) can only NARROW its parent. The boundary
+        witnesses the mint on the chain BEFORE returning the token.
+        """
+        payload: dict[str, Any] = {
+            "for_agent": for_agent,
+            "purposes": list(purposes),
+            "scope": list(scope or []),
+            "tools": list(tools or []),
+        }
+        if ttl_secs is not None:
+            payload["ttl_secs"] = int(ttl_secs)
+        if parent_capability is not None:
+            payload["parent_capability"] = parent_capability
+        resp = self._get_httpx().post("/capability/mint", json=payload)
+        resp.raise_for_status()
+        return self._parse_capability_grant(resp.json())
+
+    def capability_revoke(
+        self,
+        *,
+        capability: str | None = None,
+        capability_id: str | None = None,
+    ) -> str:
+        """Revoke a capability (POST /capability/revoke). Present the token
+        (holder / delegator / root delegator) or, as Admin, the id. Returns
+        the revoked id. Revocation is transitive and cuts matching streams."""
+        payload: dict[str, Any] = {}
+        if capability is not None:
+            payload["capability"] = capability
+        if capability_id is not None:
+            payload["capability_id"] = capability_id
+        resp = self._get_httpx().post("/capability/revoke", json=payload)
+        resp.raise_for_status()
+        body = resp.json()
+        if not isinstance(body, dict) or body.get("ok") is not True:
+            raise ValueError("capability/revoke: 'ok' missing")
+        revoked = body.get("revoked")
+        if not isinstance(revoked, str) or not revoked:
+            raise ValueError("capability/revoke: 'revoked' missing")
+        return revoked
+
+    def stream_open(self, envelope: dict[str, Any]) -> dict[str, Any]:
+        """Open a continuous-authz stream (POST /stream/open) with a full
+        Common Envelope. Returns ``{"decision":…, "enforcement":…, "stream":…}``
+        — ``stream`` is non-null (``{"stream_id":…, "status":"open"}``) iff the
+        decision passes AND is ledgered."""
+        resp = self._get_httpx().post("/stream/open", json={"envelope": envelope})
+        resp.raise_for_status()
+        body = self._require_decision(resp.json(), "stream/open")
+        stream = body.get("stream")
+        if stream is not None:
+            if not isinstance(stream, dict) or not isinstance(
+                stream.get("stream_id"), str
+            ):
+                raise ValueError("stream/open: 'stream.stream_id' missing")
+        return body
+
+    @staticmethod
+    def _parse_stream_status(body: Any) -> StreamStatus:
+        if not isinstance(body, dict) or not isinstance(body.get("status"), str):
+            raise ValueError("stream/heartbeat: 'status' missing")
+        reason = body.get("reason")
+        return StreamStatus(
+            status=body["status"],
+            reason=reason if isinstance(reason, str) else None,
+        )
+
+    def stream_heartbeat(self, stream_id: str) -> StreamStatus:
+        """Revalidate a stream NOW (POST /stream/heartbeat) against the live
+        registries (duress / legal hold / delegation expiry). ``status`` is
+        ``ok | revoked | closed``; anything but ``ok`` means STOP."""
+        resp = self._get_httpx().post(
+            "/stream/heartbeat", json={"stream_id": stream_id}
+        )
+        resp.raise_for_status()
+        return self._parse_stream_status(resp.json())
+
+    async def astream_heartbeat(self, stream_id: str) -> StreamStatus:
+        """Async variant of :meth:`stream_heartbeat` (the background-loop path)."""
+        resp = await self._get_async_httpx().post(
+            "/stream/heartbeat", json={"stream_id": stream_id}
+        )
+        resp.raise_for_status()
+        return self._parse_stream_status(resp.json())
+
+    def stream_close(self, stream_id: str) -> bool:
+        """Close a stream (POST /stream/close; owner or Admin). Witnessed."""
+        resp = self._get_httpx().post("/stream/close", json={"stream_id": stream_id})
+        resp.raise_for_status()
+        body = resp.json()
+        if not isinstance(body, dict) or body.get("ok") is not True:
+            raise ValueError("stream/close: 'ok' missing")
+        return True
 
     # ── token rotation (AO-001 + AO-004) ────────────────────────────
     def set_token(self, new_token: str) -> None:

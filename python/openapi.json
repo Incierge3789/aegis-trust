@@ -81,7 +81,7 @@
       }
     },
     "/audit/verify": {
-      "post": {
+      "get": {
         "summary": "Verify audit chain / inclusion",
         "responses": {
           "200": {
@@ -98,11 +98,11 @@
       }
     },
     "/audit-log": {
-      "get": {
-        "summary": "Read audit log entries",
+      "post": {
+        "summary": "Append an audit log entry (FULL-mode log_audit)",
         "responses": {
           "200": {
-            "description": "Audit log"
+            "description": "Audit entry accepted"
           }
         }
       }
@@ -113,6 +113,66 @@
         "responses": {
           "200": {
             "description": "Healthy"
+          }
+        }
+      }
+    },
+    "/tool-call": {
+      "post": {
+        "summary": "AI-native v1: decide one tool invocation at the boundary",
+        "responses": {
+          "200": {
+            "description": "{decision, enforcement} — BLOCKED is still 200; gate on decision.outcome + decision.ledgered"
+          }
+        }
+      }
+    },
+    "/capability/mint": {
+      "post": {
+        "summary": "AI-native v1: mint a delegation capability (narrow-only lineage)",
+        "responses": {
+          "200": {
+            "description": "{capability, id, exp, depth, root_delegator}"
+          }
+        }
+      }
+    },
+    "/capability/revoke": {
+      "post": {
+        "summary": "AI-native v1: revoke a capability (transitive; cuts matching streams)",
+        "responses": {
+          "200": {
+            "description": "{ok, revoked}"
+          }
+        }
+      }
+    },
+    "/stream/open": {
+      "post": {
+        "summary": "AI-native v1: open a continuous-authz stream from a Common Envelope decision",
+        "responses": {
+          "200": {
+            "description": "{decision, enforcement, stream|null}"
+          }
+        }
+      }
+    },
+    "/stream/heartbeat": {
+      "post": {
+        "summary": "AI-native v1: revalidate a stream against the live registries",
+        "responses": {
+          "200": {
+            "description": "{status: ok|revoked|closed, reason?}"
+          }
+        }
+      }
+    },
+    "/stream/close": {
+      "post": {
+        "summary": "AI-native v1: close a stream (owner or Admin; chain-witnessed)",
+        "responses": {
+          "200": {
+            "description": "{ok}"
           }
         }
       }

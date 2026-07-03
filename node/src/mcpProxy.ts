@@ -17,15 +17,65 @@ import { fileURLToPath } from "node:url";
 import {
   CanonicalEmitter,
   CanonicalPolicy,
+  CanonicalPurpose,
   ENFORCEMENT_MCP_PROXY,
   loadCanonicalPolicy,
 } from "./canonical.js";
+import { AegisClient, detectMode, getModuleClient } from "./client.js";
 import { VERSION } from "./index.js";
 
 const PROXY_RUNTIME = `mcp-proxy/${VERSION}`;
 
 // Data-bearing server->host methods the proxy gates.
 const GATED_METHODS = new Set(["tools/call", "resources/read", "prompts/get"]);
+
+// FULL-mode per-call gate (the third PEP grows teeth). LITE keeps today's
+// behavior; in FULL the proxy consults the gateway BEFORE forwarding a gated
+// call, so a policy deny stops the tool from ever running. Gate kind is
+// EXPLICIT (never auto-probed — a silent up/downgrade of the enforcement
+// primitive is exactly the drift Aegis refuses):
+//   check-access = @shield-parity purpose gate (every live gateway serves it);
+//   tool-call    = AI-native per-tool-call gate (AI_NATIVE_V1_CONTRACT.md).
+// Faithful mirror of python mcp_proxy.GatewayGate.
+export class GatewayGate {
+  constructor(
+    private client: AegisClient,
+    readonly kind: "check-access" | "tool-call",
+    private owner: string,
+  ) {}
+
+  /** Returns [allowed, reasonCode]. Fail-closed on every error path. */
+  async check(tool: string, purpose: CanonicalPurpose): Promise<[boolean, string]> {
+    const scope = [...(purpose.scope ?? [])];
+    if (this.kind === "tool-call") {
+      // toolAllowed() is fail-closed internally (transport / non-200 /
+      // malformed / non-passing / unledgered are all a deny).
+      const allowed = await this.client.toolAllowed({
+        tool,
+        purpose: purpose.name,
+        owner: this.owner,
+        fields: scope,
+      });
+      return allowed ? [true, ""] : [false, "gateway_denied"];
+    }
+    // checkAccess (not authorize): authorize() swallows transport errors into
+    // false, which would collapse "policy denied" and "gateway down" into one
+    // audit reason. Both deny — but they must stay distinguishable.
+    try {
+      if (scope.length > 0) {
+        for (const s of scope) {
+          const resp = await this.client.checkAccess(purpose.name, [s]);
+          if (resp.allowed !== true) return [false, "gateway_denied"];
+        }
+        return [true, ""];
+      }
+      const resp = await this.client.checkAccess(purpose.name, []);
+      return resp.allowed === true ? [true, ""] : [false, "gateway_denied"];
+    } catch {
+      return [false, "gateway_unavailable"];
+    }
+  }
+}
 
 export class ShieldProxy {
   private pending = new Map<unknown, { tool: string; purpose: string }>();
@@ -35,6 +85,7 @@ export class ShieldProxy {
     private emitter: CanonicalEmitter,
     private agentId: string,
     private sessionId: string | null = null,
+    private gate: GatewayGate | null = null,
   ) {}
 
   private principal(): Record<string, unknown> {
@@ -60,7 +111,8 @@ export class ShieldProxy {
   }
 
   // host -> server. Returns { forward, reply }; exactly one is set.
-  handleClientLine(line: string): { forward?: string; reply?: string } {
+  // Async because the FULL gate awaits the gateway; LITE resolves immediately.
+  async handleClientLine(line: string): Promise<{ forward?: string; reply?: string }> {
     let msg: unknown;
     try {
       msg = JSON.parse(line);
@@ -116,6 +168,22 @@ export class ShieldProxy {
         blockedFields: [],
       });
       return { reply: this.blockReply(m.id, operation, "unknown_tool") };
+    }
+    if (this.gate !== null) {
+      const [allowed, reason] = await this.gate.check(operation, purpose);
+      if (!allowed) {
+        // FULL gate deny: the tool NEVER runs (pre-call, like @shield).
+        this.emitter.emit({
+          principal: this.principal(),
+          purpose: purpose.name,
+          operation,
+          decision: "deny",
+          outcome: "blocked",
+          reasonCode: reason,
+          blockedFields: [],
+        });
+        return { reply: this.blockReply(m.id, operation, reason) };
+      }
     }
     if (m.id != null) {
       this.pending.set(m.id, { tool: operation, purpose: purpose.name });
@@ -203,6 +271,8 @@ interface ParsedArgs {
   agentId: string;
   sessionId: string | null;
   auditPath: string | null;
+  gateKind: "check-access" | "tool-call";
+  owner: string | null;
   serverCmd: string[];
 }
 
@@ -222,16 +292,22 @@ function parseArgs(argv: string[]): ParsedArgs {
   if (serverCmd.length === 0) {
     throw new Error("aegis-mcp-proxy: a server command after `--` is required");
   }
+  const gateKind = opts.gate || process.env.AEGIS_MCP_GATE || "check-access";
+  if (gateKind !== "check-access" && gateKind !== "tool-call") {
+    throw new Error(`aegis-mcp-proxy: unknown --gate ${gateKind} (check-access | tool-call)`);
+  }
   return {
     policy: opts.policy,
     agentId: opts["agent-id"] || process.env.AEGIS_AGENT_ID || "mcp-host",
     sessionId: opts["session-id"] || process.env.AEGIS_SESSION_ID || null,
     auditPath: opts["audit-path"] || null,
+    gateKind,
+    owner: opts.owner || process.env.AEGIS_OWNER || null,
     serverCmd,
   };
 }
 
-export function main(argv: string[]): number {
+export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const policy = loadCanonicalPolicy(args.policy);
   const emitter = new CanonicalEmitter(
@@ -240,21 +316,43 @@ export function main(argv: string[]): number {
     args.auditPath,
     policy.policyId,
   );
-  const proxy = new ShieldProxy(policy, emitter, args.agentId, args.sessionId);
+  // FULL-mode gate: armed only on explicit intent (AEGIS_MODE=full, or
+  // AEGIS_MODE=auto resolving FULL via the same detector shield uses).
+  // Unset/lite keeps today's LITE-only proxy byte-for-byte.
+  let gate: GatewayGate | null = null;
+  const modeEnv = (process.env.AEGIS_MODE ?? "").trim().toLowerCase();
+  if (modeEnv && modeEnv !== "lite") {
+    const resolved = modeEnv === "full" ? "full" : await detectMode();
+    if (resolved === "full") {
+      gate = new GatewayGate(getModuleClient(), args.gateKind, args.owner ?? args.agentId);
+      process.stderr.write(
+        `aegis-mcp-proxy: FULL gate armed (${args.gateKind}) — gateway consulted `
+          + "before every gated call (deny = tool never runs, fail-closed)\n",
+      );
+    }
+  }
+  const proxy = new ShieldProxy(policy, emitter, args.agentId, args.sessionId, gate);
 
   const server = spawn(args.serverCmd[0], args.serverCmd.slice(1), {
     stdio: ["pipe", "pipe", "inherit"],
   });
 
-  // host stdin -> proxy -> server stdin (or reply straight to host stdout)
+  // host stdin -> proxy -> server stdin (or reply straight to host stdout).
+  // Lines are handled SERIALLY (promise chain): the async FULL gate must not
+  // reorder host traffic or interleave replies.
   const clientRl = createInterface({ input: process.stdin });
+  let clientQueue: Promise<void> = Promise.resolve();
   clientRl.on("line", (line) => {
     if (!line.trim()) return;
-    const { forward, reply } = proxy.handleClientLine(line);
-    if (reply !== undefined) process.stdout.write(reply);
-    if (forward !== undefined) server.stdin.write(forward.endsWith("\n") ? forward : forward + "\n");
+    clientQueue = clientQueue.then(async () => {
+      const { forward, reply } = await proxy.handleClientLine(line);
+      if (reply !== undefined) process.stdout.write(reply);
+      if (forward !== undefined) server.stdin.write(forward.endsWith("\n") ? forward : forward + "\n");
+    });
   });
-  clientRl.on("close", () => server.stdin.end());
+  clientRl.on("close", () => {
+    void clientQueue.then(() => server.stdin.end());
+  });
 
   // server stdout -> proxy -> host stdout
   const serverRl = createInterface({ input: server.stdout });
@@ -279,10 +377,8 @@ function isMain(): boolean {
 }
 
 if (isMain()) {
-  try {
-    main(process.argv.slice(2));
-  } catch (e) {
+  main(process.argv.slice(2)).catch((e) => {
     process.stderr.write(String((e as Error).message ?? e) + "\n");
     process.exit(2);
-  }
+  });
 }

@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Added — MCP proxy FULL mode: the in-path gateway gate (third PEP grows teeth)
+- `aegis-mcp-proxy` now arms a per-call gateway gate when `AEGIS_MODE=full`
+  (or `auto` resolving FULL): every gated call is decided BEFORE forwarding,
+  so a deny means the tool never runs and a gateway outage is a deny
+  (`gateway_unavailable`), never a pass-through. Gate primitive is explicit
+  (`--gate` / `AEGIS_MCP_GATE`): `check-access` (default, @shield-parity,
+  works on every live gateway) or `tool-call` (AI-native per-tool-call gate).
+  LITE behavior is byte-for-byte unchanged when the mode is unset.
+
+### Added — AI-native v1 wire floor: tool-call / capability lineage / streaming clients
+- New `AegisClient` methods against the FROZEN boundary contract
+  (`AI_NATIVE_V1_CONTRACT.md`, additive-only): `tool_call` / `atool_call`
+  (per-tool-call boundary decision; arguments never leave the caller — refs and
+  labels only), `tool_allowed` (fail-closed boolean gate: transport error,
+  non-200, malformed body, non-passing outcome, or an UNLEDGERED decision are
+  all a deny), `capability_mint` (returns the frozen `CapabilityGrant`
+  dataclass; narrow-only lineage is enforced server-side), `capability_revoke`,
+  `stream_open`, `stream_heartbeat` / `astream_heartbeat` (returns
+  `StreamStatus`; anything but `ok` means STOP), `stream_close`. These are the
+  wire FLOOR — the in-path interposition layer (MCP proxy tool-call mode,
+  `@guard_tool`, `delegate()`, `stream_session()`) builds on them next.
+
+### Fixed — openapi.json verb inversion + the CI hole that let it survive
+- `/audit/verify` was declared `post` (client GETs) and `/audit-log` was
+  declared `get` (client POSTs) — inverted since the stub landed; the
+  path-only contract gate could not see verbs. Fixed both, added the six
+  AI-native paths, and added `test_every_client_call_verb_matches_openapi_spec`
+  so any (method, path) the client uses must be DECLARED with that verb.
+
 ### Added — `wrap()` reaches Node↔Python parity (closes the last named LITE API gap)
 - New public `wrap(value, *, purpose, scope=, deny_fields=)` returning the
   `ShieldResult` dataclass (`data`, `mode`, `purpose`, `scope`, `filtered_keys`).

@@ -118,3 +118,14 @@ Emitters stamp the canonical version; readers fail-closed
 - **free text**: only structured payloads are minimized (`structuredContent`
   / JSON text in `content`/`contents`/`messages`). Route sensitive data
   through structured results.
+- **operational decision verbs (gateway projection)**: `project_gateway_audit.py`
+  maps gateway records to canonical events only for `ALLOW`/`DENY` decisions;
+  operational verbs the gateway also writes (`LIST`, lifecycle markers) are
+  SKIPPED-AND-COUNTED, never guessed into `allow`/`deny` (2026-07-03 ruling:
+  keeping v0's decision enum honest beats coverage — a projection that
+  reclassifies an operational read as an authorization decision would
+  misrepresent the audit trail to a regulator). Verified against BOTH homes:
+  the re-homed boundary gateway writes the same vocabulary, so parity holds
+  by construction (boundary-core `test_gateway_mount.py` P1). If v1 models
+  operational events, it will do so with an explicit `event_type`, not by
+  widening the v0 mapping.

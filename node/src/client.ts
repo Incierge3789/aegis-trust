@@ -13,12 +13,19 @@
 //   POST   /shield/policy-sync
 //   GET    /shield/stats
 //   GET    /shield/report
+//   POST   /tool-call            (AI-native v1)
+//   POST   /capability/mint      (AI-native v1)
+//   POST   /capability/revoke    (AI-native v1)
+//   POST   /stream/open          (AI-native v1)
+//   POST   /stream/heartbeat     (AI-native v1)
+//   POST   /stream/close         (AI-native v1)
 
 import {
   aegisDocsUrl,
   AegisAuditError,
   AegisHttpError,
   AegisIngestError,
+  AegisValidationError,
 } from "./errors.js";
 import { AUDIT_SCHEMA_VERSION } from "./constants.js";
 import type {
@@ -58,6 +65,17 @@ function auditError(detail: string): AegisAuditError {
     remediation: "Server returned a malformed audit/verify response. Check aegis-core version.",
     docs_url: aegisDocsUrl("aegis.audit.responseShape"),
     message: `verify: ${detail}`,
+  });
+}
+
+function aiNativeError(detail: string): AegisValidationError {
+  return new AegisValidationError({
+    code: "aegis.aiNative.responseShape",
+    remediation:
+      "Server returned a malformed AI-native response. Check the boundary version "
+      + "against AI_NATIVE_V1_CONTRACT.md (additive-only).",
+    docs_url: aegisDocsUrl("aegis.aiNative.responseShape"),
+    message: detail,
   });
 }
 
@@ -231,6 +249,56 @@ export type AuthzReason =
 export interface AuthzResult {
   readonly allowed: boolean;
   readonly reason: AuthzReason;
+}
+
+// ── AI-native v1 wire types (frozen contract: boundary-core
+// docs/AI_NATIVE_V1_CONTRACT.md, additive-only). Decision-adjacent shapes
+// keep the wire's snake_case field names (BoundaryDecisionView precedent);
+// client-side ARG objects use camelCase (CheckBoundaryArgs precedent).
+
+export interface ToolCallArgs {
+  readonly tool: string;
+  readonly purpose: string;
+  readonly owner: string;
+  readonly fields?: ReadonlyArray<string>;
+  readonly sessionId?: string;
+  readonly destination?: string;
+  readonly capability?: string;
+}
+
+export interface ToolCallResult {
+  readonly decision: Record<string, unknown> & {
+    readonly outcome: string;
+    readonly ledgered: boolean;
+  };
+  readonly enforcement: unknown;
+  readonly [k: string]: unknown;
+}
+
+export interface CapabilityMintArgs {
+  readonly forAgent: string;
+  readonly purposes: ReadonlyArray<string>;
+  readonly scope?: ReadonlyArray<string>;
+  readonly tools?: ReadonlyArray<string>;
+  readonly ttlSecs?: number;
+  readonly parentCapability?: string;
+}
+
+export interface CapabilityGrant {
+  readonly capability: string;
+  readonly id: string;
+  readonly exp: number;
+  readonly depth: number;
+  readonly root_delegator: string;
+}
+
+export interface StreamOpenResult extends ToolCallResult {
+  readonly stream: { readonly stream_id: string; readonly status: string } | null;
+}
+
+export interface StreamStatus {
+  readonly status: string; // "ok" | "revoked" | "closed"
+  readonly reason: string | null;
 }
 
 export class AegisClient {
@@ -738,6 +806,162 @@ export class AegisClient {
     this._token = newToken;
     this._tokenEpoch += 1;
     this._accessCache.clear();
+  }
+
+  // ── AI-native v1: tool-call / capability lineage / streaming ─────
+  // Wire contract: boundary-core docs/AI_NATIVE_V1_CONTRACT.md (frozen
+  // 2026-07-03, additive-only). These are the WIRE-FLOOR methods — the
+  // in-path interposition layer (MCP proxy / decorators / managed stream
+  // sessions) builds on them.
+
+  /** Decision outcomes that permit the guarded action to proceed. */
+  static readonly PASSING_OUTCOMES: ReadonlyArray<string> = ["PROTECTED", "ACCESS_REDUCED"];
+
+  private static requireDecision(op: string, body: unknown): ToolCallResult {
+    if (body === null || typeof body !== "object") {
+      throw aiNativeError(`${op}: body is not an object`);
+    }
+    const decision = (body as Record<string, unknown>).decision;
+    if (decision === null || typeof decision !== "object") {
+      throw aiNativeError(`${op}: 'decision' missing`);
+    }
+    const d = decision as Record<string, unknown>;
+    if (typeof d.outcome !== "string") throw aiNativeError(`${op}: 'decision.outcome' missing`);
+    if (typeof d.ledgered !== "boolean") throw aiNativeError(`${op}: 'decision.ledgered' missing`);
+    return body as ToolCallResult;
+  }
+
+  private static toolCallBody(args: ToolCallArgs): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+      tool: args.tool,
+      purpose: args.purpose,
+      owner: args.owner,
+      fields: [...(args.fields ?? [])],
+    };
+    if (args.sessionId !== undefined) payload.session_id = args.sessionId;
+    if (args.destination !== undefined) payload.destination = args.destination;
+    if (args.capability !== undefined) payload.capability = args.capability;
+    return payload;
+  }
+
+  /** Decide ONE tool invocation at the boundary (POST /tool-call).
+   * Arguments never leave the caller — refs and labels only (INV-6). A
+   * BLOCKED outcome is still HTTP 200; gate on `decision.outcome` being in
+   * PASSING_OUTCOMES AND `decision.ledgered` (or use toolAllowed()). */
+  async toolCall(args: ToolCallArgs): Promise<ToolCallResult> {
+    const resp = await this.req("POST", "/tool-call", {
+      body: AegisClient.toolCallBody(args),
+    });
+    if (!resp.ok) throw httpError("tool-call", resp.status);
+    return AegisClient.requireDecision("tool-call", await resp.json());
+  }
+
+  /** Fail-closed boolean gate over toolCall() (authorize() parity): any
+   * transport error, non-200, malformed body, non-passing outcome, or
+   * unledgered decision is a deny. */
+  async toolAllowed(args: ToolCallArgs): Promise<boolean> {
+    try {
+      const out = await this.toolCall(args);
+      return (
+        AegisClient.PASSING_OUTCOMES.includes(out.decision.outcome)
+        && out.decision.ledgered === true
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /** Mint a delegation capability (POST /capability/mint). Root grants are
+   * bounded by the caller's role NOW; a child grant (`parentCapability`) can
+   * only NARROW its parent. Chain-witnessed before the token returns. */
+  async capabilityMint(args: CapabilityMintArgs): Promise<CapabilityGrant> {
+    const payload: Record<string, unknown> = {
+      for_agent: args.forAgent,
+      purposes: [...args.purposes],
+      scope: [...(args.scope ?? [])],
+      tools: [...(args.tools ?? [])],
+    };
+    if (args.ttlSecs !== undefined) payload.ttl_secs = args.ttlSecs;
+    if (args.parentCapability !== undefined) payload.parent_capability = args.parentCapability;
+    const resp = await this.req("POST", "/capability/mint", { body: payload });
+    if (!resp.ok) throw httpError("capability/mint", resp.status);
+    const json = (await resp.json()) as Record<string, unknown>;
+    const { capability, id, exp, depth, root_delegator: root } = json;
+    if (typeof capability !== "string" || capability === "") {
+      throw aiNativeError("capability/mint: 'capability' missing");
+    }
+    if (typeof id !== "string" || id === "") throw aiNativeError("capability/mint: 'id' missing");
+    if (typeof exp !== "number" || exp <= 0) throw aiNativeError("capability/mint: 'exp' invalid");
+    if (typeof depth !== "number" || depth <= 0) {
+      throw aiNativeError("capability/mint: 'depth' invalid");
+    }
+    if (typeof root !== "string" || root === "") {
+      throw aiNativeError("capability/mint: 'root_delegator' missing");
+    }
+    return { capability, id, exp, depth, root_delegator: root };
+  }
+
+  /** Revoke a capability (POST /capability/revoke): present the token
+   * (holder / delegator / root delegator) or, as Admin, the id. Returns the
+   * revoked id. Revocation is transitive and cuts matching open streams. */
+  async capabilityRevoke(
+    args: { capability?: string; capabilityId?: string },
+  ): Promise<string> {
+    const payload: Record<string, unknown> = {};
+    if (args.capability !== undefined) payload.capability = args.capability;
+    if (args.capabilityId !== undefined) payload.capability_id = args.capabilityId;
+    const resp = await this.req("POST", "/capability/revoke", { body: payload });
+    if (!resp.ok) throw httpError("capability/revoke", resp.status);
+    const json = (await resp.json()) as Record<string, unknown>;
+    if (json.ok !== true) throw aiNativeError("capability/revoke: 'ok' missing");
+    if (typeof json.revoked !== "string" || json.revoked === "") {
+      throw aiNativeError("capability/revoke: 'revoked' missing");
+    }
+    return json.revoked;
+  }
+
+  /** Open a continuous-authz stream (POST /stream/open) with a full Common
+   * Envelope. `stream` is non-null iff the decision passes AND is ledgered. */
+  async streamOpen(envelope: Record<string, unknown>): Promise<StreamOpenResult> {
+    const resp = await this.req("POST", "/stream/open", { body: { envelope } });
+    if (!resp.ok) throw httpError("stream/open", resp.status);
+    const body = AegisClient.requireDecision("stream/open", await resp.json());
+    const stream = (body as Record<string, unknown>).stream;
+    if (stream !== null && stream !== undefined) {
+      if (
+        typeof stream !== "object"
+        || typeof (stream as Record<string, unknown>).stream_id !== "string"
+      ) {
+        throw aiNativeError("stream/open: 'stream.stream_id' missing");
+      }
+    }
+    return body as StreamOpenResult;
+  }
+
+  /** Revalidate a stream NOW (POST /stream/heartbeat). `status` is
+   * ok | revoked | closed — anything but ok means STOP. */
+  async streamHeartbeat(streamId: string): Promise<StreamStatus> {
+    const resp = await this.req("POST", "/stream/heartbeat", {
+      body: { stream_id: streamId },
+    });
+    if (!resp.ok) throw httpError("stream/heartbeat", resp.status);
+    const json = (await resp.json()) as Record<string, unknown>;
+    if (typeof json.status !== "string") {
+      throw aiNativeError("stream/heartbeat: 'status' missing");
+    }
+    return {
+      status: json.status,
+      reason: typeof json.reason === "string" ? json.reason : null,
+    };
+  }
+
+  /** Close a stream (POST /stream/close; owner or Admin). Witnessed. */
+  async streamClose(streamId: string): Promise<boolean> {
+    const resp = await this.req("POST", "/stream/close", { body: { stream_id: streamId } });
+    if (!resp.ok) throw httpError("stream/close", resp.status);
+    const json = (await resp.json()) as Record<string, unknown>;
+    if (json.ok !== true) throw aiNativeError("stream/close: 'ok' missing");
+    return true;
   }
 
   // ── teardown ──────────────────────────────────────────

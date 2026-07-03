@@ -87,6 +87,13 @@ export {
   type CoreBoundaryOutcome,
   type CoreDecisionEvidence,
   type CheckBoundaryArgs,
+  // AI-native v1 (frozen contract: AI_NATIVE_V1_CONTRACT.md) — wire floor.
+  type ToolCallArgs,
+  type ToolCallResult,
+  type CapabilityMintArgs,
+  type CapabilityGrant,
+  type StreamOpenResult,
+  type StreamStatus,
 } from "./client.js";
 
 // Config (YAML loader, parity with aegis.config).
