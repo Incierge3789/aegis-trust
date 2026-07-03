@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added — AI-native v1 wire floor: tool-call / capability lineage / streaming clients
+- New `AegisClient` methods against the FROZEN boundary contract
+  (`AI_NATIVE_V1_CONTRACT.md`, additive-only): `toolCall` (per-tool-call
+  boundary decision; refs and labels only), `toolAllowed` (fail-closed boolean
+  gate — transport error, non-200, malformed body, non-passing outcome, or an
+  UNLEDGERED decision are all a deny), `capabilityMint` (`CapabilityGrant`,
+  narrow-only lineage server-side), `capabilityRevoke`, `streamOpen`,
+  `streamHeartbeat` (`StreamStatus`; anything but `ok` means STOP),
+  `streamClose`. New error code `aegis.aiNative.responseShape`
+  (`AegisValidationError`). Types exported from the barrel. Python parity:
+  same wire bodies, same fail-closed rules, mirrored tests.
+
 ### Added — Node↔Python parity: the MCP process-boundary proxy now ships on Node too
 - New `aegis-mcp-proxy` command (bin) and `src/mcpProxy.ts`: a stdio MCP proxy
   that sits between any MCP host (Claude Code, Cursor, codex, agy) and any MCP

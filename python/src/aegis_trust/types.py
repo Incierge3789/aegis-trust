@@ -129,3 +129,24 @@ class ShieldStats:
     by_purpose: dict[str, PurposeStats] = field(default_factory=dict)
     by_field: dict[str, FieldStats] = field(default_factory=dict)
     by_function: dict[str, FunctionStats] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CapabilityGrant:
+    """Response from /capability/mint (AI-native v1, boundary-core
+    AI_NATIVE_V1_CONTRACT.md). The token is opaque — only the boundary
+    verifies it; clients hand it to sub-agents (delegation.capability)."""
+
+    capability: str
+    id: str
+    exp: int
+    depth: int
+    root_delegator: str
+
+
+@dataclass(frozen=True)
+class StreamStatus:
+    """Response from /stream/heartbeat: ok | revoked | closed (+ reason)."""
+
+    status: str
+    reason: str | None = None
