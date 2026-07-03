@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Added — AI-native Layer 2: the interposition layer (`aegis_trust.ai_native`)
+- `@guard_tool` — the FULL-strength sibling of LITE's `@shield`: every
+  invocation of the wrapped tool (sync or async) is decided by the boundary
+  (`POST /tool-call`) BEFORE it runs. Deny / outage / malformed / unledgered
+  → the tool never runs and the call returns `None` (the `@shield`
+  convention — nothing to catch, nothing to forget). Arguments never leave
+  the process (INV-6). Owner resolves param → `AEGIS_OWNER` →
+  `AEGIS_AGENT_ID`; unresolvable denies locally.
+- `delegate()` — a context manager that mints a (narrow-only) child
+  capability at the sub-agent spawn boundary and attaches it to every
+  guarded call inside the block via `ContextVar` (no hand-carried tokens).
+  Nesting carries `parent_capability` automatically; a failed mint DENIES
+  the whole window fail-closed (guarded calls return `None`, stream
+  sessions refuse to open — running un-narrowed would be a widening); exit
+  revokes the token by default (`revoke_on_exit=False` to opt out).
+- `stream_session()` — a managed continuous-authz session (`with` /
+  `async with`) that owns the background heartbeat and INTERRUPTS the agent
+  the moment the boundary revokes: async form cancels the block and raises
+  `AegisStreamRevoked`; sync form fires `on_revoke` (or interrupts the main
+  thread as a last resort) and `__exit__` raises `AegisStreamRevoked` — a
+  revoked session can never look like a clean run. N consecutive heartbeat
+  transport failures (default 3) count as revocation
+  (`gateway_unavailable`). Open deny / denied delegation window raises
+  `AegisStreamDenied` BEFORE the block runs; normal exit closes witnessed.
+- New errors: `AegisStreamDenied`, `AegisStreamRevoked` (carries `.reason`).
+  New async floor variants: `atool_allowed`, `astream_open`, `astream_close`.
+  Node parity: `guardTool` / `delegate` / `streamSession` — identical error
+  codes, mirrored tests.
+
 ### Added — MCP proxy FULL mode: the in-path gateway gate (third PEP grows teeth)
 - `aegis-mcp-proxy` now arms a per-call gateway gate when `AEGIS_MODE=full`
   (or `auto` resolving FULL): every gated call is decided BEFORE forwarding,

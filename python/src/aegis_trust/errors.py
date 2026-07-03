@@ -143,6 +143,60 @@ class AegisAuditError(AegisError, ValueError):
     docs_url: str
 
 
+class AegisStreamDenied(AegisError):
+    """``stream_session()``: the boundary did not grant a stream.
+
+    Raised at session entry when ``/stream/open`` denies (or the decision is
+    not ledgered — ``stream`` is null) or when the enclosing ``delegate()``
+    window is denied. The agent block never runs: a context manager cannot
+    skip its body silently, so the fail-closed signal is this exception
+    (frozen contract: a revoked/denied stream must STOP the agent).
+    """
+
+    code: str
+    remediation: str
+    docs_url: str
+
+
+class AegisStreamRevoked(AegisError):
+    """``stream_session()``: the boundary revoked the stream mid-session.
+
+    Carries ``reason`` (e.g. ``duress_active`` / ``legal_hold`` /
+    ``delegation_expired`` / ``gateway_unavailable``). Raised into/at the end
+    of the session block so a revoked stream stops the agent instead of
+    waiting to be polled.
+    """
+
+    code: str
+    remediation: str
+    docs_url: str
+    reason: str
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        remediation: str,
+        docs_url: str,
+        reason: str,
+        cause: Exception | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            code=code,
+            remediation=remediation,
+            docs_url=docs_url,
+            cause=cause,
+        )
+        self.reason = reason
+
+    def to_dict(self) -> dict[str, Any]:
+        out = super().to_dict()
+        out["reason"] = self.reason
+        return out
+
+
 class AegisHttpError(AegisError):
     """HTTP-level failure — non-2xx response from aegis-core REST.
 

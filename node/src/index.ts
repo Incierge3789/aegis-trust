@@ -24,6 +24,20 @@
 // Core decorator surface.
 export { shield, wrap, syncPolicies, refreshToken, reset } from "./shield.js";
 
+// AI-native interposition layer (Layer 2 — the §8 product surface):
+// per-tool-call gating, automatic capability propagation, managed
+// continuous-authz sessions. Python parity: aegis_trust.ai_native.
+export {
+  guardTool,
+  delegate,
+  streamSession,
+  currentCapability,
+  type GuardToolOptions,
+  type DelegateOptions,
+  type StreamSessionOptions,
+  type StreamSessionHandle,
+} from "./aiNative.js";
+
 // Machine-parseable error model (v0.9.0-rc1).
 export {
   AegisError,
@@ -32,6 +46,8 @@ export {
   AegisIngestError,
   AegisAuditError,
   AegisHttpError,
+  AegisStreamDeniedError,
+  AegisStreamRevokedError,
   aegisDocsUrl,
   type AegisErrorPayload,
 } from "./errors.js";
