@@ -95,3 +95,25 @@ args = [
   host→server direction (tool arguments, sampling responses) is not yet
   inspected; egress `destinations` policy is enforced by the SDK/gateway
   forms in v0.
+
+## FULL mode on the proxy path (gateway-backed per-call gate)
+
+By default the proxy is LITE: local canonical-policy filtering only, no
+network. Setting `AEGIS_MODE=full` (or `auto` with FULL intent — `AEGIS_TOKEN`
+or a non-dev `AEGIS_URL`) arms the gateway gate: the proxy consults the
+gateway BEFORE forwarding every gated call, so a policy deny means the tool
+NEVER runs (side effects prevented, not just output filtered), and a gateway
+outage is a deny (`gateway_unavailable`), never a pass-through. Local
+filtering still applies on the way back (defense in depth).
+
+The gate primitive is explicit — never auto-probed:
+
+| `--gate` / `AEGIS_MCP_GATE` | primitive | works against |
+|---|---|---|
+| `check-access` (default) | `@shield`-parity purpose gate (`POST /check-access`) | every live gateway today |
+| `tool-call` | AI-native per-tool-call gate (`POST /tool-call`, role-keyed tool whitelist, chain-witnessed decision — `AI_NATIVE_V1_CONTRACT.md`) | boundaries serving the AI-native family |
+
+Extra env/flags: `AEGIS_URL` + `AEGIS_TOKEN` (the gateway), `--owner` /
+`AEGIS_OWNER` (principal.owner for the tool-call gate; defaults to
+`--agent-id`). Audit reason codes added by the gate: `gateway_denied`,
+`gateway_unavailable`.

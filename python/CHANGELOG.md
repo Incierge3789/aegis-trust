@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added — MCP proxy FULL mode: the in-path gateway gate (third PEP grows teeth)
+- `aegis-mcp-proxy` now arms a per-call gateway gate when `AEGIS_MODE=full`
+  (or `auto` resolving FULL): every gated call is decided BEFORE forwarding,
+  so a deny means the tool never runs and a gateway outage is a deny
+  (`gateway_unavailable`), never a pass-through. Gate primitive is explicit
+  (`--gate` / `AEGIS_MCP_GATE`): `check-access` (default, @shield-parity,
+  works on every live gateway) or `tool-call` (AI-native per-tool-call gate).
+  LITE behavior is byte-for-byte unchanged when the mode is unset.
+
 ### Added — AI-native v1 wire floor: tool-call / capability lineage / streaming clients
 - New `AegisClient` methods against the FROZEN boundary contract
   (`AI_NATIVE_V1_CONTRACT.md`, additive-only): `tool_call` / `atool_call`
