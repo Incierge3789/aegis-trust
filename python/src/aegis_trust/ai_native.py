@@ -635,7 +635,7 @@ class StreamSession:
             except Exception:  # pragma: no cover — interpreter shutdown
                 pass
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         self._stop.set()
         if self._hb_thread is not None:
             self._hb_thread.join(timeout=self._interval + 5.0)
@@ -654,7 +654,6 @@ class StreamSession:
                 "stream_session: stream close failed (already cut by a "
                 "ceremony / revocation, or gateway unreachable)"
             )
-        return False
 
     # ── async form ───────────────────────────────────────────────
 
@@ -695,7 +694,7 @@ class StreamSession:
             self._cancelled_block = True
             self._block_task.cancel()
 
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         if self._hb_task is not None and not self._hb_task.done():
             self._hb_task.cancel()
             try:
@@ -719,7 +718,7 @@ class StreamSession:
             # External cancellation: don't touch the network from a
             # cancelled task; the stream's server-side lifecycle (heartbeat
             # expiry / ceremonies) bounds it.
-            return False
+            return
         try:
             if self.stream_id is not None:
                 await self._client().astream_close(self.stream_id)
@@ -728,7 +727,6 @@ class StreamSession:
                 "stream_session: stream close failed (already cut by a "
                 "ceremony / revocation, or gateway unreachable)"
             )
-        return False
 
 
 def stream_session(
