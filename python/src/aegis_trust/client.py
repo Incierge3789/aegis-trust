@@ -947,6 +947,34 @@ class AegisClient:
         decision = body["decision"]
         return decision["outcome"] in self.PASSING_OUTCOMES and decision["ledgered"]
 
+    async def atool_allowed(
+        self,
+        tool: str,
+        purpose: str,
+        owner: str,
+        *,
+        fields: list[str] | None = None,
+        session_id: str | None = None,
+        destination: str | None = None,
+        capability: str | None = None,
+    ) -> bool:
+        """Async variant of :meth:`tool_allowed` (same fail-closed contract)."""
+        try:
+            body = await self.atool_call(
+                tool,
+                purpose,
+                owner,
+                fields=fields,
+                session_id=session_id,
+                destination=destination,
+                capability=capability,
+            )
+        except Exception:
+            logger.warning("tool_allowed: request failed, fail-closed deny")
+            return False
+        decision = body["decision"]
+        return decision["outcome"] in self.PASSING_OUTCOMES and decision["ledgered"]
+
     @staticmethod
     def _parse_capability_grant(body: Any) -> CapabilityGrant:
         if not isinstance(body, dict):
@@ -1031,7 +1059,12 @@ class AegisClient:
         decision passes AND is ledgered."""
         resp = self._get_httpx().post("/stream/open", json={"envelope": envelope})
         resp.raise_for_status()
-        body = self._require_decision(resp.json(), "stream/open")
+        return self._parse_stream_open(
+            self._require_decision(resp.json(), "stream/open")
+        )
+
+    @staticmethod
+    def _parse_stream_open(body: Any) -> dict[str, Any]:
         stream = body.get("stream")
         if stream is not None:
             if not isinstance(stream, dict) or not isinstance(
@@ -1039,6 +1072,16 @@ class AegisClient:
             ):
                 raise ValueError("stream/open: 'stream.stream_id' missing")
         return body
+
+    async def astream_open(self, envelope: dict[str, Any]) -> dict[str, Any]:
+        """Async variant of :meth:`stream_open`."""
+        resp = await self._get_async_httpx().post(
+            "/stream/open", json={"envelope": envelope}
+        )
+        resp.raise_for_status()
+        return self._parse_stream_open(
+            self._require_decision(resp.json(), "stream/open")
+        )
 
     @staticmethod
     def _parse_stream_status(body: Any) -> StreamStatus:
@@ -1071,6 +1114,17 @@ class AegisClient:
     def stream_close(self, stream_id: str) -> bool:
         """Close a stream (POST /stream/close; owner or Admin). Witnessed."""
         resp = self._get_httpx().post("/stream/close", json={"stream_id": stream_id})
+        resp.raise_for_status()
+        body = resp.json()
+        if not isinstance(body, dict) or body.get("ok") is not True:
+            raise ValueError("stream/close: 'ok' missing")
+        return True
+
+    async def astream_close(self, stream_id: str) -> bool:
+        """Async variant of :meth:`stream_close`."""
+        resp = await self._get_async_httpx().post(
+            "/stream/close", json={"stream_id": stream_id}
+        )
         resp.raise_for_status()
         body = resp.json()
         if not isinstance(body, dict) or body.get("ok") is not True:

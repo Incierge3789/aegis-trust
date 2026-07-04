@@ -16,6 +16,13 @@
 #     from aegis_trust.history import HistoryStore  # .record_idempotent(key=..., ...)
 #
 from aegis_trust.shield import ShieldResult, shield, wrap
+from aegis_trust.ai_native import (
+    StreamSession,
+    current_capability,
+    delegate,
+    guard_tool,
+    stream_session,
+)
 from aegis_trust.errors import (
     AegisError,
     AegisValidationError,
@@ -23,6 +30,8 @@ from aegis_trust.errors import (
     AegisIngestError,
     AegisAuditError,
     AegisHttpError,
+    AegisStreamDenied,
+    AegisStreamRevoked,
     aegis_docs_url,
 )
 from aegis_trust.trace import (
@@ -37,6 +46,13 @@ __all__ = [
     "shield",
     "wrap",
     "ShieldResult",
+    "guard_tool",
+    "delegate",
+    "stream_session",
+    "StreamSession",
+    "current_capability",
+    "AegisStreamDenied",
+    "AegisStreamRevoked",
     "AegisError",
     "AegisValidationError",
     "AegisConfigError",

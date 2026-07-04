@@ -120,6 +120,49 @@ export class AegisAuditError extends AegisError {
   }
 }
 
+// streamSession(): the boundary did not grant a stream (deny / unledgered /
+// unreachable open, or a denied delegate() window). The agent block never
+// ran — the fail-closed signal is this exception (a denied stream must stop
+// the agent before it starts). Python parity: AegisStreamDenied.
+export class AegisStreamDeniedError extends AegisError {
+  declare readonly code: string;
+  declare readonly remediation: string;
+  declare readonly docs_url: string;
+
+  constructor(payload: AegisErrorPayload) {
+    super({
+      code: payload.code,
+      remediation: payload.remediation,
+      docs_url: payload.docs_url,
+      message: payload.message,
+      cause: payload.cause,
+    });
+    this.name = "AegisStreamDeniedError";
+  }
+}
+
+// streamSession(): the boundary revoked the stream mid-session. Carries
+// `reason` (duress_active / legal_hold / delegation_expired /
+// gateway_unavailable / …). Python parity: AegisStreamRevoked.
+export class AegisStreamRevokedError extends AegisError {
+  declare readonly code: string;
+  declare readonly remediation: string;
+  declare readonly docs_url: string;
+  readonly reason: string;
+
+  constructor(payload: AegisErrorPayload & { reason: string }) {
+    super({
+      code: payload.code,
+      remediation: payload.remediation,
+      docs_url: payload.docs_url,
+      message: payload.message,
+      cause: payload.cause,
+    });
+    this.name = "AegisStreamRevokedError";
+    this.reason = payload.reason;
+  }
+}
+
 // HTTP-level failure — non-2xx response from aegis-core REST.
 export class AegisHttpError extends AegisError {
   declare readonly code: string;

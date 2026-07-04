@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Added — AI-native Layer 2: the interposition layer (`src/aiNative.ts`)
+- `guardTool()` — the FULL-strength sibling of LITE's `shield()`: every
+  invocation of the wrapped tool is decided by the boundary
+  (`POST /tool-call`) BEFORE it runs. Deny / outage / malformed / unledgered
+  → the tool never runs and the call resolves `null` (the shield convention
+  — nothing to catch, nothing to forget). Arguments never leave the process
+  (INV-6). Owner resolves option → `AEGIS_OWNER` → `AEGIS_AGENT_ID`;
+  unresolvable denies locally.
+- `delegate(options, fn)` — mints a (narrow-only) child capability at the
+  sub-agent spawn boundary and attaches it to every guarded call inside the
+  scope via `AsyncLocalStorage` (no hand-carried tokens). Nesting carries
+  `parentCapability` automatically; a failed mint DENIES the whole window
+  fail-closed (guarded calls resolve `null`, stream sessions refuse to
+  open); exit revokes the token by default (`revokeOnExit: false` to opt
+  out).
+- `streamSession(envelope, fn, options)` — a managed continuous-authz
+  session that owns the background heartbeat and INTERRUPTS the agent the
+  moment the boundary revokes: `session.signal` aborts, `onRevoke(reason)`
+  fires, and the promise rejects with `AegisStreamRevokedError` even while
+  `fn` is still in flight — a revoked session can never look like a clean
+  run. N consecutive heartbeat transport failures (default 3) count as
+  revocation (`gateway_unavailable`). Open deny / denied delegation window
+  throws `AegisStreamDeniedError` BEFORE `fn` runs; normal completion
+  closes witnessed.
+- New errors: `AegisStreamDeniedError`, `AegisStreamRevokedError` (carries
+  `.reason`). `currentCapability()` exported for observability. Python
+  parity: `@guard_tool` / `delegate()` / `stream_session()` — identical
+  error codes, mirrored tests.
+
 ### Added — MCP proxy FULL mode: the in-path gateway gate (third PEP grows teeth)
 - `aegis-mcp-proxy` (Node) mirrors the Python proxy's new FULL mode: explicit
   `--gate check-access|tool-call`, pre-call gateway decision with fail-closed
