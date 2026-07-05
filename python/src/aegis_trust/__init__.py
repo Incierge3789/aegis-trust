@@ -34,6 +34,13 @@ from aegis_trust.errors import (
     AegisStreamRevoked,
     aegis_docs_url,
 )
+from aegis_trust.receipt_verify import (
+    compute_lineage_root,
+    dangling_prior_receipt_refs,
+    session_dag_root,
+    verify_lineage_root,
+    verify_session_receipt_structure,
+)
 from aegis_trust.trace import (
     TraceContext,
     trace_context,
@@ -65,6 +72,11 @@ __all__ = [
     "with_trace_context",
     "get_trace_context",
     "new_trace_id",
+    "session_dag_root",
+    "verify_session_receipt_structure",
+    "dangling_prior_receipt_refs",
+    "compute_lineage_root",
+    "verify_lineage_root",
     "AEGIS_API_VERSION",
     "AEGIS_API_VERSION_HEADER",
     "AUDIT_SCHEMA_VERSION",
