@@ -474,8 +474,70 @@ describe("checkBoundary (Doctor v1)", () => {
     expect(sent.mode).toBe("full");
     expect(sent.schema_version).toBe(1);
     expect("principal" in sent).toBe(false);
+    // USAGE_METERING #4: witness claims are opt-in — absent claims must leave
+    // the body byte-identical to prior SDKs (no attribution/synthetic keys).
+    expect("attribution" in sent).toBe(false);
+    expect("synthetic" in sent).toBe(false);
     expect(view.outcome).toBe("PROTECTED");
     expect(view.allowed_fields).toEqual(["name"]);
+  });
+  it("carries enforcement-neutral witness claims verbatim when set", async () => {
+    // USAGE_METERING #4: top-level wire fields `attribution: {human,
+    // on_behalf_of[]}` and `synthetic: bool` (context.rs consumer contract).
+    // Claims for the receipt chain only — never authorization inputs.
+    const captured: { body: string }[] = [];
+    mockFetch(async (_input, init) => {
+      captured.push({ body: String(init?.body) });
+      return new Response(
+        JSON.stringify({
+          source: "CORE",
+          outcome: "PROTECTED",
+          purpose_label: "p",
+          allowed_fields: ["name"],
+          withheld_fields: [],
+          reason_code: "minimum_disclosure",
+          reason_label: "Minimum disclosure",
+          evidence_available: true,
+          evidence: null,
+        }),
+        { status: 200 },
+      );
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await c.checkBoundary({
+      purpose: "p",
+      scope: ["name"],
+      attribution: { human: "u-1", on_behalf_of: ["u-2", "u-3"] },
+      synthetic: true,
+    });
+    const sent = JSON.parse(captured[0]!.body);
+    expect(sent.attribution).toEqual({ human: "u-1", on_behalf_of: ["u-2", "u-3"] });
+    expect(sent.synthetic).toBe(true);
+  });
+  it("sends synthetic=false as an explicit claim (distinct from unset)", async () => {
+    const captured: { body: string }[] = [];
+    mockFetch(async (_input, init) => {
+      captured.push({ body: String(init?.body) });
+      return new Response(
+        JSON.stringify({
+          source: "CORE",
+          outcome: "PROTECTED",
+          purpose_label: "p",
+          allowed_fields: [],
+          withheld_fields: [],
+          reason_code: "minimum_disclosure",
+          reason_label: "Minimum disclosure",
+          evidence_available: true,
+          evidence: null,
+        }),
+        { status: 200 },
+      );
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await c.checkBoundary({ purpose: "p", scope: ["name"], synthetic: false });
+    const sent = JSON.parse(captured[0]!.body);
+    expect(sent.synthetic).toBe(false);
+    expect("attribution" in sent).toBe(false);
   });
   it("throws httpError on non-2xx (caller maps to fail-closed)", async () => {
     mockFetch(async () => new Response("nope", { status: 503 }));

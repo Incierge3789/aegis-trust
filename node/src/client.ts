@@ -222,6 +222,18 @@ export interface BoundaryDecisionView {
   readonly evidence: CoreDecisionEvidence | null;
 }
 
+// Enforcement-neutral attribution witness claim (USAGE_METERING 残作業 #4).
+// Wire shape mirrors the plane's consumer (aegis-gateway-rh context.rs):
+// `{human, on_behalf_of[]}` — snake_case on the wire, so the field names here
+// ARE the wire names and the object is sent verbatim. Claims the human (and
+// delegation chain) this request serves, for billing 帰属 only: NEVER an
+// authorization input — Core cannot change the decision on it; only hash
+// witnesses reach the receipt chain (INV-6, never the raw ids).
+export interface AttributionClaim {
+  readonly human?: string;
+  readonly on_behalf_of?: ReadonlyArray<string>;
+}
+
 // Request to POST /check-boundary. `purpose` + `scope` are required; the rest
 // are optional. The authenticated principal is the JWT subject server-side and
 // is NEVER sent in the body.
@@ -233,6 +245,13 @@ export interface CheckBoundaryArgs {
   readonly environment?: string;
   readonly mode?: string;
   readonly schemaVersion?: number;
+  // OPTIONAL enforcement-neutral witness claims — sent verbatim, ONLY when
+  // set (an unset claim leaves the body byte-identical to prior SDKs).
+  // `attribution` = the human/delegation chain this request serves;
+  // `synthetic: true` marks probe/drill traffic for billing exclusion.
+  // Neither ever changes the decision.
+  readonly attribution?: AttributionClaim;
+  readonly synthetic?: boolean;
 }
 
 // T-SDK-FULL-GATE-01: reason a /check-access authorization did not grant.
@@ -498,6 +517,10 @@ export class AegisClient {
     if (args.environment !== undefined) body.environment = args.environment;
     if (args.mode !== undefined) body.mode = args.mode;
     if (args.schemaVersion !== undefined) body.schema_version = args.schemaVersion;
+    // Enforcement-neutral witness claims (USAGE_METERING #4): verbatim,
+    // only when set — never authorization inputs, hash-witnessed by Core.
+    if (args.attribution !== undefined) body.attribution = args.attribution;
+    if (args.synthetic !== undefined) body.synthetic = args.synthetic;
     const resp = await this.req("POST", "/check-boundary", { body });
     if (!resp.ok) throw httpError("check-boundary", resp.status);
     return (await resp.json()) as BoundaryDecisionView;

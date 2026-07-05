@@ -344,6 +344,8 @@ class AegisClient:
         environment: str | None = None,
         mode: str | None = None,
         schema_version: int | None = None,
+        attribution: dict[str, Any] | None = None,
+        synthetic: bool | None = None,
     ) -> dict[str, Any]:
         """Build the ``/check-boundary`` request body.
 
@@ -351,6 +353,17 @@ class AegisClient:
         boundary endpoint's contract, unlike ``/check-access``). The
         authenticated principal is the JWT subject server-side and is NEVER sent
         in the body; ``agent_id`` is advisory.
+
+        ``attribution`` / ``synthetic`` are OPTIONAL enforcement-neutral
+        witness claims (USAGE_METERING 残作業 #4). They are NEVER authorization
+        inputs — Core cannot change the decision on them; it only freezes hash
+        witnesses into the receipt chain (INV-6, never the raw ids). Wire shape
+        (aegis-gateway-rh ``context.rs``): top-level ``attribution:
+        {"human": str, "on_behalf_of": [str]}`` — the human (and delegation
+        chain) this request serves — and top-level ``synthetic: bool`` marking
+        probe/drill traffic for billing exclusion. Both are sent verbatim and
+        ONLY when set, so a claim-free call produces a byte-identical body to
+        before these parameters existed.
         """
         body: dict[str, Any] = {"purpose": purpose, "scope": list(scope)}
         if destination is not None:
@@ -363,6 +376,10 @@ class AegisClient:
             body["mode"] = mode
         if schema_version is not None:
             body["schema_version"] = schema_version
+        if attribution is not None:
+            body["attribution"] = attribution
+        if synthetic is not None:
+            body["synthetic"] = synthetic
         return body
 
     @staticmethod
@@ -435,12 +452,22 @@ class AegisClient:
         environment: str | None = None,
         mode: str | None = None,
         schema_version: int | None = None,
+        attribution: dict[str, Any] | None = None,
+        synthetic: bool | None = None,
     ) -> BoundaryDecisionView:
         """POST ``/check-boundary`` and return the parsed
         :class:`BoundaryDecisionView`. Reuses the same auth header / base-url /
         timeout / httpx plumbing as :meth:`check_access`. Non-2xx raises (via
         ``raise_for_status``) so the Doctor v1 entry point maps it to a
         fail-closed BLOCK.
+
+        ``attribution`` (``{"human": str, "on_behalf_of": [str]}``) and
+        ``synthetic`` are OPTIONAL enforcement-neutral witness claims: they
+        NEVER change the decision (not authorization inputs); Core only
+        freezes hash witnesses into the receipt. ``attribution`` claims the
+        human (and delegation chain) this request serves; ``synthetic=True``
+        marks probe/drill traffic for billing exclusion. Omitted claims leave
+        the request body byte-identical to previous SDK versions.
         """
         resp = self._get_httpx().post(
             "/check-boundary",
@@ -452,6 +479,8 @@ class AegisClient:
                 environment=environment,
                 mode=mode,
                 schema_version=schema_version,
+                attribution=attribution,
+                synthetic=synthetic,
             ),
         )
         resp.raise_for_status()
@@ -467,8 +496,11 @@ class AegisClient:
         environment: str | None = None,
         mode: str | None = None,
         schema_version: int | None = None,
+        attribution: dict[str, Any] | None = None,
+        synthetic: bool | None = None,
     ) -> BoundaryDecisionView:
-        """Async variant of :meth:`check_boundary`."""
+        """Async variant of :meth:`check_boundary` (same enforcement-neutral
+        witness-claim contract for ``attribution`` / ``synthetic``)."""
         resp = await self._get_async_httpx().post(
             "/check-boundary",
             json=self._check_boundary_body(
@@ -479,6 +511,8 @@ class AegisClient:
                 environment=environment,
                 mode=mode,
                 schema_version=schema_version,
+                attribution=attribution,
+                synthetic=synthetic,
             ),
         )
         resp.raise_for_status()
