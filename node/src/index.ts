@@ -103,6 +103,7 @@ export {
   type CoreBoundaryOutcome,
   type CoreDecisionEvidence,
   type CheckBoundaryArgs,
+  type AttributionClaim,
   // AI-native v1 (frozen contract: AI_NATIVE_V1_CONTRACT.md) — wire floor.
   type ToolCallArgs,
   type ToolCallResult,

@@ -135,8 +135,63 @@ def test_check_boundary_posts_array_scope_and_snake_cases_fields():
     assert body["mode"] == "full"
     assert body["schema_version"] == 1
     assert "principal" not in body
+    # USAGE_METERING #4: witness claims are opt-in — absent claims must leave
+    # the body byte-identical to prior SDKs (no attribution/synthetic keys).
+    assert "attribution" not in body
+    assert "synthetic" not in body
     assert view.outcome == "PROTECTED"
     assert view.allowed_fields == ["name"]
+
+
+def test_check_boundary_witness_claims_passed_verbatim():
+    # USAGE_METERING #4: enforcement-neutral witness claims. When set, the
+    # top-level wire fields `attribution: {human, on_behalf_of[]}` and
+    # `synthetic: bool` are carried verbatim (context.rs consumer contract);
+    # they are claims for the receipt chain, never authorization inputs.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "source": "CORE",
+                "outcome": "PROTECTED",
+                "purpose_label": "p",
+                "allowed_fields": ["name"],
+                "withheld_fields": [],
+                "reason_code": "minimum_disclosure",
+                "reason_label": "Minimum disclosure",
+                "evidence_available": True,
+                "evidence": None,
+            },
+        )
+
+    c = _client_with_transport(handler)
+    c.check_boundary(
+        "p",
+        ["name"],
+        attribution={"human": "u-1", "on_behalf_of": ["u-2", "u-3"]},
+        synthetic=True,
+    )
+    body = captured["body"]
+    assert body["attribution"] == {"human": "u-1", "on_behalf_of": ["u-2", "u-3"]}
+    assert body["synthetic"] is True
+
+
+def test_check_boundary_synthetic_false_is_an_explicit_claim():
+    # `synthetic=False` is SET (an explicit "this is real traffic" claim) and
+    # must be sent as false — distinct from omitting the claim entirely.
+    body = AegisClient._check_boundary_body("p", ["name"], synthetic=False)
+    assert body["synthetic"] is False
+    assert "attribution" not in body
+
+
+def test_check_boundary_body_omits_unset_witness_claims():
+    # Body-builder pin: no claims -> no claim keys (byte-identical body).
+    body = AegisClient._check_boundary_body("p", ["name"])
+    assert "attribution" not in body
+    assert "synthetic" not in body
 
 
 def test_check_boundary_raises_on_non_2xx():
