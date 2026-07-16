@@ -238,7 +238,22 @@ function parseDestinations(
 // installed (npm install yaml); absent it, a .yaml/.yml path raises an
 // actionable error rather than silently failing — parity with canonical.py.
 export function loadCanonicalPolicy(path: string): CanonicalPolicy {
-  const text = readFileSync(path, "utf8");
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    // Coded envelope instead of a raw ENOENT (Python parity:
+    // aegis.canonical.file.notFound) — a missing policy file is the most
+    // common operator mistake at proxy startup, and automation greps the
+    // documented code. Other I/O errors (perms, etc.) propagate raw.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      throw cfgErr(
+        `Canonical policy file not found: ${path}`,
+        "aegis.canonical.file.notFound",
+      );
+    }
+    throw e;
+  }
   let raw: unknown;
   if (path.endsWith(".yaml") || path.endsWith(".yml")) {
     let YAML: { parse(s: string): unknown };

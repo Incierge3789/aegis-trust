@@ -31,6 +31,11 @@
   env table.
 - History write-failure warning withholds the path and error detail (S018
   P2 minimum-disclosure parity with Python).
+- `loadCanonicalPolicy` raises the coded `aegis.canonical.file.notFound`
+  envelope on a missing policy file (previously a raw filesystem message);
+  the proxy bin's stderr one-liner now carries the `[<code>]` suffix like
+  Python, so the documented `aegis.canonical.*` codes grep identically on
+  both SDKs. (Cross-review round 1, codex + cursor consensus.)
 
 ### Changed — single-sourced wire version constant
 - `AEGIS_API_VERSION` / `AEGIS_API_VERSION_HEADER` moved to `constants.ts`;

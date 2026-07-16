@@ -212,13 +212,14 @@ export function main(argv: string[]): number {
       const a = argv[i];
       if (a === "--limit" || a === "-n") {
         const raw = argv[++i];
-        limit = parseInt(raw ?? "", 10);
-        if (raw === undefined || Number.isNaN(limit)) {
-          // Python argparse parity: a bad --limit is an error (exit 2),
-          // never a silent fallback to the default.
+        // Python argparse parity: a bad --limit is an error (exit 2), never
+        // a silent fallback. Strict integer syntax — parseInt alone accepts
+        // partial garbage ("10oops" → 10, "0x10" → 0), argparse does not.
+        if (raw === undefined || !/^[+-]?\d+$/.test(raw)) {
           console.error(`argument --limit/-n: invalid int value: ${raw ?? "(missing)"}`);
           return 2;
         }
+        limit = parseInt(raw, 10);
       } else if (a === "--purpose" || a === "-p") {
         purpose = argv[++i];
         if (purpose === undefined) {

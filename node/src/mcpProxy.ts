@@ -418,7 +418,14 @@ function isMain(): boolean {
 
 if (isMain()) {
   main(process.argv.slice(2)).catch((e) => {
-    process.stderr.write(String((e as Error).message ?? e) + "\n");
+    // Python-parity stderr contract: one line, `aegis-mcp-proxy: <message>
+    // [<code>]` when the error carries a machine-parseable code — operators
+    // grep the documented aegis.canonical.* codes on BOTH SDKs.
+    const msg = String((e as Error).message ?? e);
+    const prefixed = msg.startsWith("aegis-mcp-proxy:") ? msg : `aegis-mcp-proxy: ${msg}`;
+    const code = (e as { code?: unknown }).code;
+    const suffix = typeof code === "string" && code.startsWith("aegis.") ? ` [${code}]` : "";
+    process.stderr.write(prefixed + suffix + "\n");
     process.exit(2);
   });
 }
