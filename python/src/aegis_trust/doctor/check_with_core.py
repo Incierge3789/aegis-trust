@@ -20,8 +20,16 @@ and exported.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from aegis_trust.client import AegisClient, BoundaryDecisionView
+if TYPE_CHECKING:
+    # FULL/gateway-mode types only. Importing AegisClient at runtime pulls the
+    # optional gateway dependencies (httpx, attrs) into the import graph; the
+    # real client is obtained lazily via ``shield._get_client()`` inside
+    # ``check_with_core()`` below, so a LITE-only install
+    # (``from aegis_trust.doctor import check``) carries no runtime dependency
+    # and importing the public ``aegis_trust.doctor`` package never touches httpx.
+    from aegis_trust.client import AegisClient, BoundaryDecisionView
 from aegis_trust.doctor.types import to_core_verified_receipt  # noqa: F401 (receipt bridge)
 from aegis_trust.doctor.types import (
     DOCTOR_SCHEMA_VERSION,

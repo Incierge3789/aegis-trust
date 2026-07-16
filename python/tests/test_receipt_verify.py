@@ -71,13 +71,19 @@ def test_dangling_prior_refs_detected():
 def test_lineage_root_cross_impl_pinned_vectors():
     # Same vectors pinned in Core lineage::tests (Python aegisbase oracle).
     r1 = compute_lineage_root("crm:customer", "file", "doc-123", ["name", "addr"])
-    assert r1.hex() == "9d36c954ae2595be57ff3e1c07090212bc1c3a20cb8a27bcce82a1940edabb97"
+    assert (
+        r1.hex() == "9d36c954ae2595be57ff3e1c07090212bc1c3a20cb8a27bcce82a1940edabb97"
+    )
     r2 = compute_lineage_root("crm:contract_value", "file", "doc-456", ["amount"], [r1])
-    assert r2.hex() == "404ec0c907d7dc2cc463f159f744e017bd1cca9e3aaaab6a894907dbcc8877f3"
+    assert (
+        r2.hex() == "404ec0c907d7dc2cc463f159f744e017bd1cca9e3aaaab6a894907dbcc8877f3"
+    )
     ra = compute_lineage_root("t.x", "s", "l", ["b", "a", "a"], sorted([r1, r2]))
     rb = compute_lineage_root("t.x", "s", "l", ["a", "b"], [r2, r1])
     assert ra == rb
-    assert ra.hex() == "5b93afcd12a957a54306e356d406d4790808c55a0541f68f9853710e451e0223"
+    assert (
+        ra.hex() == "5b93afcd12a957a54306e356d406d4790808c55a0541f68f9853710e451e0223"
+    )
 
 
 def test_forged_lineage_fails_closed():
@@ -94,3 +100,31 @@ def test_forged_lineage_fails_closed():
         raise AssertionError("value-bearing tag must be refused")
     except ValueError:
         pass
+
+
+def test_structure_verifier_reports_non_string_members_never_raises():
+    # S022 hardening: hostile JSON with mixed/non-string members must be
+    # REPORTED (returns-problems contract), not raise TypeError out of sorted().
+    receipt = {
+        "schema": "aegis-span-crypto.v0",
+        "event_receipt_refs": [1, "a"],  # mixed unorderable
+        "fragment_tags": [42],
+        "dag_root": "0" * 64,
+        "audit_chain_link": "deadbeef",
+    }
+    problems = verify_session_receipt_structure(receipt)
+    assert "event_receipt_refs contain non-string members" in problems
+    assert "fragment_tags contain non-string members" in problems
+    assert "fragment_tag 42 is not a value-free label" in problems
+    assert "dag_root not checked (non-string refs/tags cannot be hashed)" in problems
+    # And a well-formed receipt still verifies clean.
+    refs = ["r1", "r2"]
+    tags = ["billing"]
+    ok = {
+        "schema": "aegis-span-crypto.v0",
+        "event_receipt_refs": refs,
+        "fragment_tags": tags,
+        "dag_root": session_dag_root(refs, tags),
+        "audit_chain_link": "deadbeef",
+    }
+    assert verify_session_receipt_structure(ok) == []

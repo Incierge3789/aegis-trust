@@ -40,7 +40,9 @@ def is_value_free_label(s: str) -> bool:
     )
 
 
-def session_dag_root(event_receipt_refs: Sequence[str], fragment_tags: Sequence[str]) -> str:
+def session_dag_root(
+    event_receipt_refs: Sequence[str], fragment_tags: Sequence[str]
+) -> str:
     """Recompute a Session Receipt's ``dag_root`` (hex). Inputs are used AS
     STORED on the receipt (Core sorts + dedups before sealing)."""
     h = hashlib.sha256()
@@ -58,24 +60,41 @@ def session_dag_root(event_receipt_refs: Sequence[str], fragment_tags: Sequence[
 def verify_session_receipt_structure(receipt: Mapping[str, object]) -> list[str]:
     """Structural verification of a Session Receipt. Returns the list of
     problems found (empty = structurally sound). NEVER claims authenticity —
-    the keyed ``audit_chain_link`` is verifiable only by the key holder."""
+    the keyed ``audit_chain_link`` is verifiable only by the key holder.
+
+    Hostile-input contract (S022 hardening): non-string members in
+    ``event_receipt_refs`` / ``fragment_tags`` are reported as problems —
+    this function returns, it never raises (previously mixed unorderable
+    types raised ``TypeError`` out of ``sorted()``, breaking the documented
+    returns-problems contract)."""
     problems: list[str] = []
     schema = receipt.get("schema")
     if schema != SPAN_CRYPTO_SCHEMA_TAG:
         problems.append(f"schema is {schema!r}, expected {SPAN_CRYPTO_SCHEMA_TAG!r}")
     refs = list(receipt.get("event_receipt_refs") or [])  # type: ignore[arg-type]
     tags = list(receipt.get("fragment_tags") or [])  # type: ignore[arg-type]
-    if refs != sorted(set(refs)):
+    refs_ok = all(isinstance(r, str) for r in refs)
+    tags_ok = all(isinstance(t, str) for t in tags)
+    if not refs_ok:
+        problems.append("event_receipt_refs contain non-string members")
+    elif refs != sorted(set(refs)):
         problems.append("event_receipt_refs are not sorted+deduplicated")
-    if tags != sorted(set(tags)):
+    if not tags_ok:
+        problems.append("fragment_tags contain non-string members")
+    elif tags != sorted(set(tags)):
         problems.append("fragment_tags are not sorted+deduplicated")
     for t in tags:
         if not isinstance(t, str) or not is_value_free_label(t):
             problems.append(f"fragment_tag {t!r} is not a value-free label")
     claimed = receipt.get("dag_root")
-    recomputed = session_dag_root([str(r) for r in refs], [str(t) for t in tags])
-    if claimed != recomputed:
-        problems.append("dag_root does not recompute over the stored refs+tags")
+    if refs_ok and tags_ok:
+        recomputed = session_dag_root(refs, tags)
+        if claimed != recomputed:
+            problems.append("dag_root does not recompute over the stored refs+tags")
+    else:
+        # Never hash coerced values: a receipt whose dag_root was sealed over
+        # str()-coerced non-strings must not be reported as recomputing.
+        problems.append("dag_root not checked (non-string refs/tags cannot be hashed)")
     if not receipt.get("audit_chain_link"):
         problems.append("audit_chain_link missing (keyed link is Core-verifiable only)")
     return problems
@@ -115,7 +134,9 @@ def compute_lineage_root(
     if not fragment_tag or not fragment_tag.strip():
         raise ValueError("fragment_tag must be non-empty")
     if not is_value_free_label(fragment_tag):
-        raise ValueError("fragment_tag must be a value-free label ([A-Za-z0-9._:-], <=128)")
+        raise ValueError(
+            "fragment_tag must be a value-free label ([A-Za-z0-9._:-], <=128)"
+        )
     for r in prior_lineage_roots:
         if len(r) != LINEAGE_ROOT_LEN:
             raise ValueError("each prior lineage_root must be 32 bytes")
@@ -150,4 +171,6 @@ def verify_lineage_root(
         fragment_tag, source_kind, locator, field_set, resolved_parent_roots
     )
     if expected != claimed_root:
-        raise ValueError("lineage_root does not match resolved parents (forged lineage)")
+        raise ValueError(
+            "lineage_root does not match resolved parents (forged lineage)"
+        )
