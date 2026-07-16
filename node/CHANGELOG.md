@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added — keyless receipt verifier (`src/receiptVerify.ts`, PyPI parity)
+- `sessionDagRoot` / `verifySessionReceiptStructure` /
+  `danglingPriorReceiptRefs` / `computeLineageRoot` / `verifyLineageRoot` /
+  `isValueFreeLabel` exported from the package root — the consumer-side
+  (keyless) receipt verification surface, previously Python-only. Hex
+  vectors pinned cross-impl with the Python SDK and Aegis Core; problem
+  strings byte-identical to Python (including `repr` formatting), so
+  failures grep identically across SDKs. HONESTY BOUNDARY: authenticity of
+  the keyed `audit_chain_link` remains Core-verifiable only.
+- Hostile non-string refs/tags are reported as problems (returns-problems
+  contract), never thrown.
+
 ### Added — AI-native Layer 2: the interposition layer (`src/aiNative.ts`)
 - `guardTool()` — the FULL-strength sibling of LITE's `shield()`: every
   invocation of the wrapped tool is decided by the boundary

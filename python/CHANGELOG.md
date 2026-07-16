@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Added — keyless receipt verifier (`aegis_trust.receipt_verify`, 穴1)
+- `session_dag_root` / `verify_session_receipt_structure` /
+  `dangling_prior_receipt_refs` / `compute_lineage_root` /
+  `verify_lineage_root` / `is_value_free_label` — consumer-side structural
+  verification of Aegis boundary receipts without key material; hex vectors
+  pinned cross-impl with Aegis Core (`boundary_adapter` / `lineage`) and the
+  Node SDK. HONESTY BOUNDARY: authenticity of the keyed `audit_chain_link`
+  remains Core-verifiable only — this module checks structure and internal
+  consistency, never authenticity.
+- Hardening: `verify_session_receipt_structure` reports hostile non-string
+  refs/tags as problems (returns-problems contract) instead of raising a
+  `TypeError` out of `sorted()`; `dag_root` is never recomputed over
+  coerced values.
+
+### Fixed — LITE zero-dep import path (doctor)
+- `from aegis_trust.doctor import check` no longer pulls `httpx` into a
+  LITE-only install: `check_with_core`'s client imports moved under
+  `TYPE_CHECKING` (the doctor package eagerly imports `check_with_core`, so
+  the runtime import graph must stay stdlib-only). Subprocess regression
+  test added to the zero-dep suite.
+
 ### Added — AI-native Layer 2: the interposition layer (`aegis_trust.ai_native`)
 - `@guard_tool` — the FULL-strength sibling of LITE's `@shield`: every
   invocation of the wrapped tool (sync or async) is decided by the boundary

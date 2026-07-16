@@ -65,6 +65,47 @@ def test_lite_import_and_filter_without_gateway_extra() -> None:
     assert "LITE_OK" in r.stdout
 
 
+def test_lite_doctor_import_and_check_without_gateway_extra() -> None:
+    """`from aegis_trust.doctor import check` (documented LITE-only Doctor v0 path)
+    must import AND run a local decision with httpx/attrs absent.
+
+    Regression guard for the S017 codex+cursor cross-review P0: ``doctor/__init__``
+    eagerly imported ``check_with_core`` → ``client`` → ``import httpx``, so the
+    documented ``from aegis_trust.doctor import check`` broke at import time in a
+    dependency-free LITE install even though the module is labelled "LITE-only".
+    The FULL client import is now deferred (TYPE_CHECKING + lazy ``_get_client``),
+    so the LITE Doctor path carries no runtime dependency.
+    """
+    code = (
+        "import sys\n"
+        "sys.modules['httpx'] = None\n"  # force ImportError on `import httpx`
+        "sys.modules['attrs'] = None\n"
+        "from aegis_trust.doctor import (\n"
+        "    check, ActionPlan, LocalPolicy, PurposeRule, ActionRule, BoundaryOutcome\n"
+        ")\n"
+        "pol = LocalPolicy(\n"
+        "    purposes={'customer_support': PurposeRule(allow=['name', 'issue'])},\n"
+        "    sensitive_fields=['email'],\n"
+        "    never_fields=['ssn'],\n"
+        "    external_destinations=['external_llm'],\n"
+        "    actions={'send': ActionRule(requires_approval=True)},\n"
+        ")\n"
+        "plan = ActionPlan(\n"
+        "    purpose='customer_support', action_type='generate_draft',\n"
+        "    data_requested=['name', 'issue'], destinations=['internal_reply'],\n"
+        ")\n"
+        "d = check(plan, pol)\n"
+        "assert d.outcome is BoundaryOutcome.ALLOW, d.outcome\n"
+        "assert d.allowed_data == ['name', 'issue'], d.allowed_data\n"
+        "print('LITE_DOCTOR_OK')\n"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+    )
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert "LITE_DOCTOR_OK" in r.stdout
+
+
 def test_full_mode_without_gateway_extra_is_actionable() -> None:
     """Driving FULL without the extra raises AegisConfigError pointing at [full]."""
     code = (

@@ -156,8 +156,22 @@ export { AUDIT_SCHEMA_VERSION } from "./constants.js";
 export const STABILITY_LEVEL: "preview" | "stable" | "deprecated" = "preview";
 
 // Aegis-Api-Version dated header (Stripe-model dated API versioning).
-// Date-based public contract version. Clients send `Aegis-Api-Version: <YYYY-MM-DD>`;
+// Date-based wire contract version. Clients send `Aegis-Api-Version: <YYYY-MM-DD>`;
 // unset → SDK uses this default.
 // Sunset: 18-month notice + 6-month deprecation warning.
 export const AEGIS_API_VERSION = "2026-05-18";
 export const AEGIS_API_VERSION_HEADER = "Aegis-Api-Version";
+
+// Keyless (LITE) structural receipt verifier — 穴1, the consumer-side
+// verification surface (parity with python aegis_trust.receipt_verify;
+// cross-impl pinned vectors in tests/receiptVerify.test.ts).
+export {
+  LINEAGE_ROOT_LEN,
+  SPAN_CRYPTO_SCHEMA_TAG,
+  computeLineageRoot,
+  danglingPriorReceiptRefs,
+  isValueFreeLabel,
+  sessionDagRoot,
+  verifyLineageRoot,
+  verifySessionReceiptStructure,
+} from "./receiptVerify.js";
