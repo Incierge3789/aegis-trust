@@ -71,8 +71,8 @@ def verify_session_receipt_structure(receipt: Mapping[str, object]) -> list[str]
     schema = receipt.get("schema")
     if schema != SPAN_CRYPTO_SCHEMA_TAG:
         problems.append(f"schema is {schema!r}, expected {SPAN_CRYPTO_SCHEMA_TAG!r}")
-    refs = list(receipt.get("event_receipt_refs") or [])  # type: ignore[arg-type]
-    tags = list(receipt.get("fragment_tags") or [])  # type: ignore[arg-type]
+    refs = list(receipt.get("event_receipt_refs") or [])  # type: ignore[call-overload]
+    tags = list(receipt.get("fragment_tags") or [])  # type: ignore[call-overload]
     refs_ok = all(isinstance(r, str) for r in refs)
     tags_ok = all(isinstance(t, str) for t in tags)
     if not refs_ok:
