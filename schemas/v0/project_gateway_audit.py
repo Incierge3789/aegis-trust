@@ -26,10 +26,18 @@ Mapping notes, monolith shape (see DESIGN.md table):
 
 Mapping notes, plane-NATIVE union-ledger shape:
 - detected by kind == "receipt", or by actor + a decision in the native
-  vocabulary (BLOCKED / PROTECTED / ACCESS_REDUCED).
+  vocabulary (BLOCKED / PROTECTED / ACCESS_REDUCED / CHECK_REQUIRED /
+  APPROVAL_REQUIRED).
 - decision: BLOCKED -> deny; PROTECTED -> allow (outcome=protected);
-  ACCESS_REDUCED -> allow (outcome=access_reduced). Any other native decision
-  raises ProjectionError (fail-closed skip-and-count, never guessed).
+  ACCESS_REDUCED -> allow (outcome=access_reduced);
+  CHECK_REQUIRED -> deny (outcome=check_required);
+  APPROVAL_REQUIRED -> deny (outcome=approval_required) — the full five-state
+  DecisionOutcome vocabulary (union_ledger.schema.json), mapped per the v0
+  outcome contract ("deny maps to blocked|check_required|approval_required":
+  a pending check/approval has not granted anything yet, so the binary
+  decision is deny until a later PROTECTED/ACCESS_REDUCED receipt lands).
+  Any other native decision raises ProjectionError (fail-closed
+  skip-and-count, never guessed).
 - principal.agent_id <- actor (the plane's actor is the JWT-verified
   requester); principal.role <- role when present.
 - enforcement_point stays "gateway" (v0 enum has no "plane" member);
@@ -63,11 +71,15 @@ class ProjectionError(ValueError):
 
 
 # Plane-NATIVE decision vocabulary -> (v0 decision, v0 outcome).
+# All five DecisionOutcome states are mapped; the pending states project to
+# deny because nothing has been granted yet (v0 outcome contract).
 # Anything else (LIST, lifecycle markers, future verbs) fail-closes.
 _NATIVE_DECISION_MAP = {
     "BLOCKED": ("deny", "blocked"),
     "PROTECTED": ("allow", "protected"),
     "ACCESS_REDUCED": ("allow", "access_reduced"),
+    "CHECK_REQUIRED": ("deny", "check_required"),
+    "APPROVAL_REQUIRED": ("deny", "approval_required"),
 }
 
 # Value-free reason_code literals (the v0 schema's ReasonCode vocabulary).
@@ -407,6 +419,32 @@ def _selftest() -> int:
         assert "reason_code" not in ev
         assert "salary" not in json.dumps(ev)
 
+    def t_native_check_required():
+        rec = copy.deepcopy(native_blocked)
+        rec.update(decision="CHECK_REQUIRED", reason_code="check_required")
+        ev = project_record(rec)
+        validator.validate(ev)
+        assert ev["decision"] == "deny" and ev["outcome"] == "check_required"
+        assert ev["reason_code"] == "check_required"
+
+    def t_native_approval_required():
+        rec = copy.deepcopy(native_blocked)
+        rec.update(decision="APPROVAL_REQUIRED", reason_code="approval_required")
+        ev = project_record(rec)
+        validator.validate(ev)
+        assert ev["decision"] == "deny" and ev["outcome"] == "approval_required"
+        assert ev["reason_code"] == "approval_required"
+
+    def t_native_pending_detected_without_kind():
+        # CHECK_REQUIRED/APPROVAL_REQUIRED must trip _is_native even when the
+        # record lacks kind="receipt" (actor + native vocabulary suffices).
+        rec = copy.deepcopy(native_blocked)
+        rec.pop("kind")
+        rec["decision"] = "APPROVAL_REQUIRED"
+        ev = project_record(rec)
+        validator.validate(ev)
+        assert ev["decision"] == "deny" and ev["outcome"] == "approval_required"
+
     check("project:v8-allow", t_allow)
     check("project:v7-identity-mismatch", t_identity_mismatch)
     check("project:v2-egress", t_egress)
@@ -418,6 +456,9 @@ def _selftest() -> int:
     check("project:native-no-purpose-skips", t_native_no_purpose_skips)
     check("project:native-unknown-decision-rejected", t_native_unknown_decision_rejected)
     check("project:native-freetext-reason-dropped", t_native_freetext_reason_dropped)
+    check("project:native-check-required-deny", t_native_check_required)
+    check("project:native-approval-required-deny", t_native_approval_required)
+    check("project:native-pending-detected-without-kind", t_native_pending_detected_without_kind)
 
     print()
     if failures:

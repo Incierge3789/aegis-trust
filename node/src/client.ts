@@ -27,7 +27,11 @@ import {
   AegisIngestError,
   AegisValidationError,
 } from "./errors.js";
-import { AUDIT_SCHEMA_VERSION } from "./constants.js";
+import {
+  AEGIS_API_VERSION,
+  AEGIS_API_VERSION_HEADER,
+  AUDIT_SCHEMA_VERSION,
+} from "./constants.js";
 import type {
   AuditChainStatus,
   FieldStats,
@@ -343,9 +347,10 @@ export class AegisClient {
   }
 
   private authHeaders(): Record<string, string> {
-    // Always attach the Aegis-Api-Version dated header.
+    // Always attach the Aegis-Api-Version dated header (single-sourced
+    // constant — a second hardcoded literal here drifted-by-construction).
     const headers: Record<string, string> = {
-      "Aegis-Api-Version": "2026-05-18",
+      [AEGIS_API_VERSION_HEADER]: AEGIS_API_VERSION,
     };
     if (this._token) {
       headers["Authorization"] = `Bearer ${this._token}`;
@@ -519,6 +524,10 @@ export class AegisClient {
     if (args.schemaVersion !== undefined) body.schema_version = args.schemaVersion;
     // Enforcement-neutral witness claims (USAGE_METERING #4): verbatim,
     // only when set — never authorization inputs, hash-witnessed by Core.
+    // Deployment caveat (2026-07-16 wire audit): only the decide-plane wire
+    // carries both claims; the monolith gateway build ignores these fields
+    // (HTTP 200, nothing witnessed). Confirm the deployment is plane-fronted
+    // before relying on `synthetic` for billing exclusion.
     if (args.attribution !== undefined) body.attribution = args.attribution;
     if (args.synthetic !== undefined) body.synthetic = args.synthetic;
     const resp = await this.req("POST", "/check-boundary", { body });

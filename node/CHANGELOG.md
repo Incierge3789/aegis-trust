@@ -14,6 +14,38 @@
 - Hostile non-string refs/tags are reported as problems (returns-problems
   contract), never thrown.
 
+### Fixed — CLI + proxy hardening (S022 audit remediation)
+- `aegis-mcp-proxy` argument parser is strict: an unknown flag exits 2 with
+  usage (previously it silently consumed the NEXT flag as its value — a
+  typo could drop `--audit-path` without warning); flag values are consumed
+  only for known flags; `--help` prints usage.
+- `aegis history` no longer truncates the Blocked column at 30 chars —
+  blocked fields can no longer disappear from the audit inspection view
+  (pad-only, Python parity).
+- `aegis history --limit` rejects non-numeric values (exit 2, Python
+  argparse parity) instead of silently falling back to 20; a negative limit
+  means unlimited (SQLite parity) instead of silently dropping records;
+  `--purpose` with a missing value exits 2 instead of meaning "no filter".
+- `cmdSandbox` comment no longer claims a Python mirror (the Python CLI has
+  no sandbox subcommand); `AEGIS_SANDBOX_AUDIT` documented in the README
+  env table.
+- History write-failure warning withholds the path and error detail (S018
+  P2 minimum-disclosure parity with Python).
+- `loadCanonicalPolicy` raises the coded `aegis.canonical.file.notFound`
+  envelope on a missing policy file (previously a raw filesystem message);
+  the proxy bin's stderr one-liner now carries the `[<code>]` suffix like
+  Python, so the documented `aegis.canonical.*` codes grep identically on
+  both SDKs. (Cross-review round 1, codex + cursor consensus.)
+
+### Changed — single-sourced wire version constant
+- `AEGIS_API_VERSION` / `AEGIS_API_VERSION_HEADER` moved to `constants.ts`;
+  `client.ts` uses the constant instead of a second hardcoded date literal
+  (drift-by-construction removed). Public exports unchanged.
+
+### Docs — honesty corrections (S022 audit remediation)
+- `checkBoundary` witness-claims comment gains a deployment caveat: claims
+  are witnessed only on decide-plane-fronted deployments.
+
 ### Added — AI-native Layer 2: the interposition layer (`src/aiNative.ts`)
 - `guardTool()` — the FULL-strength sibling of LITE's `shield()`: every
   invocation of the wrapped tool is decided by the boundary

@@ -18,6 +18,13 @@ import httpx
 from dataclasses import dataclass, field
 
 from aegis_trust._constants import AUDIT_SCHEMA_VERSION
+from aegis_trust.errors import (
+    AegisAuditError,
+    AegisHttpError,
+    AegisIngestError,
+    AegisValidationError,
+    aegis_docs_url,
+)
 from aegis_trust.types import (
     AuditChainStatus,
     CapabilityGrant,
@@ -33,6 +40,66 @@ from aegis_trust.types import (
 )
 
 logger = logging.getLogger("aegis")
+
+
+# ── coded error envelopes (S022 audit remediation) ──────────────────
+# Mirror of node/src/client.ts httpError/ingestError/auditError/aiNativeError:
+# the documented error model is "switch on err.code across SDKs". Before this,
+# the Python client raised raw ValueError / httpx.HTTPStatusError on the same
+# conditions, so AegisHttpError/AegisIngestError were dead exports here.
+# Catch-compat: the three shape errors subclass ValueError, and every internal
+# fail-closed path catches broad Exception, so existing behavior is preserved.
+def _http_error(endpoint: str, status: int) -> AegisHttpError:
+    return AegisHttpError(
+        f"{endpoint} HTTP {status}",
+        code="aegis.http.nonOk",
+        remediation="Inspect server logs; verify endpoint + token; retry if 5xx.",
+        docs_url=aegis_docs_url("aegis.http.nonOk"),
+        status=status,
+    )
+
+
+def _ensure_ok(resp: httpx.Response, endpoint: str) -> None:
+    """Raise the coded non-2xx envelope (Node `if (!resp.ok) throw httpError`)."""
+    if not resp.is_success:
+        raise _http_error(endpoint, resp.status_code)
+
+
+def _ingest_error(detail: str) -> AegisIngestError:
+    return AegisIngestError(
+        f"ingest: {detail}",
+        code="aegis.ingest.responseShape",
+        remediation=(
+            "Server returned a malformed shield/ingest response. "
+            "Check aegis-core version."
+        ),
+        docs_url=aegis_docs_url("aegis.ingest.responseShape"),
+    )
+
+
+def _audit_error(detail: str) -> AegisAuditError:
+    return AegisAuditError(
+        f"verify: {detail}",
+        code="aegis.audit.responseShape",
+        remediation=(
+            "Server returned a malformed audit/verify response. "
+            "Check aegis-core version."
+        ),
+        docs_url=aegis_docs_url("aegis.audit.responseShape"),
+    )
+
+
+def _ai_native_error(detail: str) -> AegisValidationError:
+    return AegisValidationError(
+        detail,
+        code="aegis.aiNative.responseShape",
+        remediation=(
+            "Server returned a malformed AI-native response. Check the boundary "
+            "version against AI_NATIVE_V1_CONTRACT.md (additive-only)."
+        ),
+        docs_url=aegis_docs_url("aegis.aiNative.responseShape"),
+    )
+
 
 _DEFAULT_BASE_URL = "https://localhost:8443/api/v1"
 
@@ -321,7 +388,7 @@ class AegisClient:
             "/check-access",
             json=self._check_access_body(purpose, scope),
         )
-        resp.raise_for_status()
+        _ensure_ok(resp, "check-access")
         return resp.json()
 
     async def acheck_access(self, purpose: str, scope: list[str]) -> dict[str, Any]:
@@ -330,7 +397,7 @@ class AegisClient:
             "/check-access",
             json=self._check_access_body(purpose, scope),
         )
-        resp.raise_for_status()
+        _ensure_ok(resp, "check-access")
         return resp.json()
 
     # ── check-boundary (Doctor v1, Core-backed) ───────────
@@ -457,9 +524,9 @@ class AegisClient:
     ) -> BoundaryDecisionView:
         """POST ``/check-boundary`` and return the parsed
         :class:`BoundaryDecisionView`. Reuses the same auth header / base-url /
-        timeout / httpx plumbing as :meth:`check_access`. Non-2xx raises (via
-        ``raise_for_status``) so the Doctor v1 entry point maps it to a
-        fail-closed BLOCK.
+        timeout / httpx plumbing as :meth:`check_access`. Non-2xx raises the
+        coded :class:`AegisHttpError` (``aegis.http.nonOk``) so the Doctor v1
+        entry point maps it to a fail-closed BLOCK.
 
         ``attribution`` (``{"human": str, "on_behalf_of": [str]}``) and
         ``synthetic`` are OPTIONAL enforcement-neutral witness claims: they
@@ -468,6 +535,14 @@ class AegisClient:
         human (and delegation chain) this request serves; ``synthetic=True``
         marks probe/drill traffic for billing exclusion. Omitted claims leave
         the request body byte-identical to previous SDK versions.
+
+        Deployment caveat (2026-07-16 wire audit): witnessing requires a
+        decide-plane-fronted Core — the plane's ``/check-boundary`` wire
+        carries both claims. The monolith gateway build's request struct does
+        NOT include these fields and silently ignores them (HTTP 200, nothing
+        witnessed), and the checkd bin carries ``attribution`` only. Do not
+        rely on ``synthetic`` for billing exclusion until the serving
+        deployment is confirmed plane-fronted.
         """
         resp = self._get_httpx().post(
             "/check-boundary",
@@ -483,7 +558,7 @@ class AegisClient:
                 synthetic=synthetic,
             ),
         )
-        resp.raise_for_status()
+        _ensure_ok(resp, "check-boundary")
         return self._parse_boundary_view(resp.json())
 
     async def acheck_boundary(
@@ -515,7 +590,7 @@ class AegisClient:
                 synthetic=synthetic,
             ),
         )
-        resp.raise_for_status()
+        _ensure_ok(resp, "check-boundary")
         return self._parse_boundary_view(resp.json())
 
     # ── check_access enforcement (AO-003) ───────────────────────────
@@ -658,7 +733,7 @@ class AegisClient:
         if bytes_returned is not None:
             payload["bytes_returned"] = bytes_returned
         resp = self._get_httpx().post("/audit-log", json=payload)
-        resp.raise_for_status()
+        _ensure_ok(resp, "audit-log")
 
     # ── Shield API ─────────────────────────────────────────
 
@@ -687,24 +762,25 @@ class AegisClient:
         aegis-core can in principle return HTTP 200 with a shape that
         differs from the OpenAPI contract (bug, proxy rewrite, version
         drift). This helper centralizes strict schema checks and raises
-        :class:`ValueError` on any violation. The outer try/except in
-        ``_shield_full`` treats that as a transport error and returns the
+        :class:`AegisIngestError` (``aegis.ingest.responseShape``, a
+        :class:`ValueError` subclass) on any violation. The outer try/except
+        in ``_shield_full`` treats that as a transport error and returns the
         AO-002 fail-closed empty result — never raise into the caller.
         """
         if not isinstance(body, dict):
-            raise ValueError("ingest: body is not a dict")
+            raise _ingest_error("body is not a dict")
         data = body.get("data")
         if not isinstance(data, dict):
-            raise ValueError("ingest: body['data'] missing or not a dict")
+            raise _ingest_error("body['data'] missing or not a dict")
         ingested = data.get("ingested")
         seq_start = data.get("audit_seq_start")
         seq_end = data.get("audit_seq_end")
         if not isinstance(ingested, int) or ingested < 0:
-            raise ValueError("ingest: 'ingested' invalid")
+            raise _ingest_error("'ingested' invalid")
         if not isinstance(seq_start, int) or seq_start < 0:
-            raise ValueError("ingest: 'audit_seq_start' invalid")
+            raise _ingest_error("'audit_seq_start' invalid")
         if not isinstance(seq_end, int) or seq_end < seq_start:
-            raise ValueError("ingest: 'audit_seq_end' invalid or non-monotonic")
+            raise _ingest_error("'audit_seq_end' invalid or non-monotonic")
         return IngestResponse(
             ingested=ingested,
             audit_seq_start=seq_start,
@@ -735,8 +811,8 @@ class AegisClient:
         window-size check would risk fail-closing a legitimate ingest.
         """
         if parsed.ingested != expected:
-            raise ValueError(
-                f"ingest: partial acceptance ({parsed.ingested}/{expected}) — "
+            raise _ingest_error(
+                f"partial acceptance ({parsed.ingested}/{expected}) — "
                 "audit incomplete, failing closed"
             )
 
@@ -747,7 +823,7 @@ class AegisClient:
             "/shield/ingest", json=self._ingest_payload(entries)
         )
         _emit_metric("shield.ingest", t0, resp.status_code)
-        resp.raise_for_status()
+        _ensure_ok(resp, "shield/ingest")
         parsed = self._parse_ingest_body(resp.json())
         self._require_full_acceptance(parsed, len(entries))
         return self._record_seq(parsed)
@@ -761,7 +837,7 @@ class AegisClient:
             "/shield/ingest", json=self._ingest_payload(entries)
         )
         _emit_metric("shield.ingest", t0, resp.status_code)
-        resp.raise_for_status()
+        _ensure_ok(resp, "shield/ingest")
         parsed = self._parse_ingest_body(resp.json())
         self._require_full_acceptance(parsed, len(entries))
         return self._record_seq(parsed)
@@ -770,25 +846,25 @@ class AegisClient:
     @staticmethod
     def _parse_chain_body(body: Any) -> AuditChainStatus:
         if not isinstance(body, dict):
-            raise ValueError("verify: body is not a dict")
+            raise _audit_error("body is not a dict")
         chain_valid = body.get("chain_valid")
         total = body.get("total_entries")
         if not isinstance(chain_valid, bool):
-            raise ValueError("verify: 'chain_valid' must be bool")
+            raise _audit_error("'chain_valid' must be bool")
         if not isinstance(total, int) or total < 0:
-            raise ValueError("verify: 'total_entries' invalid")
+            raise _audit_error("'total_entries' invalid")
         return AuditChainStatus(chain_valid=chain_valid, total_entries=total)
 
     def verify_audit_chain(self) -> AuditChainStatus:
         """Verify the backend audit chain integrity (GET /audit/verify)."""
         resp = self._get_httpx().get("/audit/verify")
-        resp.raise_for_status()
+        _ensure_ok(resp, "audit/verify")
         return self._parse_chain_body(resp.json())
 
     async def averify_audit_chain(self) -> AuditChainStatus:
         """Async variant of :meth:`verify_audit_chain`."""
         resp = await self._get_async_httpx().get("/audit/verify")
-        resp.raise_for_status()
+        _ensure_ok(resp, "audit/verify")
         return self._parse_chain_body(resp.json())
 
     def verify_inclusion(self, *, seq_end: int | None = None) -> bool:
@@ -851,14 +927,14 @@ class AegisClient:
     def _require_decision(body: Any, op: str) -> dict[str, Any]:
         """Fail-closed shape check for decision-bearing responses."""
         if not isinstance(body, dict):
-            raise ValueError(f"{op}: body is not a dict")
+            raise _ai_native_error(f"{op}: body is not a dict")
         decision = body.get("decision")
         if not isinstance(decision, dict):
-            raise ValueError(f"{op}: 'decision' missing or not a dict")
+            raise _ai_native_error(f"{op}: 'decision' missing or not a dict")
         if not isinstance(decision.get("outcome"), str):
-            raise ValueError(f"{op}: 'decision.outcome' missing")
+            raise _ai_native_error(f"{op}: 'decision.outcome' missing")
         if not isinstance(decision.get("ledgered"), bool):
-            raise ValueError(f"{op}: 'decision.ledgered' missing")
+            raise _ai_native_error(f"{op}: 'decision.ledgered' missing")
         return body
 
     @staticmethod
@@ -919,7 +995,7 @@ class AegisClient:
             ),
         )
         _emit_metric("tool_call", t0, resp.status_code)
-        resp.raise_for_status()
+        _ensure_ok(resp, "tool-call")
         return self._require_decision(resp.json(), "tool-call")
 
     async def atool_call(
@@ -948,7 +1024,7 @@ class AegisClient:
             ),
         )
         _emit_metric("tool_call", t0, resp.status_code)
-        resp.raise_for_status()
+        _ensure_ok(resp, "tool-call")
         return self._require_decision(resp.json(), "tool-call")
 
     def tool_allowed(
@@ -1012,22 +1088,22 @@ class AegisClient:
     @staticmethod
     def _parse_capability_grant(body: Any) -> CapabilityGrant:
         if not isinstance(body, dict):
-            raise ValueError("capability/mint: body is not a dict")
+            raise _ai_native_error("capability/mint: body is not a dict")
         token = body.get("capability")
         cap_id = body.get("id")
         exp = body.get("exp")
         depth = body.get("depth")
         root = body.get("root_delegator")
         if not isinstance(token, str) or not token:
-            raise ValueError("capability/mint: 'capability' missing")
+            raise _ai_native_error("capability/mint: 'capability' missing")
         if not isinstance(cap_id, str) or not cap_id:
-            raise ValueError("capability/mint: 'id' missing")
+            raise _ai_native_error("capability/mint: 'id' missing")
         if not isinstance(exp, int) or exp <= 0:
-            raise ValueError("capability/mint: 'exp' invalid")
+            raise _ai_native_error("capability/mint: 'exp' invalid")
         if not isinstance(depth, int) or depth <= 0:
-            raise ValueError("capability/mint: 'depth' invalid")
+            raise _ai_native_error("capability/mint: 'depth' invalid")
         if not isinstance(root, str) or not root:
-            raise ValueError("capability/mint: 'root_delegator' missing")
+            raise _ai_native_error("capability/mint: 'root_delegator' missing")
         return CapabilityGrant(
             capability=token, id=cap_id, exp=exp, depth=depth, root_delegator=root
         )
@@ -1059,7 +1135,7 @@ class AegisClient:
         if parent_capability is not None:
             payload["parent_capability"] = parent_capability
         resp = self._get_httpx().post("/capability/mint", json=payload)
-        resp.raise_for_status()
+        _ensure_ok(resp, "capability/mint")
         return self._parse_capability_grant(resp.json())
 
     def capability_revoke(
@@ -1077,13 +1153,13 @@ class AegisClient:
         if capability_id is not None:
             payload["capability_id"] = capability_id
         resp = self._get_httpx().post("/capability/revoke", json=payload)
-        resp.raise_for_status()
+        _ensure_ok(resp, "capability/revoke")
         body = resp.json()
         if not isinstance(body, dict) or body.get("ok") is not True:
-            raise ValueError("capability/revoke: 'ok' missing")
+            raise _ai_native_error("capability/revoke: 'ok' missing")
         revoked = body.get("revoked")
         if not isinstance(revoked, str) or not revoked:
-            raise ValueError("capability/revoke: 'revoked' missing")
+            raise _ai_native_error("capability/revoke: 'revoked' missing")
         return revoked
 
     def stream_open(self, envelope: dict[str, Any]) -> dict[str, Any]:
@@ -1092,7 +1168,7 @@ class AegisClient:
         — ``stream`` is non-null (``{"stream_id":…, "status":"open"}``) iff the
         decision passes AND is ledgered."""
         resp = self._get_httpx().post("/stream/open", json={"envelope": envelope})
-        resp.raise_for_status()
+        _ensure_ok(resp, "stream/open")
         return self._parse_stream_open(
             self._require_decision(resp.json(), "stream/open")
         )
@@ -1104,7 +1180,7 @@ class AegisClient:
             if not isinstance(stream, dict) or not isinstance(
                 stream.get("stream_id"), str
             ):
-                raise ValueError("stream/open: 'stream.stream_id' missing")
+                raise _ai_native_error("stream/open: 'stream.stream_id' missing")
         return body
 
     async def astream_open(self, envelope: dict[str, Any]) -> dict[str, Any]:
@@ -1112,7 +1188,7 @@ class AegisClient:
         resp = await self._get_async_httpx().post(
             "/stream/open", json={"envelope": envelope}
         )
-        resp.raise_for_status()
+        _ensure_ok(resp, "stream/open")
         return self._parse_stream_open(
             self._require_decision(resp.json(), "stream/open")
         )
@@ -1120,7 +1196,7 @@ class AegisClient:
     @staticmethod
     def _parse_stream_status(body: Any) -> StreamStatus:
         if not isinstance(body, dict) or not isinstance(body.get("status"), str):
-            raise ValueError("stream/heartbeat: 'status' missing")
+            raise _ai_native_error("stream/heartbeat: 'status' missing")
         reason = body.get("reason")
         return StreamStatus(
             status=body["status"],
@@ -1134,7 +1210,7 @@ class AegisClient:
         resp = self._get_httpx().post(
             "/stream/heartbeat", json={"stream_id": stream_id}
         )
-        resp.raise_for_status()
+        _ensure_ok(resp, "stream/heartbeat")
         return self._parse_stream_status(resp.json())
 
     async def astream_heartbeat(self, stream_id: str) -> StreamStatus:
@@ -1142,16 +1218,16 @@ class AegisClient:
         resp = await self._get_async_httpx().post(
             "/stream/heartbeat", json={"stream_id": stream_id}
         )
-        resp.raise_for_status()
+        _ensure_ok(resp, "stream/heartbeat")
         return self._parse_stream_status(resp.json())
 
     def stream_close(self, stream_id: str) -> bool:
         """Close a stream (POST /stream/close; owner or Admin). Witnessed."""
         resp = self._get_httpx().post("/stream/close", json={"stream_id": stream_id})
-        resp.raise_for_status()
+        _ensure_ok(resp, "stream/close")
         body = resp.json()
         if not isinstance(body, dict) or body.get("ok") is not True:
-            raise ValueError("stream/close: 'ok' missing")
+            raise _ai_native_error("stream/close: 'ok' missing")
         return True
 
     async def astream_close(self, stream_id: str) -> bool:
@@ -1159,10 +1235,10 @@ class AegisClient:
         resp = await self._get_async_httpx().post(
             "/stream/close", json={"stream_id": stream_id}
         )
-        resp.raise_for_status()
+        _ensure_ok(resp, "stream/close")
         body = resp.json()
         if not isinstance(body, dict) or body.get("ok") is not True:
-            raise ValueError("stream/close: 'ok' missing")
+            raise _ai_native_error("stream/close: 'ok' missing")
         return True
 
     # ── token rotation (AO-001 + AO-004) ────────────────────────────
@@ -1246,7 +1322,7 @@ class AegisClient:
             }
         }
         resp = self._get_httpx().post("/shield/policy-sync", json=payload)
-        resp.raise_for_status()
+        _ensure_ok(resp, "shield/policy-sync")
         data = resp.json()["data"]
         return PolicySyncResponse(
             synced=data["synced"],
@@ -1270,7 +1346,7 @@ class AegisClient:
         if purpose is not None:
             params["purpose"] = purpose
         resp = self._get_httpx().get("/shield/stats", params=params)
-        resp.raise_for_status()
+        _ensure_ok(resp, "shield/stats")
         data = resp.json()["data"]
         return ShieldStats(
             period_from=data["period"]["from"],
@@ -1304,7 +1380,7 @@ class AegisClient:
         """
         params = {"format": fmt} if fmt != "json" else {}
         resp = self._get_httpx().get("/shield/report", params=params)
-        resp.raise_for_status()
+        _ensure_ok(resp, "shield/report")
         if fmt == "pdf":
             return resp.content
         return resp.json()["data"]

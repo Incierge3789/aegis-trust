@@ -6,8 +6,9 @@ Closes codex C1 finding: the SDK's hand-rolled httpx calls (/shield/ingest,
 client. This test catches SDK→openapi.json drift without needing a live
 aegis-core — every endpoint client.py hits must also exist in the committed
 openapi.json. If the endpoint is missing here, either the spec is stale
-(run `make generate-sdk` against a running core) or the SDK is calling a
-route the gateway does not expose.
+(refresh python/openapi.json from a running dev gateway — see
+`_generated/__init__.py` for the regeneration steps; there is no Makefile in
+this repo) or the SDK is calling a route the gateway does not expose.
 """
 
 from __future__ import annotations
@@ -67,7 +68,8 @@ def test_every_client_path_is_in_openapi_spec():
     assert not missing, (
         f"Contract drift — SDK client.py calls {sorted(missing)} but these "
         f"endpoints are not in openapi.json. Regenerate the spec "
-        f"(`make generate-sdk` with aegis-core running) or remove the stale "
+        f"(refresh python/openapi.json from a running dev gateway; see "
+        f"_generated/__init__.py) or remove the stale "
         f"client call. Known SDK paths: {sorted(client_paths)}. Known spec "
         f"paths (sample): {sorted(list(spec_paths)[:8])}."
     )

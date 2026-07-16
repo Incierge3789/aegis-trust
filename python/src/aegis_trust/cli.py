@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -28,7 +29,18 @@ def _open_store() -> HistoryStore | None:
         print(f"No history database found at {db_path}")
         print("Enable history with: AEGIS_HISTORY=1")
         return None
-    return HistoryStore(db_path)
+    try:
+        return HistoryStore(db_path)
+    except sqlite3.Error:
+        # Not a SQLite database (e.g. AEGIS_HISTORY_PATH points at the Node
+        # SDK's history.jsonl, which shares the env var name but not the
+        # format). Inspection commands must hint, not stack-trace.
+        print(f"History file at {db_path} is not a SQLite database.")
+        print(
+            "If this is the Node SDK's history.jsonl, inspect it with "
+            "`npx aegis history` instead."
+        )
+        return None
 
 
 def cmd_history(args: argparse.Namespace) -> int:
@@ -137,3 +149,10 @@ def main(argv: list[str] | None = None) -> int:
 def cli_entry() -> None:
     """Entry point used by the ``aegis`` console script (see ``pyproject.toml``)."""
     sys.exit(main())
+
+
+if __name__ == "__main__":  # pragma: no cover
+    # `python -m aegis_trust.cli` must behave like the `aegis` console script.
+    # Without this guard the module invocation was a silent no-op with exit 0 —
+    # the same silent-exit class the Node CLI fixed in PR #4.
+    cli_entry()

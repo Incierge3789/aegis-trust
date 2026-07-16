@@ -41,17 +41,26 @@ class TraceContext:
 _TRACE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
+# Error-code labels are camelCase on the wire (S018 doctrine: shared concepts
+# use error-code strings identical to the Node SDK — trace.ts emits
+# aegis.trace.traceId.invalid / aegis.trace.parentId.invalid, and the
+# ecosystem precedent is camelCase, e.g. aegis.audit.idempotencyKey.*).
+# The human-readable message keeps the pythonic snake_case argument name.
+_CODE_LABELS = {"trace_id": "traceId", "parent_id": "parentId"}
+
+
 def _assert_trace_id(label: str, value: str) -> None:
     if not isinstance(value, str) or not _TRACE_ID_RE.fullmatch(value):
+        code = f"aegis.trace.{_CODE_LABELS[label]}.invalid"
         raise AegisValidationError(
             f"with_trace_context: {label} must match [A-Za-z0-9._:-]{{1,128}}",
-            code=f"aegis.trace.{label}.invalid",
+            code=code,
             remediation=(
                 f"{label} must be 1-128 chars of [A-Za-z0-9._:-]. Generate one with "
                 "`new_trace_id()`. Never pass secrets (Bearer tokens, API keys) as "
                 "trace_id — the audit JSONL is not a secret store."
             ),
-            docs_url=aegis_docs_url(f"aegis.trace.{label}.invalid"),
+            docs_url=aegis_docs_url(code),
         )
 
 

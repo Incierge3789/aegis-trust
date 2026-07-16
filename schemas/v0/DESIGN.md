@@ -101,6 +101,28 @@ Emitters stamp the canonical version; readers fail-closed
 - All of the above are exercised in CI: schema harness, loader/emitter unit
   tests, and end-to-end proxy subprocess tests.
 
+## Plane-NATIVE union-ledger projection (2026-07-05, extended 2026-07-16)
+
+`project_gateway_audit.py` also recognizes plane-NATIVE union-ledger receipts
+(`kind: "receipt"`, or `actor` + a decision in the native vocabulary) and maps
+the full five-state `DecisionOutcome` vocabulary into the v0 binary decision
+plus the five-state `outcome` refinement:
+
+| native decision | v0 `decision` | v0 `outcome` | rationale |
+|---|---|---|---|
+| `BLOCKED` | `deny` | `blocked` | denial, final |
+| `PROTECTED` | `allow` | `protected` | grant, minimum disclosure applied |
+| `ACCESS_REDUCED` | `allow` | `access_reduced` | grant with reduced scope |
+| `CHECK_REQUIRED` | `deny` | `check_required` | pending: nothing granted yet |
+| `APPROVAL_REQUIRED` | `deny` | `approval_required` | pending: nothing granted yet |
+
+The pending states project to `deny` per the v0 outcome contract ("deny maps
+to blocked|check_required|approval_required"): a receipt that requires a check
+or an approval has not released any data, and a later grant produces its own
+`PROTECTED`/`ACCESS_REDUCED` receipt. Any decision outside this table still
+raises `ProjectionError` (fail-closed skip-and-count, never guessed).
+(Panel D-188..D-193, S022.)
+
 ## Known v0 limits (documented, not hidden)
 
 - **SDK evidentiary limit**: in-process events have no `integrity` chain; the
@@ -119,8 +141,10 @@ Emitters stamp the canonical version; readers fail-closed
   / JSON text in `content`/`contents`/`messages`). Route sensitive data
   through structured results.
 - **operational decision verbs (gateway projection)**: `project_gateway_audit.py`
-  maps gateway records to canonical events only for `ALLOW`/`DENY` decisions;
-  operational verbs the gateway also writes (`LIST`, lifecycle markers) are
+  maps monolith gateway records to canonical events only for `ALLOW`/`DENY`
+  decisions (plane-NATIVE receipts map the full five-state vocabulary — see
+  the projection table above); operational verbs the gateway also writes
+  (`LIST`, lifecycle markers) are
   SKIPPED-AND-COUNTED, never guessed into `allow`/`deny` (2026-07-03 ruling:
   keeping v0's decision enum honest beats coverage — a projection that
   reclassifies an operational read as an authorization decision would

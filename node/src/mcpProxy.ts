@@ -276,15 +276,49 @@ interface ParsedArgs {
   serverCmd: string[];
 }
 
+const USAGE = `usage: aegis-mcp-proxy --policy <aegis-policy v0 JSON> [options] -- <server command>
+
+options:
+  --policy <path>      aegis-policy v0 document (JSON), required
+  --agent-id <id>      advisory principal id of the host agent (env AEGIS_AGENT_ID)
+  --session-id <id>    session id stamped on canonical events (env AEGIS_SESSION_ID)
+  --audit-path <path>  canonical event JSONL path (env AEGIS_CANONICAL_AUDIT_PATH)
+  --gate <kind>        FULL-mode gate primitive: check-access | tool-call (env AEGIS_MCP_GATE)
+  --owner <id>         principal.owner for the tool-call gate (env AEGIS_OWNER)
+  --help               show this help
+`;
+
+// Flags that take a value. Anything else starting with "--" is rejected: the
+// old positional parser silently consumed the NEXT flag as an unknown flag's
+// value, so one typo could drop e.g. --audit-path without any warning — on
+// the component whose whole job is auditable enforcement.
+const VALUE_FLAGS = new Set([
+  "--policy",
+  "--agent-id",
+  "--session-id",
+  "--audit-path",
+  "--gate",
+  "--owner",
+]);
+
 function parseArgs(argv: string[]): ParsedArgs {
   const sep = argv.indexOf("--");
   const flags = sep === -1 ? argv : argv.slice(0, sep);
   const serverCmd = sep === -1 ? [] : argv.slice(sep + 1);
   const opts: Record<string, string> = {};
-  for (let i = 0; i < flags.length; i += 2) {
+  for (let i = 0; i < flags.length; i += 1) {
     const key = flags[i];
-    if (!key.startsWith("--")) continue;
-    opts[key.slice(2)] = flags[i + 1] ?? "";
+    if (!VALUE_FLAGS.has(key)) {
+      throw new Error(
+        `aegis-mcp-proxy: unknown argument ${key}\n${USAGE}`,
+      );
+    }
+    const value = flags[i + 1];
+    if (value === undefined) {
+      throw new Error(`aegis-mcp-proxy: ${key} requires a value\n${USAGE}`);
+    }
+    opts[key.slice(2)] = value;
+    i += 1;
   }
   if (!opts.policy) {
     throw new Error("aegis-mcp-proxy: --policy <aegis-policy v0 JSON> is required");
@@ -308,6 +342,12 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 export async function main(argv: string[]): Promise<number> {
+  const sepIdx = argv.indexOf("--");
+  const flagPart = sepIdx === -1 ? argv : argv.slice(0, sepIdx);
+  if (flagPart.includes("--help") || flagPart.includes("-h")) {
+    process.stdout.write(USAGE);
+    return 0;
+  }
   const args = parseArgs(argv);
   const policy = loadCanonicalPolicy(args.policy);
   const emitter = new CanonicalEmitter(
@@ -378,7 +418,14 @@ function isMain(): boolean {
 
 if (isMain()) {
   main(process.argv.slice(2)).catch((e) => {
-    process.stderr.write(String((e as Error).message ?? e) + "\n");
+    // Python-parity stderr contract: one line, `aegis-mcp-proxy: <message>
+    // [<code>]` when the error carries a machine-parseable code — operators
+    // grep the documented aegis.canonical.* codes on BOTH SDKs.
+    const msg = String((e as Error).message ?? e);
+    const prefixed = msg.startsWith("aegis-mcp-proxy:") ? msg : `aegis-mcp-proxy: ${msg}`;
+    const code = (e as { code?: unknown }).code;
+    const suffix = typeof code === "string" && code.startsWith("aegis.") ? ` [${code}]` : "";
+    process.stderr.write(prefixed + suffix + "\n");
     process.exit(2);
   });
 }
