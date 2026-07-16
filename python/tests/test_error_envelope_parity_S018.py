@@ -244,3 +244,24 @@ def test_get_purpose_policy_surfaces_malformed_config(tmp_path, monkeypatch):
     with pytest.raises(AegisConfigError) as ei:
         get_purpose_policy("s")
     assert ei.value.code == "aegis.config.purpose.empty"
+
+
+# ── S022 audit remediation: trace codes must match Node (camelCase) ─
+
+
+def test_trace_id_code_matches_node():
+    from aegis_trust.trace import trace_context
+
+    with pytest.raises(AegisValidationError) as ei:
+        with trace_context("bad id with spaces"):
+            pass
+    _assert_envelope(ei.value, "aegis.trace.traceId.invalid")
+
+
+def test_parent_id_code_matches_node():
+    from aegis_trust.trace import trace_context
+
+    with pytest.raises(AegisValidationError) as ei:
+        with trace_context("ok-trace", "bad parent!"):
+            pass
+    _assert_envelope(ei.value, "aegis.trace.parentId.invalid")

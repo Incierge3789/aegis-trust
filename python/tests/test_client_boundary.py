@@ -199,8 +199,15 @@ def test_check_boundary_raises_on_non_2xx():
         return httpx.Response(503, text="nope")
 
     c = _client_with_transport(handler)
-    with pytest.raises(httpx.HTTPStatusError):
+    # S022 audit remediation: non-2xx raises the coded envelope (Node parity:
+    # `if (!resp.ok) throw httpError("check-boundary", ...)`), not a raw
+    # httpx.HTTPStatusError. Doctor still fail-closes via `except Exception`.
+    from aegis_trust.errors import AegisHttpError
+
+    with pytest.raises(AegisHttpError) as ei:
         c.check_boundary("p", ["name"])
+    assert ei.value.code == "aegis.http.nonOk"
+    assert ei.value.status == 503
 
 
 def test_check_boundary_raises_on_malformed_body():

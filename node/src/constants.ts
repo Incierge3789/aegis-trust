@@ -9,3 +9,12 @@
 // missing version as 1 (S017 D-C). NOT part of the idempotency `_payloadHash`
 // (S017 D-D).
 export const AUDIT_SCHEMA_VERSION = 1;
+
+// Aegis-Api-Version dated header (Stripe-model dated API versioning).
+// Clients send `Aegis-Api-Version: <YYYY-MM-DD>`; unset → SDK uses this
+// default. Sunset: 18-month notice + 6-month deprecation warning.
+// Lives here (leaf module) so client.ts and index.ts share ONE definition —
+// client.ts previously hardcoded the date literal a second time, which would
+// drift silently on the next version bump.
+export const AEGIS_API_VERSION = "2026-05-18";
+export const AEGIS_API_VERSION_HEADER = "Aegis-Api-Version";

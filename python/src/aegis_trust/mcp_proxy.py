@@ -58,6 +58,7 @@ from aegis_trust.canonical import (
     CanonicalPurpose,
     load_canonical_policy,
 )
+from aegis_trust.errors import AegisConfigError
 
 try:  # single-source runtime version
     from aegis_trust import __version__ as _sdk_version
@@ -375,15 +376,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # argparse validates `choices` only for the flag form; an invalid
+    # AEGIS_MCP_GATE env value arrives via `default` unchecked. Validate the
+    # merged value like the Node proxy does (exit 2, same message shape).
+    if args.gate not in ("check-access", "tool-call"):
+        parser.error(f"unknown --gate {args.gate} (check-access | tool-call)")
+
     server_cmd = args.server_cmd
     if server_cmd and server_cmd[0] == "--":
         server_cmd = server_cmd[1:]
     if not server_cmd:
         parser.error("missing real MCP server command after --")
 
-    policy = load_canonical_policy(
-        args.policy
-    )  # fail-closed: structural error aborts startup
+    try:
+        policy = load_canonical_policy(
+            args.policy
+        )  # fail-closed: structural error aborts startup
+    except AegisConfigError as exc:
+        # Coded one-liner on stderr, exit 2 — parity with the Node proxy.
+        # A raw traceback here hid the machine-parseable `code` operators grep
+        # for, and exit 1 diverged from Node's exit 2 for the same mistake.
+        print(f"aegis-mcp-proxy: {exc} [{exc.code}]", file=sys.stderr)
+        return 2
     emitter = CanonicalEmitter(
         ENFORCEMENT_MCP_PROXY,
         PROXY_RUNTIME,

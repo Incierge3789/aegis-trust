@@ -29,7 +29,10 @@ function openStore(): HistoryStore | null {
 }
 
 function pad(s: string, n: number, right = false): string {
-  if (s.length >= n) return s.slice(0, n);
+  // Pad only, never truncate (Python `f"{x:<n}"` parity): a truncated
+  // Blocked column made blocked fields disappear from the audit view,
+  // which reads as "this field was disclosed" — the opposite of the truth.
+  if (s.length >= n) return s;
   const fill = " ".repeat(n - s.length);
   return right ? fill + s : s + fill;
 }
@@ -65,9 +68,10 @@ function cmdHistory(args: { limit: number; purpose?: string }): number {
 }
 
 function cmdSandbox(): number {
-  // Run the 10-second aegis-trust sandbox demo (dummy data, no infra).
-  // Mirrors aegis (Python) `aegis sandbox` so the value can be seen with:
+  // Run the 10-second aegis-trust sandbox demo (dummy data, no infra):
   //   npm install aegis-trust && npx aegis sandbox
+  // Node-only command: the Python `aegis` CLI has no sandbox subcommand
+  // (it offers history/stats only) — do not claim a mirror that isn't there.
 
   const dummyUser: Record<string, unknown> = {
     user_id: "u_123",
@@ -207,10 +211,22 @@ export function main(argv: string[]): number {
     for (let i = 1; i < argv.length; i++) {
       const a = argv[i];
       if (a === "--limit" || a === "-n") {
-        limit = parseInt(argv[++i] ?? "20", 10);
-        if (Number.isNaN(limit)) limit = 20;
+        const raw = argv[++i];
+        limit = parseInt(raw ?? "", 10);
+        if (raw === undefined || Number.isNaN(limit)) {
+          // Python argparse parity: a bad --limit is an error (exit 2),
+          // never a silent fallback to the default.
+          console.error(`argument --limit/-n: invalid int value: ${raw ?? "(missing)"}`);
+          return 2;
+        }
       } else if (a === "--purpose" || a === "-p") {
         purpose = argv[++i];
+        if (purpose === undefined) {
+          // Python argparse parity: a missing value is an error, not
+          // a silent "no filter" that shows everything.
+          console.error("argument --purpose/-p: expected one argument");
+          return 2;
+        }
       } else {
         console.error(`unknown arg: ${a}`);
         return 2;

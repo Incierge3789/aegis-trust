@@ -24,7 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from aegis_trust.errors import AegisConfigError, aegis_docs_url
+from aegis_trust.errors import (
+    AegisConfigError,
+    AegisConfigFileNotFoundError,
+    aegis_docs_url,
+)
 from aegis_trust.shield import (
     _diff_keys,
     _filter_result,
@@ -259,7 +263,21 @@ def load_canonical_policy(path: str | Path) -> CanonicalPolicy:
     including a policy_schema_version this reader does not support.
     """
     resolved = Path(path)
-    text = resolved.read_text(encoding="utf-8")
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        # Coded envelope instead of a raw traceback: the docstring promises
+        # AegisConfigError on any structural violation, and a missing policy
+        # file is the most common operator mistake at proxy startup.
+        raise AegisConfigFileNotFoundError(
+            f"Canonical policy file not found: {resolved}",
+            code="aegis.canonical.file.notFound",
+            remediation=(
+                "Check the --policy path passed to aegis-mcp-proxy (or the "
+                "load_canonical_policy() argument)."
+            ),
+            docs_url=aegis_docs_url("aegis.canonical.file.notFound"),
+        ) from exc
     if resolved.suffix in (".yaml", ".yml"):
         try:
             import yaml
@@ -270,7 +288,14 @@ def load_canonical_policy(path: str | Path) -> CanonicalPolicy:
             ) from exc
         raw = yaml.safe_load(text)
     else:
-        raw = json.loads(text)
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError as exc:
+            # Node parity: canonical.ts raises aegis.canonical.topLevel.notJson.
+            raise _err(
+                "Canonical policy must be valid JSON",
+                "aegis.canonical.topLevel.notJson",
+            ) from exc
     if not isinstance(raw, dict):
         raise _err(
             "Canonical policy must be a mapping", "aegis.canonical.topLevel.notMapping"

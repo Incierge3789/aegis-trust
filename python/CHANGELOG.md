@@ -23,6 +23,51 @@
   the runtime import graph must stay stdlib-only). Subprocess regression
   test added to the zero-dep suite.
 
+### Changed — coded error envelopes on the FULL client (S022 audit remediation)
+- `AegisClient` now raises the machine-parseable envelopes the Node SDK
+  already raises (the documented cross-SDK error model): non-2xx →
+  `AegisHttpError` (`aegis.http.nonOk`, carries `.status`); malformed
+  `shield/ingest` body → `AegisIngestError` (`aegis.ingest.responseShape`);
+  malformed `audit/verify` body → `AegisAuditError`
+  (`aegis.audit.responseShape`); malformed AI-native bodies →
+  `AegisValidationError` (`aegis.aiNative.responseShape`).
+  Catch-compat: the shape errors still subclass `ValueError`; fail-closed
+  wrappers (`tool_allowed`, doctor, `@shield` FULL) behave identically.
+  Only code that caught `httpx.HTTPStatusError` specifically must switch to
+  `AegisHttpError`.
+- `aegis_trust.trace` validation codes are now Node-identical (S018
+  doctrine): `aegis.trace.traceId.invalid` / `aegis.trace.parentId.invalid`
+  (previously snake_case `trace_id`/`parent_id`).
+
+### Fixed — CLI + proxy hardening (S022 audit remediation)
+- `python -m aegis_trust.cli` now runs the CLI (module `__main__` guard);
+  previously it exited 0 silently for every subcommand.
+- `aegis history`/`aegis stats` print a clean hint instead of a raw
+  `sqlite3` traceback when `AEGIS_HISTORY_PATH` points at a non-SQLite file
+  (e.g. the Node SDK's `history.jsonl`).
+- `aegis-mcp-proxy` exits 2 with a coded one-liner on a missing
+  (`aegis.canonical.file.notFound`) or malformed
+  (`aegis.canonical.topLevel.notJson`) policy file (Node-parity exit code
+  and codes; previously a raw traceback with exit 1), and validates
+  `AEGIS_MCP_GATE` env values at startup like the flag form.
+
+### Changed — schemas/v0 projector: full five-state union-ledger vocabulary
+- `project_gateway_audit.py` now maps `CHECK_REQUIRED` → `deny`
+  (`outcome=check_required`) and `APPROVAL_REQUIRED` → `deny`
+  (`outcome=approval_required`) per the v0 outcome contract — previously
+  these live Core decision states raised `ProjectionError` and turned the
+  projection red on legitimate ledgers. Unknown decisions still fail
+  closed. (Panel D-188..D-193.)
+
+### Docs — honesty corrections (S022 audit remediation)
+- README supply-chain paragraph now states npm provenance is enabled
+  (matching the live release workflow; it previously said omitted).
+- `check_boundary` witness-claims docstring gains a deployment caveat:
+  claims are witnessed only on decide-plane-fronted deployments.
+- `_generated/__init__.py` regeneration note describes the real
+  openapi-python-client path (the referenced make target does not exist in
+  this repo); LITE_CLAIMS.md anchors converted to symbol references.
+
 ### Added — AI-native Layer 2: the interposition layer (`aegis_trust.ai_native`)
 - `@guard_tool` — the FULL-strength sibling of LITE's `@shield`: every
   invocation of the wrapped tool (sync or async) is decided by the boundary

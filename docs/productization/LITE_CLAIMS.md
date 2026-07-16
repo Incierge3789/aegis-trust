@@ -89,10 +89,10 @@ gateway's boundary decision: Node `checkBoundary(args)` and Python
 
 | Claim | Evidence |
 |---|---|
-| Node: `checkBoundary()` is a typed passthrough of `POST /check-boundary`; the SDK adds no client-side decision logic | `node/src/client.ts:137-383` (`BoundaryDecisionView`, `CheckBoundaryArgs`, `checkBoundary`) |
-| Python: `check_boundary()` / async `acheck_boundary()` with the same wire shape, parsed fail-closed (malformed views are rejected, not coerced) | `python/src/aegis_trust/client.py:102` (`BoundaryDecisionView`), `:296` (`_parse_boundary_view`), `:355` (`check_boundary`); `python/tests/test_client_boundary.py` |
-| Field **names** are surfaced, never field **values** | type comment at `node/src/client.ts:137-140`; projection tests in `node/tests/` |
-| The decision view carries evidence pointers (`decision_id`, `integrity_checkable_at`, `recorded_at`) **when produced by the gateway** | `CoreDecisionEvidence` in `node/src/client.ts`; the Python evidence dataclass in `python/src/aegis_trust/client.py:92` |
+| Node: `checkBoundary()` is a typed passthrough of `POST /check-boundary`; the SDK adds no client-side decision logic | `node/src/client.ts` — `BoundaryDecisionView`, `CheckBoundaryArgs`, `checkBoundary` (symbol anchors; line numbers drift) |
+| Python: `check_boundary()` / async `acheck_boundary()` with the same wire shape, parsed fail-closed (malformed views are rejected, not coerced) | `python/src/aegis_trust/client.py` — `BoundaryDecisionView`, `_parse_boundary_view`, `check_boundary`; `python/tests/test_client_boundary.py` |
+| Field **names** are surfaced, never field **values** | `BoundaryDecisionView` doc comment in `node/src/client.ts`; projection tests in `node/tests/` |
+| The decision view carries evidence pointers (`decision_id`, `integrity_checkable_at`, `recorded_at`) **when produced by the gateway** | `CoreDecisionEvidence` in `node/src/client.ts` and in `python/src/aegis_trust/client.py` |
 
 **The LITE boundary, stated plainly (never-claim for LITE):**
 
@@ -118,8 +118,8 @@ metrics system.
 
 | Claim | Evidence |
 |---|---|
-| Python: `set_metrics_hook(hook)` | `python/src/aegis_trust/client.py:46` |
-| Node: `setMetricsHook(hook)` with the same shape (`endpoint`, `durationMs`, `status`) | `node/src/client.ts:75-88`, exported from `node/src/index.ts` |
+| Python: `set_metrics_hook(hook)` | `python/src/aegis_trust/client.py` — `set_metrics_hook` |
+| Node: `setMetricsHook(hook)` with the same shape (`endpoint`, `durationMs`, `status`) | `node/src/client.ts` — `setMetricsHook`, exported from `node/src/index.ts` |
 | The SDK does not bundle or auto-register a metrics backend (no global registry pollution); the hook is the integration point | `python/tests/test_metrics_hook.py` (records the design decision and pins the behavior) |
 
 **Customer-side:** the metrics backend itself (Prometheus, statsd, Datadog,

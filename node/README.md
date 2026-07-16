@@ -388,6 +388,7 @@ shield({ purpose: "lookup", scope: ["name"] })(
 | `AEGIS_MODE` | `auto` | Override mode detection (`full` / `lite`) — see matrix above. |
 | `AEGIS_HISTORY` | (unset) | `1` to enable local audit log |
 | `AEGIS_HISTORY_PATH` | `~/.aegis/history.jsonl` | Local audit file |
+| `AEGIS_SANDBOX_AUDIT` | `./aegis-sandbox-audit.jsonl` | `npx aegis sandbox` demo audit output path (Node-only command) |
 | `AEGIS_CONFIG` | (unset) | Override YAML config path |
 
 ### FULL mode — gateway trust-boundary guarantees

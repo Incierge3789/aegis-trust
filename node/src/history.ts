@@ -233,6 +233,9 @@ export class HistoryStore {
       filtered = all.filter((r) => r.purpose === opts.purpose);
     }
     filtered.sort((a, b) => b.id - a.id);
+    // Negative limit means unlimited (Python parity: SQLite `LIMIT -1`).
+    // A raw negative slice(0, -1) would silently DROP records from the end.
+    if (limit < 0) return filtered;
     return filtered.slice(0, limit);
   }
 
@@ -310,12 +313,18 @@ export function recordIfEnabled(args: {
     // the broken-evidence condition is visible.
     if (!_historyWarned) {
       _historyWarned = true;
-      const path = process.env.AEGIS_HISTORY_PATH ?? "~/.aegis/history.jsonl";
+      // S018 P2 minimum-disclosure parity with Python history.py: the
+      // AEGIS_HISTORY_PATH value and the raw error message are withheld —
+      // either may embed tenant / user / secret-bearing path segments.
+      void err;
       console.warn(
-        `aegis-trust: AEGIS_HISTORY=1 but the local audit log could not be `
-        + `written (path=${path}): ${err instanceof Error ? err.message : String(err)}. `
-        + `Audit evidence is NOT being recorded — fix the path/permissions or unset `
-        + `AEGIS_HISTORY.`,
+        "aegis-trust: history_write_failed local_evidence_not_recorded=true "
+        + "— AEGIS_HISTORY=1 but the local history could not be written. "
+        + "Check the path/permissions configured via AEGIS_HISTORY_PATH "
+        + "(its value, the underlying error, and its type are withheld here "
+        + "to avoid leaking tenant / user / secret-bearing strings), or "
+        + "unset AEGIS_HISTORY. (Local developer diagnostic only — not an "
+        + "authoritative audit record.)",
       );
     }
   }
