@@ -19,31 +19,28 @@
  *      read only in the TLS-resolution module `client.ts` (fail-secure
  *      prod-lock, AO-001 / AO-005).
  *
- * The source is passed through a string/comment-aware scanner before matching,
- * so `//` inside a string literal (e.g. "http://…") is not mistaken for a
- * comment, comment text is not mistaken for code, and template `${...}`
- * interpolations ARE scanned as code. Optional chaining (`process?.env`),
- * computed subscript keys (`process.env["A"+x]`, `` process.env[`${k}`] ``) and
- * destructuring off `process` are handled — closing the bypass classes surfaced
- * by the S024 cross-review (codex + cursor, two rounds).
- *
- * Accepted coverage boundary (defense-in-depth, not a full TS analyzer; none of
- * these appear in the SDK and each is non-idiomatic). Out of scope for a
- * regex-level lint: reflective access (`Reflect.get(process,"env")`), ESM/CJS
- * imports of the process module (`import proc from "node:process"`,
- * `require("process").env`), split declaration-then-assignment or
- * control-flow-dependent aliasing (`let p; p = process`), parenthesized or
+ * Implemented on the TypeScript compiler AST (typescript is a devDependency, so
+ * it is available wherever this test runs). Working on the real AST — rather
+ * than a regex over source text — closes the bypass classes that a text scanner
+ * cannot follow: identifier aliasing (`const p = process; p.env.X`,
+ * `const e = process.env; e.X`), whole-env intake (`{...process.env}`,
+ * destructuring), computed / dynamic keys, optional chaining, parenthesized and
  * type-asserted heads (`(process as NodeJS.Process).env`, `process!.env`), and
- * a read placed on the same line as a regex literal containing `//`. A real TS
- * AST would be needed to follow these; they are covered by the layered controls
- * (gitleaks + human code review + fail-closed runtime). Residual handoff
- * (R-S024-1).
+ * `process["env"]` / `Reflect.get(process, "env")`. Comments, string contents
+ * and regex literals cannot be mistaken for code because the parser tokenises
+ * them. Verified across four rounds of the S024 cross-review (codex + cursor).
+ *
+ * Residual (accepted boundary): value flow that only a type-checker or runtime
+ * could follow — e.g. `process` reached through a function return or a property
+ * of another object, or a fully dynamic `Reflect`/`globalThis` computed member.
+ * Layered with gitleaks + human review + fail-closed runtime (R-S024-1).
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -62,176 +59,163 @@ function tsFiles(dir: string): string[] {
   return out;
 }
 
-/**
- * Blank out comments and string/template contents while preserving overall
- * character positions. String contents become spaces so a `//` or `process.env`
- * inside a literal is never scanned as code; comments become spaces so their
- * text is never scanned as code. Template-literal `${...}` interpolations are
- * kept as code, so a real read inside a template (`` `x=${process.env.X}` ``)
- * is not erased. String *delimiters* are kept so a literal subscript key still
- * shows its brackets — the key text is recovered from the raw source.
- */
-function blankStringsAndComments(src: string): string {
-  const out: string[] = [];
-  let i = 0;
-  const n = src.length;
-  // A stack lets template `${...}` push back to code and pop on the closing `}`.
-  const stack: Array<"code" | "line" | "block" | "'" | '"' | "`"> = ["code"];
-  const braceDepth: number[] = []; // depth per template-interpolation frame
-  const state = () => stack[stack.length - 1];
-  while (i < n) {
-    const c = src[i];
-    const c2 = i + 1 < n ? src[i + 1] : "";
-    const s = state();
-    if (s === "code") {
-      if (c === "/" && c2 === "/") {
-        out.push("  ");
-        i += 2;
-        stack.push("line");
-      } else if (c === "/" && c2 === "*") {
-        out.push("  ");
-        i += 2;
-        stack.push("block");
-      } else if (c === "'" || c === '"' || c === "`") {
-        out.push(c);
-        i += 1;
-        stack.push(c);
-      } else if (c === "}" && braceDepth.length && braceDepth[braceDepth.length - 1] === 0) {
-        // closing a `${...}` interpolation → pop both the code frame and its
-        // brace counter, returning to the enclosing template-string state.
-        braceDepth.pop();
-        stack.pop();
-        out.push(" ");
-        i += 1;
-      } else {
-        if (braceDepth.length) {
-          if (c === "{") braceDepth[braceDepth.length - 1] += 1;
-          else if (c === "}") braceDepth[braceDepth.length - 1] -= 1;
-        }
-        out.push(c);
-        i += 1;
-      }
-    } else if (s === "line") {
-      if (c === "\n") {
-        out.push(c);
-        stack.pop();
-      } else {
-        out.push(" ");
-      }
-      i += 1;
-    } else if (s === "block") {
-      if (c === "*" && c2 === "/") {
-        out.push("  ");
-        i += 2;
-        stack.pop();
-      } else {
-        out.push(c === "\n" ? "\n" : " ");
-        i += 1;
-      }
-    } else {
-      // inside a string/template delimited by `s`
-      if (c === "\\") {
-        out.push("  ");
-        i += 2;
-      } else if (s === "`" && c === "$" && c2 === "{") {
-        // enter interpolation: treat its body as code
-        out.push("  ");
-        i += 2;
-        stack.push("code");
-        braceDepth.push(0);
-      } else if (c === s) {
-        out.push(c);
-        i += 1;
-        stack.pop();
-      } else {
-        out.push(c === "\n" ? "\n" : " ");
-        i += 1;
-      }
-    }
-  }
-  return out.join("");
+function relKey(file: string): string {
+  return relative(SRC_DIR, file).split(sep).join("/");
 }
 
 interface Scan {
   reads: string[];
-  indirect: number; // count of bulk / indirect / dynamic accesses
+  indirect: number; // bulk / indirect / dynamic / reflective accesses
 }
 
-function reEscape(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Strip parentheses, `!` non-null, and `as`/`satisfies` type assertions. */
+function unwrap(node: ts.Expression): ts.Expression {
+  let n: ts.Expression = node;
+  for (;;) {
+    if (ts.isParenthesizedExpression(n)) n = n.expression;
+    else if (ts.isNonNullExpression(n)) n = n.expression;
+    else if (ts.isAsExpression(n) || ts.isSatisfiesExpression(n)) n = n.expression;
+    else return n;
+  }
 }
 
-// `process` reached with optional-chaining tolerance (`process?.env`).
-const PROCESS_ENV = String.raw`process\s*\??\.\s*env`;
-
-/**
- * Classify every env access reached through one "head" (`process.env`, or an
- * `<alias>.env` where the alias was bound to `process`). All matching is done on
- * the blanked code so comments/strings can neither hide nor forge an access;
- * literal subscript keys are recovered from the raw source by index.
- */
-function scanHead(code: string, src: string, head: string, out: Scan): void {
-  // Dot read: head.IDENT  (optional chaining allowed on either dot)
-  for (const m of code.matchAll(new RegExp(head + String.raw`\s*\??\.\s*([A-Za-z_$][\w$]*)`, "g"))) {
-    out.reads.push(m[1]);
-  }
-  // Subscript: head[...] or head?.[...] — classify literal-vs-computed on the
-  // blanked inner text, recover the literal key from raw at the same span.
-  const openRe = new RegExp(head + String.raw`\s*\??\.?\s*\[`, "g");
-  for (const m of code.matchAll(openRe)) {
-    const open = m.index + m[0].length - 1; // index of '['
-    const close = code.indexOf("]", open);
-    if (close < 0) {
-      out.indirect += 1;
-      continue;
-    }
-    const innerBlank = code.slice(open + 1, close);
-    // A literal key shows as a quoted, blanked-empty span (delimiters kept).
-    if (/^\s*(["'`])\s*\1\s*$/.test(innerBlank)) {
-      const km = /(["'`])([^"'`]*)\1/.exec(src.slice(open + 1, close));
-      if (km && !(km[1] === "`" && km[2].includes("${"))) out.reads.push(km[2]);
-      else out.indirect += 1; // template-interpolated key → computed
-    } else {
-      out.indirect += 1; // dynamic / concatenated / nested key
-    }
-  }
-  // Bulk / alias / spread: head not followed by `.`, `[`, `?`, or an ident char.
-  for (const m of code.matchAll(new RegExp(head + String.raw`(?!\s*[.[\w$?])`, "g"))) {
-    void m;
-    out.indirect += 1;
-  }
+function isIdent(node: ts.Expression, name: string): boolean {
+  const n = unwrap(node);
+  return ts.isIdentifier(n) && n.text === name;
 }
 
 function scan(src: string): Scan {
-  const code = blankStringsAndComments(src);
-  const out: Scan = { reads: [], indirect: 0 };
+  const sf = ts.createSourceFile("m.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const reads: string[] = [];
+  let indirect = 0;
 
-  // process-aliases: `const p = process` / `const p: NodeJS.Process = process`
-  // (bare process, not process. / process[). An optional type annotation before
-  // `=` is tolerated so a type-annotated alias is still tracked.
-  const heads = [PROCESS_ENV];
-  for (const m of code.matchAll(
-    /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*process(?!\s*[.[\w$])/g,
-  )) {
-    heads.push(reEscape(m[1]) + String.raw`\s*\??\.\s*env`);
-  }
-  for (const head of heads) scanHead(code, src, head, out);
+  // Identifiers bound to `process` and to `process.env`.
+  const processAliases = new Set<string>(["process"]);
+  const envAliases = new Set<string>();
 
-  // Reached as process["env"] / process['env'] / process[`env`] (dynamic).
-  for (const m of code.matchAll(/process\s*\??\[\s*(["'`])\s*\1\s*\]/g)) {
-    void m;
-    out.indirect += 1;
-  }
-  // Destructured off process: const { env } = process.
-  for (const m of code.matchAll(/\{[^{}]*\benv\b[^{}]*\}\s*=\s*process\b/g)) {
-    void m;
-    out.indirect += 1;
-  }
-  return out;
-}
+  const isProcess = (node: ts.Expression): boolean => {
+    const n = unwrap(node);
+    return ts.isIdentifier(n) && processAliases.has(n.text);
+  };
+  // `<process>.env` (property or computed "env"), or an env-alias identifier.
+  const isProcessEnv = (node: ts.Expression): boolean => {
+    const n = unwrap(node);
+    if (ts.isIdentifier(n) && envAliases.has(n.text)) return true;
+    if (ts.isPropertyAccessExpression(n)) {
+      return isProcess(n.expression) && n.name.text === "env";
+    }
+    if (ts.isElementAccessExpression(n)) {
+      const arg = n.argumentExpression;
+      return (
+        isProcess(n.expression) &&
+        ts.isStringLiteralLike(arg) &&
+        arg.text === "env"
+      );
+    }
+    return false;
+  };
 
-function relKey(file: string): string {
-  return relative(SRC_DIR, file).split(sep).join("/");
+  // First pass: resolve aliases (declarations may appear before or after use,
+  // so collect them fully before classifying accesses).
+  const collectAliases = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const init = unwrap(node.initializer);
+      if (ts.isIdentifier(node.name)) {
+        if (isProcess(init)) processAliases.add(node.name.text);
+        else if (isProcessEnv(init)) envAliases.add(node.name.text);
+      }
+    }
+    // `p = process` / `e = process.env` assignments.
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left)
+    ) {
+      const rhs = unwrap(node.right);
+      if (isProcess(rhs)) processAliases.add(node.left.text);
+      else if (isProcessEnv(rhs)) envAliases.add(node.left.text);
+    }
+    ts.forEachChild(node, collectAliases);
+  };
+  // Alias chains (a = process; b = a) resolve in a few passes.
+  for (let i = 0; i < 4; i++) {
+    const before = processAliases.size + envAliases.size;
+    collectAliases(sf);
+    if (processAliases.size + envAliases.size === before) break;
+  }
+
+  // Node ids that are legitimate confined reads, so the catch-all below does
+  // not double-count them as indirect.
+  const confined = new Set<ts.Node>();
+
+  const classify = (node: ts.Node): void => {
+    // <process.env>.NAME  → confined named read
+    if (ts.isPropertyAccessExpression(node) && isProcessEnv(node.expression)) {
+      confined.add(node.expression);
+      reads.push(node.name.text);
+    }
+    // <process.env>[expr]
+    else if (ts.isElementAccessExpression(node) && isProcessEnv(node.expression)) {
+      confined.add(node.expression);
+      const arg = node.argumentExpression;
+      if (ts.isStringLiteralLike(arg)) reads.push(arg.text);
+      else indirect += 1; // computed / dynamic key
+    }
+    // Destructuring off process.env or process: `const { X } = process.env`
+    else if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer &&
+      ts.isObjectBindingPattern(node.name)
+    ) {
+      const init = unwrap(node.initializer);
+      if (isProcessEnv(init)) {
+        confined.add(init);
+        indirect += 1; // whole-env destructure — arbitrary intake
+      } else if (isProcess(init)) {
+        // `const { env } = process`
+        if (node.name.elements.some((e) => e.propertyName?.getText() === "env" || e.name.getText() === "env")) {
+          indirect += 1;
+        }
+      }
+    }
+    // Reflect.get(process, "env") / Reflect.get(process.env, ...)
+    else if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "get" &&
+      isIdent(node.expression.expression, "Reflect") &&
+      node.arguments.length >= 1 &&
+      (isProcess(node.arguments[0]) || isProcessEnv(node.arguments[0]))
+    ) {
+      indirect += 1;
+    }
+    ts.forEachChild(node, classify);
+  };
+  classify(sf);
+
+  // Catch-all: any process.env expression that is not a confined read receiver
+  // and not an alias-defining initializer is a bulk / indirect access (bare
+  // reference, spread element, passed as an argument, etc.).
+  const catchAll = (node: ts.Node): void => {
+    if (ts.isExpression(node) && isProcessEnv(node) && !confined.has(node)) {
+      // Skip the RHS of an alias definition (already accounted for).
+      const p = node.parent;
+      const isAliasDef =
+        (ts.isVariableDeclaration(p) && p.initializer && unwrap(p.initializer) === node) ||
+        (ts.isBinaryExpression(p) &&
+          p.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          unwrap(p.right) === node);
+      // Skip the receiver position of a confined property/element access.
+      const isReceiver =
+        (ts.isPropertyAccessExpression(p) && p.expression === node) ||
+        (ts.isElementAccessExpression(p) && p.expression === node);
+      if (!isAliasDef && !isReceiver) indirect += 1;
+    }
+    ts.forEachChild(node, catchAll);
+  };
+  catchAll(sf);
+
+  return { reads, indirect };
 }
 
 function scanAll(): Map<string, Scan> {
@@ -243,7 +227,7 @@ function scanAll(): Map<string, Scan> {
   return out;
 }
 
-describe("S024 env-surface hygiene (Node)", () => {
+describe("S024 env-surface hygiene (Node, TS-AST)", () => {
   it("scan is non-vacuous", () => {
     const scans = scanAll();
     const total = [...scans.values()].reduce((a, s) => a + s.reads.length, 0);
