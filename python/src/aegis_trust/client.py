@@ -12,12 +12,13 @@ import logging
 import os
 import time
 import warnings
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Coroutine, Literal
 
 import httpx
 from dataclasses import dataclass, field
 
 from aegis_trust._constants import AUDIT_SCHEMA_VERSION
+from aegis_trust._delegation_context import _delegation_denied, current_capability
 from aegis_trust.errors import (
     AegisAuditError,
     AegisHttpError,
@@ -63,6 +64,45 @@ def _ensure_ok(resp: httpx.Response, endpoint: str) -> None:
     """Raise the coded non-2xx envelope (Node `if (!resp.ok) throw httpError`)."""
     if not resp.is_success:
         raise _http_error(endpoint, resp.status_code)
+
+
+class _Unset:
+    """Sentinel: "the caller passed nothing", distinct from an explicit
+    ``None``. Mirrors Node's ``undefined`` vs ``null`` on
+    :attr:`CheckBoundaryArgs.capability`: unset = attach the enclosing
+    delegation token, ``None`` = opt out of the attachment for this call."""
+
+    __slots__ = ()
+
+
+_UNSET = _Unset()
+
+
+def _ensure_boundary_ok(resp: httpx.Response, capability: str | None) -> None:
+    """``_ensure_ok`` for ``/check-boundary``, naming the A-1 delegation refusal.
+
+    A monolith-gateway deployment refuses a presented capability with 501
+    rather than deciding at full width with the token unread (aegis_gateway
+    ``rest.rs`` check_boundary, "A-1 delegation refusal"). That is the correct
+    fail-closed answer, but a generic non-2xx makes it read as an outage —
+    name the cause so the operator fixes the deployment, not the code.
+    """
+    if resp.status_code == 501 and capability is not None:
+        raise AegisHttpError(
+            "check-boundary HTTP 501 — deployment is not plane-fronted",
+            code="aegis.boundary.delegationUnsupported",
+            remediation=(
+                "This deployment does not evaluate delegated capabilities: only "
+                "the decide-plane serves check-boundary with A-1 delegation. "
+                "Front the deployment with the plane. Do NOT strip the "
+                "capability to get a 200 — that trades a refusal for a "
+                "full-width answer the delegation was supposed to narrow. "
+                "Fix the deployment."
+            ),
+            docs_url=aegis_docs_url("aegis.boundary.delegationUnsupported"),
+            status=501,
+        )
+    _ensure_ok(resp, "check-boundary")
 
 
 def _ingest_error(detail: str) -> AegisIngestError:
@@ -413,6 +453,7 @@ class AegisClient:
         schema_version: int | None = None,
         attribution: dict[str, Any] | None = None,
         synthetic: bool | None = None,
+        capability: str | None | _Unset = _UNSET,
     ) -> dict[str, Any]:
         """Build the ``/check-boundary`` request body.
 
@@ -431,6 +472,17 @@ class AegisClient:
         probe/drill traffic for billing exclusion. Both are sent verbatim and
         ONLY when set, so a claim-free call produces a byte-identical body to
         before these parameters existed.
+
+        ``capability`` is the A-1 delegation token. It defaults to the token
+        attached by the enclosing :func:`~aegis_trust.ai_native.delegate`
+        window: a boundary the caller must REMEMBER to carry is fail-open by
+        forgetting, the same reasoning that put ``guard_tool`` in the call
+        path. An explicit value wins; explicit ``None`` opts out for one call.
+        Wire shape is TOP-LEVEL ``capability`` — this flat face is not the
+        envelope dialect, and sending ``delegation: {capability}`` here is
+        refused 422 by the plane (aegis-decide-plane ``compat.rs``
+        ``decide_flat``), precisely so a token in the wrong shape is never
+        silently dropped and answered at full width.
         """
         body: dict[str, Any] = {"purpose": purpose, "scope": list(scope)}
         if destination is not None:
@@ -447,6 +499,35 @@ class AegisClient:
             body["attribution"] = attribution
         if synthetic is not None:
             body["synthetic"] = synthetic
+        if isinstance(capability, _Unset):
+            # A denied window refuses HERE, before the wire: the mint failed,
+            # so there is no token to narrow with, and asking un-narrowed would
+            # answer at the PARENT's full width. ``allowed_fields`` on that
+            # answer is what Doctor hands the agent as authorization
+            # (doctor.check_with_core → BoundaryDecision.allowed_data), so a
+            # full-width answer inside a denied window is a widening even
+            # though this method only asks a question. Same local fail-closed
+            # as guard_tool / stream_session.
+            if _delegation_denied():
+                raise AegisValidationError(
+                    "check-boundary: the enclosing delegation window is "
+                    "denied — not asked (fail-closed)",
+                    code="aegis.boundary.delegationDenied",
+                    remediation=(
+                        "The enclosing delegate() window is denied — its "
+                        "capability mint failed, so no narrowed decision can "
+                        "be obtained. Fix the delegation (narrowing, depth, "
+                        "revoked ancestor) or ask outside the window. Nothing "
+                        "was sent; the answer would have been at the parent's "
+                        "full width."
+                    ),
+                    docs_url=aegis_docs_url("aegis.boundary.delegationDenied"),
+                )
+            resolved = current_capability()
+        else:
+            resolved = capability
+        if resolved is not None:
+            body["capability"] = resolved
         return body
 
     @staticmethod
@@ -521,6 +602,7 @@ class AegisClient:
         schema_version: int | None = None,
         attribution: dict[str, Any] | None = None,
         synthetic: bool | None = None,
+        capability: str | None | _Unset = _UNSET,
     ) -> BoundaryDecisionView:
         """POST ``/check-boundary`` and return the parsed
         :class:`BoundaryDecisionView`. Reuses the same auth header / base-url /
@@ -543,25 +625,30 @@ class AegisClient:
         witnessed), and the checkd bin carries ``attribution`` only. Do not
         rely on ``synthetic`` for billing exclusion until the serving
         deployment is confirmed plane-fronted.
+
+        ``capability`` (A-1 delegation) defaults to the token attached by the
+        enclosing :func:`~aegis_trust.ai_native.delegate` window; explicit
+        ``None`` opts out for this call. A deployment that cannot evaluate a
+        presented capability refuses with 501 rather than deciding at full
+        width, surfaced here as ``aegis.boundary.delegationUnsupported``.
         """
-        resp = self._get_httpx().post(
-            "/check-boundary",
-            json=self._check_boundary_body(
-                purpose,
-                scope,
-                destination=destination,
-                agent_id=agent_id,
-                environment=environment,
-                mode=mode,
-                schema_version=schema_version,
-                attribution=attribution,
-                synthetic=synthetic,
-            ),
+        body = self._check_boundary_body(
+            purpose,
+            scope,
+            destination=destination,
+            agent_id=agent_id,
+            environment=environment,
+            mode=mode,
+            schema_version=schema_version,
+            attribution=attribution,
+            synthetic=synthetic,
+            capability=capability,
         )
-        _ensure_ok(resp, "check-boundary")
+        resp = self._get_httpx().post("/check-boundary", json=body)
+        _ensure_boundary_ok(resp, body.get("capability"))
         return self._parse_boundary_view(resp.json())
 
-    async def acheck_boundary(
+    def acheck_boundary(
         self,
         purpose: str,
         scope: list[str],
@@ -573,24 +660,41 @@ class AegisClient:
         schema_version: int | None = None,
         attribution: dict[str, Any] | None = None,
         synthetic: bool | None = None,
-    ) -> BoundaryDecisionView:
+        capability: str | None | _Unset = _UNSET,
+    ) -> Coroutine[Any, Any, BoundaryDecisionView]:
         """Async variant of :meth:`check_boundary` (same enforcement-neutral
-        witness-claim contract for ``attribution`` / ``synthetic``)."""
-        resp = await self._get_async_httpx().post(
-            "/check-boundary",
-            json=self._check_boundary_body(
-                purpose,
-                scope,
-                destination=destination,
-                agent_id=agent_id,
-                environment=environment,
-                mode=mode,
-                schema_version=schema_version,
-                attribution=attribution,
-                synthetic=synthetic,
-            ),
+        witness-claim contract for ``attribution`` / ``synthetic``, and the
+        same A-1 ``capability`` attachment / 501 refusal contract).
+
+        Deliberately a plain ``def`` returning a coroutine, not an ``async
+        def``: the ambient delegation token is read when you CALL this, not
+        when the coroutine is awaited. An ``async def`` body runs entirely at
+        await time, so ``coro = c.acheck_boundary(...)`` inside a
+        ``delegate()`` window that is gathered after the window exits would
+        read a reset ContextVar and ask at full width — silently, since
+        nothing carries the token. Node's ``checkBoundary`` captures at the
+        call expression (the sync prefix of the async function runs inside the
+        AsyncLocalStorage scope); this keeps the two SDKs identical. The
+        denied-window refusal below raises at call time for the same reason.
+        """
+        body = self._check_boundary_body(
+            purpose,
+            scope,
+            destination=destination,
+            agent_id=agent_id,
+            environment=environment,
+            mode=mode,
+            schema_version=schema_version,
+            attribution=attribution,
+            synthetic=synthetic,
+            capability=capability,
         )
-        _ensure_ok(resp, "check-boundary")
+        return self._acheck_boundary_send(body)
+
+    async def _acheck_boundary_send(self, body: dict[str, Any]) -> BoundaryDecisionView:
+        """Send a body already built (and delegation-resolved) by the caller."""
+        resp = await self._get_async_httpx().post("/check-boundary", json=body)
+        _ensure_boundary_ok(resp, body.get("capability"))
         return self._parse_boundary_view(resp.json())
 
     # ── check_access enforcement (AO-003) ───────────────────────────

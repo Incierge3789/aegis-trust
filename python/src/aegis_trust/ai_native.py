@@ -34,9 +34,15 @@ import logging
 import os
 import threading
 from contextlib import contextmanager
-from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 
+from aegis_trust._delegation_context import (
+    _DELEGATION_DENIED,
+    _capability_var,
+    _delegation_denied,
+    _DelegationDenied,
+    current_capability,
+)
 from aegis_trust.errors import (
     AegisStreamDenied,
     AegisStreamRevoked,
@@ -56,33 +62,11 @@ logger = logging.getLogger("aegis")
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-class _DelegationDenied:
-    """Sentinel carried by the capability ContextVar when a ``delegate()``
-    mint failed: every guarded call inside the window fails closed locally
-    (no gateway round-trip, no un-narrowed execution)."""
-
-    __slots__ = ()
-
-
-_DELEGATION_DENIED = _DelegationDenied()
-
-# The active delegation token for the current context. ``str`` = an attached
-# capability; ``_DELEGATION_DENIED`` = a denied window; ``None`` = no window.
-# ContextVar propagates into asyncio tasks and threads started with a copied
-# context, which is exactly the spawn-boundary semantics delegate() wants.
-_capability_var: ContextVar[str | _DelegationDenied | None] = ContextVar(
-    "aegis_capability", default=None
-)
-
-
-def current_capability() -> str | None:
-    """The delegation capability attached to the current context (or None)."""
-    tok = _capability_var.get()
-    return tok if isinstance(tok, str) else None
-
-
-def _delegation_denied() -> bool:
-    return isinstance(_capability_var.get(), _DelegationDenied)
+# The delegation store lives in ``_delegation_context``: ``client.py`` must
+# read it too (``check_boundary`` attaches the token), and this module imports
+# ``client``, so keeping the store here would close an import cycle.
+# ``current_capability`` is imported above and stays importable from here, so
+# the public API surface (``__init__.py``) is unchanged.
 
 
 def _resolve_client(client: AegisClient | None) -> AegisClient:

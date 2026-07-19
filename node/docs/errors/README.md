@@ -124,6 +124,8 @@ switch on `code`. Previously these escaped as bare `Error` and broke the
 | `aegis.http.nonOk` | `AegisHttpError` | Any aegis-core REST endpoint returns non-2xx. Carries `status`. | Inspect server logs; verify endpoint + token; retry if 5xx. |
 | `aegis.ingest.responseShape` | `AegisIngestError` | `/shield/ingest` response shape (body / data / ingested / audit_seq_*) is malformed. | Server returned a malformed response. Check aegis-core version. |
 | `aegis.audit.responseShape` | `AegisAuditError` | `/audit/verify` response shape (chain_valid / total_entries) is malformed. | Server returned a malformed response. Check aegis-core version. |
+| `aegis.boundary.delegationDenied` | `AegisValidationError` | `/check-boundary` was called inside a `delegate()` window whose capability mint failed. Nothing is sent — asking un-narrowed would return the *parent's* full width, which Doctor hands the agent as authorization. | Fix the delegation (narrowing, depth, revoked ancestor), or ask outside the window. Passing an explicit `capability` still works (a hand-carried token is not a guess). |
+| `aegis.boundary.delegationUnsupported` | `AegisHttpError` | `/check-boundary` was called with an A-1 delegation capability against a deployment that cannot evaluate one — it refuses with 501 rather than deciding at full width with the token unread. Carries `status: 501`. | Front the deployment with the decide-plane (the only surface serving `/check-boundary` with A-1 delegation), or run outside a `delegate()` window. This is a deployment fix, not a code fix — retrying never clears it. |
 
 ## Retry pattern (agent)
 
