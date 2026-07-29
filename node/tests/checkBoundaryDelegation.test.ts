@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AegisClient, getModuleClient, resetModuleClient } from "../src/client.js";
 import { AegisHttpError, AegisValidationError } from "../src/errors.js";
-import { delegate } from "../src/aiNative.js";
+import { delegate, guardTool } from "../src/aiNative.js";
 
 const origFetch = globalThis.fetch;
 afterEach(() => {
@@ -270,6 +270,43 @@ describe("checkBoundary — automatic delegation attachment", () => {
     });
     const boundary = calls.find((c2) => c2.path.endsWith("/check-boundary"));
     expect(boundary?.body).toHaveProperty("capability");
+  });
+
+  // Path-level origin pins. The binding lives in one shared helper, but
+  // cross-review (cursor, 2026-07-29) called shared-helper coverage what it is:
+  // indirect. Each send path gets its own positive+negative pair, so a path
+  // that stops calling the helper fails HERE and not only in checkBoundary.
+  it("guardTool does NOT send the ambient token through a different client", async () => {
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/tool-call": () => new Response(JSON.stringify({ outcome: "PASS" }), { status: 200 }),
+    });
+    const minting = client();
+    const other = new AegisClient({ baseUrl: "https://other.invalid/api/v1", verifySsl: false });
+    process.env.AEGIS_OWNER = "owner-1";
+    await delegate({ forAgent: "child", purposes: ["p"], client: minting }, async () => {
+      await guardTool({ purpose: "customer_support", client: other })(async () => "ok")();
+      await guardTool({ purpose: "customer_support", client: minting })(async () => "ok")();
+    });
+    delete process.env.AEGIS_OWNER;
+    const toolCalls = calls.filter((c) => c.path.endsWith("/tool-call"));
+    expect(toolCalls.length).toBe(2);
+    expect(toolCalls[0]?.body).not.toHaveProperty("capability"); // other client
+    expect(toolCalls[1]?.body).toHaveProperty("capability"); // minting client
+  });
+
+  it("a nested delegate does NOT carry the parent token to a different client", async () => {
+    const calls = mockRoutes({ "/capability/mint": mintOk });
+    const minting = client();
+    const other = new AegisClient({ baseUrl: "https://other.invalid/api/v1", verifySsl: false });
+    await delegate({ forAgent: "child", purposes: ["p"], client: minting }, async () => {
+      await delegate({ forAgent: "grand", purposes: ["p"], client: other }, async () => {});
+      await delegate({ forAgent: "grand2", purposes: ["p"], client: minting }, async () => {});
+    });
+    const mints = calls.filter((c) => c.path.endsWith("/mint"));
+    expect(mints.length).toBe(3);
+    expect(mints[1]?.body).not.toHaveProperty("parent_capability"); // other client
+    expect(mints[2]?.body).toHaveProperty("parent_capability"); // minting client
   });
 
   it("an EXPLICIT capability still works inside a denied window", async () => {
