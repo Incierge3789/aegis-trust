@@ -491,6 +491,28 @@ def test_stream_session_attaches_delegation_capability():
     assert open_body["envelope"]["delegation"]["capability"] == "cap-token-1"
 
 
+def test_stream_session_does_not_attach_through_a_different_client():
+    # Node twin: checkBoundaryDelegation.test.ts "streamSession does NOT send
+    # the ambient token through a different client". The positive above proves
+    # attachment happens; without this negative, a regression that attaches
+    # unconditionally would still be green. Cross-review (cursor, 2026-07-29)
+    # called the parity gap after Node closed it.
+    routes = _stream_routes([{"status": "ok"}])
+    routes["/capability/mint"] = httpx.Response(200, json=GRANT)
+    routes["/capability/revoke"] = httpx.Response(
+        200, json={"ok": True, "revoked": GRANT["id"]}
+    )
+    handler, calls = _recording_handler(routes)
+    minting = _client(handler)
+    other = _client(handler)
+    other._base_url = "https://other.invalid/api/v1"
+    with delegate("a", ["p"], client=minting):
+        with stream_session({"principal": {}}, heartbeat_interval=1.0, client=other):
+            pass
+    open_body = next(b for p, b in calls if p.endswith("/stream/open"))
+    assert "delegation" not in open_body["envelope"]
+
+
 def test_stream_session_validation():
     with pytest.raises(AegisValidationError, match="envelope"):
         stream_session({})
