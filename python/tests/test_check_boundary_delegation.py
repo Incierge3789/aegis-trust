@@ -22,7 +22,7 @@ import threading
 import httpx
 import pytest
 
-from aegis_trust.ai_native import delegate
+from aegis_trust.ai_native import delegate, guard_tool
 from aegis_trust.client import AegisClient
 from aegis_trust.errors import AegisHttpError, AegisValidationError
 
@@ -52,8 +52,8 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("AEGIS_AGENT_ID", raising=False)
 
 
-def _client(handler) -> AegisClient:
-    c = AegisClient(base_url="https://localhost:8443/api/v1", verify_ssl=False)
+def _client(handler, base_url: str = "https://localhost:8443/api/v1") -> AegisClient:
+    c = AegisClient(base_url=base_url, verify_ssl=False)
     c._httpx = httpx.Client(
         base_url=c._base_url,
         transport=httpx.MockTransport(handler),
@@ -210,6 +210,91 @@ def test_explicit_none_opt_out_is_still_honoured_in_a_granted_window():
         assert grant is not None
         c.check_boundary("customer_support", ["name"], capability=None)
     assert "capability" not in _boundary_body(calls)
+
+
+def test_delegate_without_an_explicit_client_still_mints(monkeypatch):
+    # Regression: the origin was first read off the `client` ARGUMENT, which is
+    # None when the caller relies on the module client. That raised
+    # AttributeError inside delegate(), the broad except swallowed it, and every
+    # default-usage window silently became DENIED. Every existing test passed an
+    # explicit client, so nothing caught it — found by cross-review (cursor,
+    # 2026-07-29). The origin now comes from the RESOLVED client.
+    handler, calls = _recording_handler(
+        {"/capability/mint": _mint_ok, "/check-boundary": _boundary_ok}
+    )
+    c = _client(handler)
+    monkeypatch.setattr("aegis_trust.ai_native._resolve_client", lambda _arg: c)
+    with delegate("child", ["p"]) as grant:
+        assert grant is not None, "default-client window was denied"
+        c.check_boundary("customer_support", ["name"])
+    assert "capability" in _boundary_body(calls)
+
+
+def test_ambient_token_does_not_attach_to_a_different_client():
+    # The store used to hold a bare bearer string, so any client built inside
+    # the window picked it up — including one pointed at a different base URL.
+    # That ships a capability minted for one boundary to another. Found by
+    # cross-review (codex, 2026-07-29, severity high) on the merged change; the
+    # store now carries the minting origin and the send path refuses mismatches.
+    handler, calls = _recording_handler(
+        {"/capability/mint": _mint_ok, "/check-boundary": _boundary_ok}
+    )
+    minting = _client(handler)
+    other = _client(handler, base_url="https://other.invalid/api/v1")
+    with delegate("child", ["p"], client=minting) as grant:
+        assert grant is not None
+        other.check_boundary("customer_support", ["name"])
+    assert "capability" not in _boundary_body(calls)
+
+
+def test_ambient_token_does_attach_to_the_minting_client():
+    # Non-vacuity for the test above: if binding were always-refuse, the
+    # negative test would pass while auto-attach was dead.
+    handler, calls = _recording_handler(
+        {"/capability/mint": _mint_ok, "/check-boundary": _boundary_ok}
+    )
+    c = _client(handler)
+    with delegate("child", ["p"], client=c):
+        c.check_boundary("customer_support", ["name"])
+    assert "capability" in _boundary_body(calls)
+
+
+def test_guard_tool_does_not_send_the_token_through_a_different_client(monkeypatch):
+    # Path-level origin pin. The binding lives in one shared helper, but
+    # cross-review (cursor, 2026-07-29) called shared-helper coverage what it
+    # is: indirect. Each send path gets its own positive+negative pair so a path
+    # that stops calling the helper fails HERE, not only in check_boundary.
+    def routes(body):
+        return httpx.Response(200, json={"outcome": "PASS"})
+
+    handler, calls = _recording_handler(
+        {"/capability/mint": _mint_ok, "/tool-call": routes}
+    )
+    minting = _client(handler)
+    other = _client(handler, base_url="https://other.invalid/api/v1")
+    monkeypatch.setenv("AEGIS_OWNER", "owner-1")
+    with delegate("child", ["p"], client=minting):
+        guard_tool(purpose="customer_support", client=other)(lambda: "ok")()
+        guard_tool(purpose="customer_support", client=minting)(lambda: "ok")()
+    tool_calls = [b for p_, b in calls if p_.endswith("/tool-call")]
+    assert len(tool_calls) == 2
+    assert "capability" not in tool_calls[0]  # other client
+    assert "capability" in tool_calls[1]  # minting client
+
+
+def test_nested_delegate_does_not_carry_the_parent_token_to_another_client():
+    handler, calls = _recording_handler({"/capability/mint": _mint_ok})
+    minting = _client(handler)
+    other = _client(handler, base_url="https://other.invalid/api/v1")
+    with delegate("child", ["p"], client=minting):
+        with delegate("grand", ["p"], client=other):
+            pass
+        with delegate("grand2", ["p"], client=minting):
+            pass
+    mints = [b for p_, b in calls if p_.endswith("/mint")]
+    assert len(mints) == 3
+    assert "parent_capability" not in mints[1]  # other client
+    assert "parent_capability" in mints[2]  # minting client
 
 
 def test_explicit_capability_still_works_inside_a_denied_window():

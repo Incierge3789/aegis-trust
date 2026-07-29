@@ -27,8 +27,10 @@
 
 import {
   DELEGATION_DENIED,
+  type DelegationGrant,
   capabilityStorage,
   currentCapability,
+  currentCapabilityFor,
   delegationDenied,
 } from "./delegationContext.js";
 import { AegisClient, getModuleClient } from "./client.js";
@@ -145,14 +147,18 @@ export function guardTool(options: GuardToolOptions) {
       }
       let allowed = false;
       try {
-        allowed = await (options.client ?? getModuleClient()).toolAllowed({
+        // Same origin binding as checkBoundary: read the ambient token for THIS
+        // client only, so a token minted against one boundary is never sent to
+        // another (cross-review, codex 2026-07-29, severity high).
+        const gc = options.client ?? getModuleClient();
+        allowed = await gc.toolAllowed({
           tool: toolName,
           purpose: options.purpose,
           owner,
           fields: options.fields,
           sessionId: options.sessionId,
           destination: options.destination,
-          capability: currentCapability() ?? undefined,
+          capability: currentCapabilityFor(gc.baseUrl) ?? undefined,
         });
       } catch {
         // toolAllowed is itself fail-closed and non-throwing; an unexpected
@@ -245,7 +251,10 @@ export async function delegate<T>(
 
   const client = options.client ?? getModuleClient();
   let grant: CapabilityGrant | null = null;
-  let store: string | typeof DELEGATION_DENIED;
+  // The store carries the minting client's origin, not a bare token: a bearer
+  // string alone can be picked up by any other client in the window and sent
+  // to a different boundary (cross-review, codex 2026-07-29, severity high).
+  let store: DelegationGrant | typeof DELEGATION_DENIED;
   if (delegationDenied()) {
     // A nested window inside an already-denied window stays denied —
     // minting from a denied parent would escape the fail-closed state.
@@ -262,9 +271,9 @@ export async function delegate<T>(
         scope: options.scope,
         tools: options.tools,
         ttlSecs: options.ttlSecs,
-        parentCapability: currentCapability() ?? undefined,
+        parentCapability: currentCapabilityFor(client.baseUrl) ?? undefined,
       });
-      store = grant.capability;
+      store = { token: grant.capability, origin: client.baseUrl };
     } catch {
       // Mint refused or unreachable. The error detail is withheld (fixed
       // strings only — house diagnostic discipline).
@@ -384,7 +393,10 @@ export async function streamSession<T>(
 
   // Attach an enclosing delegation capability (never hand-carried).
   let body = envelope;
-  const capability = currentCapability();
+  // Origin-bound: a stream envelope is a send path too, so a token minted
+  // against another boundary must not ride on it (cross-review, cursor
+  // 2026-07-29). Python twin: ai_native.py _envelope_with_capability.
+  const capability = currentCapabilityFor(client.baseUrl);
   if (capability !== null) {
     const delegation = {
       capability,

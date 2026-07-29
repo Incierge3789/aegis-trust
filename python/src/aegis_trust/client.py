@@ -18,7 +18,10 @@ import httpx
 from dataclasses import dataclass, field
 
 from aegis_trust._constants import AUDIT_SCHEMA_VERSION
-from aegis_trust._delegation_context import _delegation_denied, current_capability
+from aegis_trust._delegation_context import (
+    _delegation_denied,
+    current_capability_for,
+)
 from aegis_trust.errors import (
     AegisAuditError,
     AegisHttpError,
@@ -446,6 +449,7 @@ class AegisClient:
         purpose: str,
         scope: list[str],
         *,
+        origin: str,
         destination: str | None = None,
         agent_id: str | None = None,
         environment: str | None = None,
@@ -539,8 +543,15 @@ class AegisClient:
         # Resolution is unchanged by the fix above: unset attaches the ambient
         # token, an explicit ``None`` still opts out for one call (now only
         # reachable outside a denied window), an explicit string wins.
+        # Origin-bound read: the ambient token is attached ONLY if this client
+        # is the one it was minted against. A bare bearer read would let a
+        # second client in the same window ship a capability minted for one
+        # boundary to a different base URL (cross-review, codex 2026-07-29,
+        # severity high). Node twin: client.ts currentCapabilityFor.
         resolved = (
-            current_capability() if isinstance(capability, _Unset) else capability
+            current_capability_for(origin)
+            if isinstance(capability, _Unset)
+            else capability
         )
         if resolved is not None:
             body["capability"] = resolved
@@ -651,6 +662,7 @@ class AegisClient:
         body = self._check_boundary_body(
             purpose,
             scope,
+            origin=self._base_url,
             destination=destination,
             agent_id=agent_id,
             environment=environment,
@@ -696,6 +708,7 @@ class AegisClient:
         body = self._check_boundary_body(
             purpose,
             scope,
+            origin=self._base_url,
             destination=destination,
             agent_id=agent_id,
             environment=environment,

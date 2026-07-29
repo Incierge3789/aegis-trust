@@ -11,9 +11,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AegisClient } from "../src/client.js";
+import { AegisClient, getModuleClient, resetModuleClient } from "../src/client.js";
 import { AegisHttpError, AegisValidationError } from "../src/errors.js";
-import { delegate } from "../src/aiNative.js";
+import { delegate, guardTool } from "../src/aiNative.js";
 
 const origFetch = globalThis.fetch;
 afterEach(() => {
@@ -204,6 +204,109 @@ describe("checkBoundary — automatic delegation attachment", () => {
     const boundary = calls.find((c2) => c2.path.endsWith("/check-boundary"));
     expect(boundary).toBeDefined();
     expect(boundary?.body).not.toHaveProperty("capability");
+  });
+
+  it("delegate WITHOUT an explicit client still mints and attaches", async () => {
+    // Python twin. There the origin was first read off the `client` ARGUMENT,
+    // which is None on the module-client path — AttributeError, swallowed by
+    // the mint block's except, every default window silently DENIED. Node
+    // resolves the client before writing the store so it was never exposed,
+    // but the pin belongs on both sides: this is the path every quickstart
+    // uses, and it had no test in either SDK (cross-review, cursor 2026-07-29).
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/check-boundary": boundaryOk,
+    });
+    const prevUrl = process.env.AEGIS_BASE_URL;
+    process.env.AEGIS_BASE_URL = "https://localhost:8443/api/v1";
+    resetModuleClient();
+    try {
+      const c = getModuleClient();
+      await delegate({ forAgent: "child", purposes: ["p"] }, async (grant) => {
+        expect(grant, "default-client window was denied").not.toBeNull();
+        await c.checkBoundary({ purpose: "customer_support", scope: ["name"] });
+      });
+    } finally {
+      if (prevUrl === undefined) delete process.env.AEGIS_BASE_URL;
+      else process.env.AEGIS_BASE_URL = prevUrl;
+      resetModuleClient();
+    }
+    const boundary = calls.find((c2) => c2.path.endsWith("/check-boundary"));
+    expect(boundary?.body).toHaveProperty("capability");
+  });
+
+  it("the ambient token does NOT attach to a DIFFERENT client in the window", async () => {
+    // The store used to hold a bare bearer string, so any client constructed
+    // inside the window picked it up — including one pointed at a different
+    // base URL. That ships a capability minted for one boundary to another.
+    // Found by cross-review (codex, 2026-07-29, severity high) on the merged
+    // change; the store now carries the minting origin and the send path
+    // refuses a mismatch locally.
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/check-boundary": boundaryOk,
+    });
+    const minting = client();
+    const other = new AegisClient({ baseUrl: "https://other.invalid/api/v1", verifySsl: false });
+    await delegate({ forAgent: "child", purposes: ["p"], client: minting }, async (grant) => {
+      expect(grant).not.toBeNull();
+      await other.checkBoundary({ purpose: "customer_support", scope: ["name"] });
+    });
+    const boundary = calls.find((c) => c.path.endsWith("/check-boundary"));
+    expect(boundary).toBeDefined();
+    expect(boundary?.body).not.toHaveProperty("capability");
+  });
+
+  it("the ambient token DOES attach to the minting client", async () => {
+    // Non-vacuity for the test above: if binding were simply always-refuse,
+    // the negative test would pass while auto-attach was dead.
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/check-boundary": boundaryOk,
+    });
+    const c = client();
+    await delegate({ forAgent: "child", purposes: ["p"], client: c }, async () => {
+      await c.checkBoundary({ purpose: "customer_support", scope: ["name"] });
+    });
+    const boundary = calls.find((c2) => c2.path.endsWith("/check-boundary"));
+    expect(boundary?.body).toHaveProperty("capability");
+  });
+
+  // Path-level origin pins. The binding lives in one shared helper, but
+  // cross-review (cursor, 2026-07-29) called shared-helper coverage what it is:
+  // indirect. Each send path gets its own positive+negative pair, so a path
+  // that stops calling the helper fails HERE and not only in checkBoundary.
+  it("guardTool does NOT send the ambient token through a different client", async () => {
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/tool-call": () => new Response(JSON.stringify({ outcome: "PASS" }), { status: 200 }),
+    });
+    const minting = client();
+    const other = new AegisClient({ baseUrl: "https://other.invalid/api/v1", verifySsl: false });
+    process.env.AEGIS_OWNER = "owner-1";
+    await delegate({ forAgent: "child", purposes: ["p"], client: minting }, async () => {
+      await guardTool({ purpose: "customer_support", client: other })(async () => "ok")();
+      await guardTool({ purpose: "customer_support", client: minting })(async () => "ok")();
+    });
+    delete process.env.AEGIS_OWNER;
+    const toolCalls = calls.filter((c) => c.path.endsWith("/tool-call"));
+    expect(toolCalls.length).toBe(2);
+    expect(toolCalls[0]?.body).not.toHaveProperty("capability"); // other client
+    expect(toolCalls[1]?.body).toHaveProperty("capability"); // minting client
+  });
+
+  it("a nested delegate does NOT carry the parent token to a different client", async () => {
+    const calls = mockRoutes({ "/capability/mint": mintOk });
+    const minting = client();
+    const other = new AegisClient({ baseUrl: "https://other.invalid/api/v1", verifySsl: false });
+    await delegate({ forAgent: "child", purposes: ["p"], client: minting }, async () => {
+      await delegate({ forAgent: "grand", purposes: ["p"], client: other }, async () => {});
+      await delegate({ forAgent: "grand2", purposes: ["p"], client: minting }, async () => {});
+    });
+    const mints = calls.filter((c) => c.path.endsWith("/mint"));
+    expect(mints.length).toBe(3);
+    expect(mints[1]?.body).not.toHaveProperty("parent_capability"); // other client
+    expect(mints[2]?.body).toHaveProperty("parent_capability"); // minting client
   });
 
   it("an EXPLICIT capability still works inside a denied window", async () => {
