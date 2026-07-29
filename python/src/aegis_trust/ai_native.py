@@ -360,7 +360,7 @@ def delegate(
             "for_agent=%s stays denied (fail-closed)",
             for_agent,
         )
-        token: str | _DelegationDenied = _DELEGATION_DENIED
+        token: str | _Grant | _DelegationDenied = _DELEGATION_DENIED
     else:
         try:
             resolved = _resolve_client(client)
