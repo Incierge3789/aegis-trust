@@ -54,7 +54,12 @@ export interface HistoryStats {
 // Used to detect when the same idempotencyKey is reused with a different
 // payload — Stripe-style semantics surface this as an error rather than
 // silently discarding the divergent retry.
-function payloadHash(args: {
+//
+// Exported under an underscore (the _setTestHook convention) so the conformance
+// corpus can exercise the SHIPPED function rather than a restatement of it, and
+// mirroring Python's module-level `_payload_hash`. Not re-exported from
+// index.ts, so it stays off the public API surface.
+export function _payloadHash(args: {
   function: string;
   purpose: string;
   scope: ReadonlyArray<string>;
@@ -166,11 +171,11 @@ export class HistoryStore {
       this._seenKeys = new Map();
       for (const r of this.readAll()) {
         if (r.idempotencyKey) {
-          this._seenKeys.set(r.idempotencyKey, payloadHash(r));
+          this._seenKeys.set(r.idempotencyKey, _payloadHash(r));
         }
       }
     }
-    const newHash = payloadHash(args);
+    const newHash = _payloadHash(args);
     const existing = this._seenKeys.get(idempotencyKey);
     if (existing !== undefined) {
       if (existing !== newHash) {

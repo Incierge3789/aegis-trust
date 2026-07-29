@@ -1,0 +1,267 @@
+{
+  "$comment": "Irreversibility classification of the SDK's shipped operation surface, v0 — INV-7, SDK form.\n\nWHY. INV-7 says no single trigger causes an irreversible transition. Its SDK-form obligation\nis written against REACHABLE EFFECT, not local syntax: the question is what the SDK can\nCAUSE, not what it contains. An earlier draft of this suite asserted 'the SDK contains no\ndestructive operations', reached by grepping for os.remove / rmtree / unlink / rmSync. That\nfound nothing and was reported as satisfaction. It was wrong: it had only asked about local\nfilesystem deletion and never about what the SDK could reach over the wire.\n\nWHAT THE SURFACE ACTUALLY LOOKS LIKE. The generated gateway client ships in the wheel\n(pyproject packages = [src/aegis_trust, src/aegis]) and is importable from an installed\naegis-trust. Across its whole operation set exactly one operation declares irreversibility\nin its own docstring: destroy_capsule, 'Irreversibly destroy a capsule', POST\n/capsules/{id}/destroy.\n\nTHE CONTRAST THAT MATTERS. Capsule RECALL is a deliberate two-step flow — recall/request\nthen recall/confirm — so it cannot fire from one call. Capsule DESTROY, the one operation\nthat cannot be undone, takes a single call with no confirmation step and no opt-in gate.\nThe two-step pattern this codebase already knows how to build is applied to the reversible\noperation and not to the irreversible one. That is D8's shape restated at the SDK layer:\nthe default sits on the destructive side and nothing observes it.\n\nWHAT THIS FILE ENFORCES (python/tests/test_irreversible_ops.py, node/tests/irreversibleOps.test.ts):\n  1. Every shipped operation is classified. A new one fails CI until someone decides.\n  2. Any operation whose docstring declares irreversibility must be classified irreversible,\n     so the classification cannot drift from what the generator emitted.\n  3. No irreversible operation is re-exported from the top-level public API. True today;\n     asserting it stops it silently becoming false.\n  4. The set of SINGLE-CALL UNGATED irreversible operations is pinned. It may shrink without\n     ceremony. It cannot grow without this test failing.\n\nHONEST STATE. ungated_single_call is non-empty. This file does not fix that — fixing it means\nchanging a shipped surface, which is a product decision, not a test change. What it does is\nmake the count machine-visible and prevent a second one appearing unnoticed.",
+  "version": 0,
+  "source_of_truth": "python/src/aegis_trust/_generated/aegis_gateway_rest_api_client/api/**",
+  "irreversibility_marker": "Irreversibly",
+  "classes": {
+    "irreversible": "Reaches a Core-side transition that cannot be undone (AO-004 Wiped / Destroyed).",
+    "two_step": "Part of a deliberate multi-call flow; no single call completes the effect.",
+    "reversible": "Effect can be undone, or the operation is a read/query."
+  },
+  "operations": {
+    "get_audit_log": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/audit/get_audit_log.py",
+      "method": "get",
+      "url": "/audit",
+      "summary": "Get audit log entries",
+      "class": "reversible"
+    },
+    "log_audit_entry": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/audit/log_audit_entry.py",
+      "method": "post",
+      "url": "/audit-log",
+      "summary": "Record a manual audit entry",
+      "class": "reversible"
+    },
+    "verify_audit_chain": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/audit/verify_audit_chain.py",
+      "method": "get",
+      "url": "/audit/verify",
+      "summary": "Verify audit chain integrity",
+      "class": "reversible"
+    },
+    "check_access": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/auth/check_access.py",
+      "method": "post",
+      "url": "/check-access",
+      "summary": "Check permission for a purpose",
+      "class": "reversible"
+    },
+    "exchange_token": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/auth/exchange_token.py",
+      "method": "post",
+      "url": "/auth/token",
+      "summary": "Exchange API key for JWT token",
+      "class": "reversible"
+    },
+    "refresh_token": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/auth/refresh_token.py",
+      "method": "post",
+      "url": "/auth/refresh",
+      "summary": "Refresh an expired JWT token",
+      "class": "reversible"
+    },
+    "batch_query": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/batch/batch_query.py",
+      "method": "post",
+      "url": "/batch/query",
+      "summary": "Execute multiple queries in one request",
+      "class": "reversible"
+    },
+    "destroy_capsule": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/destroy_capsule.py",
+      "method": "post",
+      "url": "/capsules/{id}/destroy",
+      "summary": "Irreversibly destroy a capsule",
+      "class": "irreversible"
+    },
+    "escape_capsule": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/escape_capsule.py",
+      "method": "post",
+      "url": "/capsules/{id}/escape",
+      "summary": "Move capsule to vault (escape)",
+      "class": "reversible"
+    },
+    "get_capsule": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/get_capsule.py",
+      "method": "get",
+      "url": "/capsules/{id}",
+      "summary": "Get capsule details with optional decryption",
+      "class": "reversible"
+    },
+    "list_capsules": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/list_capsules.py",
+      "method": "get",
+      "url": "/capsules",
+      "summary": "List all capsules",
+      "class": "reversible"
+    },
+    "recall_capsule_confirm": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/recall_capsule_confirm.py",
+      "method": "post",
+      "url": "/capsules/{id}/recall/confirm",
+      "summary": "Confirm capsule recall (TPI step 2)",
+      "class": "two_step"
+    },
+    "recall_capsule_request": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/recall_capsule_request.py",
+      "method": "post",
+      "url": "/capsules/{id}/recall/request",
+      "summary": "Request capsule recall (TPI step 1)",
+      "class": "two_step"
+    },
+    "restore_capsule": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/restore_capsule.py",
+      "method": "post",
+      "url": "/capsules/{id}/restore",
+      "summary": "Restore capsule from vault",
+      "class": "reversible"
+    },
+    "load_config_integrity": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/config/load_config_integrity.py",
+      "method": "get",
+      "url": "/config/integrity",
+      "summary": "Load a config integrity hash",
+      "class": "reversible"
+    },
+    "read_openclaw_config": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/config/read_openclaw_config.py",
+      "method": "get",
+      "url": "/config/openclaw",
+      "summary": "Read OpenClaw configuration",
+      "class": "reversible"
+    },
+    "save_config_integrity": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/config/save_config_integrity.py",
+      "method": "post",
+      "url": "/config/integrity",
+      "summary": "Save a config integrity hash baseline",
+      "class": "reversible"
+    },
+    "write_openclaw_config": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/config/write_openclaw_config.py",
+      "method": "post",
+      "url": "/config/openclaw",
+      "summary": "Write OpenClaw configuration",
+      "class": "reversible"
+    },
+    "query_data": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/data/query_data.py",
+      "method": "post",
+      "url": "/query",
+      "summary": "Query data with purpose-based scope filtering",
+      "class": "reversible"
+    },
+    "read_data": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/data/read_data.py",
+      "method": "post",
+      "url": "/read",
+      "summary": "Read data with strict scope template",
+      "class": "reversible"
+    },
+    "search_data": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/data/search_data.py",
+      "method": "post",
+      "url": "/search",
+      "summary": "Search capsules by name or company",
+      "class": "reversible"
+    },
+    "hash_sign": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/esign/hash_sign.py",
+      "method": "post",
+      "url": "/esign/hash-sign",
+      "summary": "Create an electronic signature request",
+      "class": "reversible"
+    },
+    "approve_ingest": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/ingest/approve_ingest.py",
+      "method": "post",
+      "url": "/ingest/approve",
+      "summary": "Approve a pending ingestion",
+      "class": "reversible"
+    },
+    "ingest_data": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/ingest/ingest_data.py",
+      "method": "post",
+      "url": "/ingest",
+      "summary": "Encrypt and register data as a capsule",
+      "class": "reversible"
+    },
+    "list_pending_ingests": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/ingest/list_pending_ingests.py",
+      "method": "get",
+      "url": "/ingest/pending",
+      "summary": "List pending ingestion items",
+      "class": "reversible"
+    },
+    "get_security_proof": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/proof/get_security_proof.py",
+      "method": "get",
+      "url": "/security-proof/{session_id}",
+      "summary": "Generate security proof for a session",
+      "class": "reversible"
+    },
+    "rpc_exec": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/rpc/rpc_exec.py",
+      "method": "post",
+      "url": "/rpc/exec",
+      "summary": "Execute RPC with authorization check",
+      "class": "reversible"
+    },
+    "rpc_gate": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/rpc/rpc_gate.py",
+      "method": "post",
+      "url": "/rpc",
+      "summary": "RPC authorization gate",
+      "class": "reversible"
+    },
+    "retrieve_secret": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/secrets/retrieve_secret.py",
+      "method": "post",
+      "url": "/secret/retrieve",
+      "summary": "Retrieve a secret via purpose-based access",
+      "class": "reversible"
+    },
+    "get_health": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/system/get_health.py",
+      "method": "get",
+      "url": "/health",
+      "summary": "Get API health status",
+      "class": "reversible"
+    },
+    "get_metrics": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/system/get_metrics.py",
+      "method": "get",
+      "url": "/metrics",
+      "summary": "Get Prometheus metrics",
+      "class": "reversible"
+    },
+    "report_threat": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/threat/report_threat.py",
+      "method": "post",
+      "url": "/threat",
+      "summary": "Report a threat event",
+      "class": "reversible"
+    },
+    "read_workspace_file": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/workspace/read_workspace_file.py",
+      "method": "get",
+      "url": "/workspace/read",
+      "summary": "Read a file from the workspace",
+      "class": "reversible"
+    },
+    "write_workspace_file": {
+      "module": "aegis_trust/_generated/aegis_gateway_rest_api_client/api/workspace/write_workspace_file.py",
+      "method": "post",
+      "url": "/workspace/write",
+      "summary": "Write a file to the workspace",
+      "class": "reversible"
+    }
+  },
+  "ungated_single_call": {
+    "destroy_capsule": {
+      "url": "POST /capsules/{id}/destroy",
+      "reachable_from": "an installed aegis-trust, by importing the generated client module directly",
+      "top_level_public_api": false,
+      "gate": null,
+      "confirmation_step": null,
+      "test": null,
+      "note": "One call from the shipped package reaches an irreversible transition. Not re-exported from __init__.py or client.py, so it is not top-level public API — but INV-7 is written against reachable effect. Remediation (a gate, an explicit opt-in, or removing the subtree from the wheel) changes a shipped surface and is a product decision recorded for the operator, not something a test may decide."
+    }
+  },
+  "node_asymmetry": {
+    "state": "node/src has no generated gateway client and no destroy or wipe surface.",
+    "consequence": "With respect to INV-7 the two SDKs are not the same product. Declared here so the asymmetry is visible rather than discovered later.",
+    "enforced_by": "node/tests/irreversibleOps.test.ts asserts the Node source stays free of an irreversible surface; if one is added, that test fails and this entry must be rewritten."
+  }
+}

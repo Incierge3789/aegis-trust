@@ -1,0 +1,100 @@
+{
+  "$comment": "Conformance runner registry, v0 — the non-vacuity guard for the conformance suite itself.\n\nWHY THIS FILE EXISTS.\nA shared corpus only produces cross-language identity if BOTH implementations\nfeed it to the code that actually ships. A runner that re-derives the behaviour\ninline and checks its own reconstruction is tautological: it proves the\nprimitive it reimplemented is deterministic, stays green while the shipped code\ndrifts underneath it, and reads as coverage in every report.\n\nThat is not hypothetical. The Node byte anchor for the canonical idempotency\ndigest did exactly this -- it rebuilt the canonical form with JSON.stringify,\nhashed its own reconstruction with createHash, and never once called the shipped\npayloadHash. It had been green the whole time while proving nothing.\n\nStating the rule in a comment does not prevent the next corpus from repeating\nit. This registry makes the rule machine-checked:\n\n  python/tests/test_conformance_runner_hygiene.py\n  node/tests/conformanceRunnerHygiene.test.ts\n\nWHAT IS ENFORCED.\n  1. COVERAGE. Every corpus in conformance/ has a runner entry for both\n     languages. Adding a corpus without runners fails CI, so a corpus can never\n     sit unexercised while appearing to be part of the suite.\n  2. REACHES THE SHIPPED CODE. Each runner imports the symbol named in\n     `must_import` from the SDK source. A runner that stopped calling shipped\n     code would have to drop that import to do so.\n  3. CANNOT RE-DERIVE. No runner imports a primitive from `forbidden_imports`.\n     Without crypto and hashing primitives a runner has no way to rebuild the\n     behaviour it is meant to verify, so the tautology is unreachable rather\n     than merely discouraged.\n  4. NON-VACUOUS. The guard asserts its own scan found files. A guard that\n     silently matched nothing would be the same disease one level further up.\n\nThis file is the registry of what must be exercised. invariants.v0.json is the\nregistry of what must hold. Neither is optional, and neither is self-verifying\nwithout the other.",
+  "version": 0,
+  "corpora": [
+    {
+      "corpus": "filter_parity.v0.json",
+      "exercises": "the shipped public wrap() LITE filter",
+      "runners": {
+        "python": {
+          "path": "python/tests/test_filter_parity_corpus.py",
+          "must_import": {
+            "module": "aegis_trust",
+            "symbol": "wrap"
+          }
+        },
+        "node": {
+          "path": "node/tests/filterParityCorpus.test.ts",
+          "must_import": {
+            "module": "../src/index.js",
+            "symbol": "wrap"
+          }
+        }
+      }
+    },
+    {
+      "corpus": "canonical_digest.v0.json",
+      "exercises": "the shipped canonical idempotency payload hash",
+      "runners": {
+        "python": {
+          "path": "python/tests/test_canonical_digest_corpus.py",
+          "must_import": {
+            "module": "aegis_trust.history",
+            "symbol": "_payload_hash"
+          }
+        },
+        "node": {
+          "path": "node/tests/canonicalDigestCorpus.test.ts",
+          "must_import": {
+            "module": "../src/history.js",
+            "symbol": "_payloadHash"
+          }
+        }
+      }
+    },
+    {
+      "corpus": "golden_decisions.v0.json",
+      "exercises": "recorded decisions replayed against the shipped wrap() and doctor.check",
+      "runners": {
+        "python": {
+          "path": "python/tests/test_golden_decisions.py",
+          "must_import": {
+            "module": "aegis_trust",
+            "symbol": "wrap"
+          }
+        },
+        "node": {
+          "path": "node/tests/goldenDecisions.test.ts",
+          "must_import": {
+            "module": "../src/index.js",
+            "symbol": "wrap"
+          }
+        }
+      }
+    }
+  ],
+  "forbidden_imports": {
+    "python": [
+      "hashlib",
+      "hmac"
+    ],
+    "node": [
+      "node:crypto",
+      "crypto"
+    ]
+  },
+  "forbidden_dynamic_import": {
+    "$comment": "Banning static crypto imports alone is walked straight past by dynamic import. Flagged independently by cursor and agy in the 2026-07-19 cross-review.",
+    "python": [
+      "__import__",
+      "import_module"
+    ],
+    "node": [
+      "require",
+      "import"
+    ]
+  },
+  "not_corpora": [
+    "invariants.v0.json",
+    "runners.v0.json",
+    "backends.v0.json",
+    "irreversible_ops.v0.json"
+  ],
+  "not_corpora_reasons": {
+    "$comment": "Every exemption must state why. An undocumented exemption list is where a conformance suite quietly stops meaning anything, so the guard rejects entries with no reason.",
+    "invariants.v0.json": "The declaration of what must hold, not a vector corpus. It has no input/expected pairs to run; it is instead validated directly by the hygiene guards (customer_facing derivation, evidence paths, enforcement vocabulary).",
+    "runners.v0.json": "This registry itself. Exercised by the hygiene guards that read it; it contains no vectors of its own.",
+    "backends.v0.json": "The registry of WHAT the invariants must hold for (surfaces, backends, and the backend x invariant coverage product). Like invariants.v0.json it contains no input/expected vectors to run; it is validated directly by test_backend_registry.py / backendRegistry.test.ts, which parse the SDK source and refuse any export that is neither a registered backend nor a justified exclusion.",
+    "irreversible_ops.v0.json": "The irreversibility classification of the SDK's shipped operation surface (INV-7, SDK form). Contains no input/expected vectors: it is validated directly by test_irreversible_ops.py and irreversibleOps.test.ts, which parse the shipped generated client and refuse any operation that is unclassified, any docstring-declared irreversibility classified otherwise, and any growth of the ungated single-call set."
+  }
+}

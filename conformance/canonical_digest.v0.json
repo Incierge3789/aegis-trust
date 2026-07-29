@@ -1,0 +1,102 @@
+{
+  "$comment": "Canonical idempotency-digest parity corpus, v0.\n\nWHY THIS FILE EXISTS.\nThe cross-language byte anchor for the idempotency payload hash was previously\nasserted as a duplicated string literal in two places -- one in the Python\nsuite, one in the Node suite. Two literals that must agree, with nothing\ncausing them to agree, is a break waiting to happen: an edit to one side leaves\nthe other green and the divergence is discovered by a customer, not by CI.\n\nThis file is the single source both implementations read, following the pattern\nalready proven by filter_parity.v0.json. There is now exactly one place where\nthe expected digest is written down.\n\nWHAT THE CANONICAL FORM IS.\nA SHA-256 over a JSON array of the idempotency-significant fields, in this\norder, with the three list fields sorted and with no whitespace between tokens:\n\n  [function, purpose, sorted(scope), sorted(denyFields), sorted(blockedFields), mode]\n\nPython uses separators=(\",\", \":\") so that json.dumps matches JSON.stringify\nbyte for byte. schema_version is deliberately NOT part of this hash: it is\nrecord metadata, so stamping it must never change the digest nor break parity.\nCases 2 and 3 exercise the sorting normalisation; cases 4 through 7 pin that\neach remaining component actually participates in the digest, so a canonical\nform that silently dropped a field could not pass.\n\nBOTH SIDES MUST CALL THE REAL FUNCTION.\nEach implementation feeds these inputs to its own production hash function and\ncompares against `expected_digest`. A test that re-derives the canonical form\ninline and hashes its own reconstruction proves only that SHA-256 is\ndeterministic -- it stays green while the shipped function drifts underneath it.\nThe corpus runner must therefore reach the module's actual hash, not a local\nrestatement of what it is believed to do.",
+
+  "version": 0,
+  "algorithm": "sha256",
+  "canonical_form": "JSON array [function, purpose, sorted(scope), sorted(denyFields), sorted(blockedFields), mode], no whitespace between tokens",
+  "excluded_from_hash": ["schema_version"],
+
+  "cases": [
+    {
+      "id": "anchor-sorted-input",
+      "doc": "The historical byte anchor, inputs already in sorted order. This exact digest was previously duplicated as a literal in both suites; it is now written once, here.",
+      "input": {
+        "function": "getUser",
+        "purpose": "p",
+        "scope": ["a", "b"],
+        "denyFields": ["y", "z"],
+        "blockedFields": ["m", "n"],
+        "mode": "lite"
+      },
+      "expected_digest": "4578b3e2eaa20d48e43ab7bd13d0c03b163c8f463b674ce1551a01ba3a4a06e9"
+    },
+    {
+      "id": "scope-unsorted-normalizes",
+      "doc": "scope supplied out of order must normalise to the anchor digest — argument order is not idempotency-significant.",
+      "input": {
+        "function": "getUser",
+        "purpose": "p",
+        "scope": ["b", "a"],
+        "denyFields": ["y", "z"],
+        "blockedFields": ["m", "n"],
+        "mode": "lite"
+      },
+      "expected_digest": "4578b3e2eaa20d48e43ab7bd13d0c03b163c8f463b674ce1551a01ba3a4a06e9"
+    },
+    {
+      "id": "deny-blocked-unsorted-normalizes",
+      "doc": "denyFields and blockedFields supplied out of order likewise normalise to the anchor digest.",
+      "input": {
+        "function": "getUser",
+        "purpose": "p",
+        "scope": ["a", "b"],
+        "denyFields": ["z", "y"],
+        "blockedFields": ["n", "m"],
+        "mode": "lite"
+      },
+      "expected_digest": "4578b3e2eaa20d48e43ab7bd13d0c03b163c8f463b674ce1551a01ba3a4a06e9"
+    },
+    {
+      "id": "empty-lists",
+      "doc": "All three list fields empty — the degenerate shape must still be stable across languages.",
+      "input": {
+        "function": "getUser",
+        "purpose": "p",
+        "scope": [],
+        "denyFields": [],
+        "blockedFields": [],
+        "mode": "lite"
+      },
+      "expected_digest": "049cf22bf9c36cfe1b8eda07b10cff56104dc273fa7f4972819e69240edaca2a"
+    },
+    {
+      "id": "mode-full-differs",
+      "doc": "mode participates in the digest: the anchor payload under FULL must not collide with it under LITE.",
+      "input": {
+        "function": "getUser",
+        "purpose": "p",
+        "scope": ["a", "b"],
+        "denyFields": ["y", "z"],
+        "blockedFields": ["m", "n"],
+        "mode": "full"
+      },
+      "expected_digest": "55618f373d99e4d739b8fcfc878f1cbb7942aec3a6a63bd5a716bc05ab2beddd"
+    },
+    {
+      "id": "function-differs",
+      "doc": "function participates in the digest.",
+      "input": {
+        "function": "getOrder",
+        "purpose": "p",
+        "scope": ["a", "b"],
+        "denyFields": ["y", "z"],
+        "blockedFields": ["m", "n"],
+        "mode": "lite"
+      },
+      "expected_digest": "87873b54a99c3974fe9afb6a22ae9ad3af8ea304606da5dfea0134e325e5e972"
+    },
+    {
+      "id": "purpose-differs",
+      "doc": "purpose participates in the digest.",
+      "input": {
+        "function": "getUser",
+        "purpose": "q",
+        "scope": ["a", "b"],
+        "denyFields": ["y", "z"],
+        "blockedFields": ["m", "n"],
+        "mode": "lite"
+      },
+      "expected_digest": "188dcceeb2f028ec4101429c12c7804b2eb3bf33750cc7720ae809a86fe1f72e"
+    }
+  ]
+}

@@ -1,0 +1,412 @@
+{
+  "$comment": "Golden decision snapshot, v0 — INV-4: the same input yields the same decision ACROSS VERSIONS.\n\nWHAT MAKES THIS DIFFERENT FROM THE OTHER CORPORA. filter_parity and canonical_digest establish\nthat the two SDKs agree with EACH OTHER at one point in time. Neither says anything about whether\nthis release agrees with the last one. A customer's real question is not 'do your two SDKs match'\nbut 'will the answer I got last month still be the answer next month'. That is what this file is\nfor, and it is why attaching the other corpora to INV-4 was refused.\n\nWHAT IT PROVES TODAY: NOTHING. These values were recorded from the current build, so replaying\nthem against the current build is circular. The property becomes real at the FIRST RELEASE that\nreplays this file and finds it unchanged. Stating that plainly matters more than the file itself:\na golden snapshot that quietly gets regenerated whenever it fails is worse than no snapshot,\nbecause it looks like cross-version evidence while being a mirror.\n\nTHE DISCIPLINE. Entries may be ADDED freely — new coverage is always welcome. An existing entry's\n`expected` may only change together with an entry in `breaking_changes` naming the version and the\nreason. When a replay fails, the correct first response is to assume the IMPLEMENTATION regressed,\nnot that the snapshot is stale. Regenerating this file to make CI green is the failure mode it\nexists to prevent.\n\nRESIDUAL, stated rather than hidden: nothing here mechanically prevents someone editing an\n`expected` value in the same commit as a behaviour change. Detecting that needs a diff against the\nbase branch in CI, which is not implemented. What IS enforced is that the values must match the\nshipped functions, so a silent behaviour change fails loudly and requires a deliberate edit.",
+  "version": 0,
+  "recorded_against": "0.9.3",
+  "proves_cross_version_from": "the first release after 0.9.3 that replays this file",
+  "entries": [
+    {
+      "id": "wrap/scope-basic",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "name": "a",
+          "email": "e",
+          "ssn": "s"
+        },
+        "purpose": "support",
+        "scope": [
+          "name"
+        ]
+      },
+      "expected": {
+        "data": {
+          "name": "a"
+        },
+        "filtered_keys": [
+          "email",
+          "ssn"
+        ]
+      }
+    },
+    {
+      "id": "wrap/scope-multi",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "name": "a",
+          "email": "e",
+          "ssn": "s"
+        },
+        "purpose": "support",
+        "scope": [
+          "name",
+          "email"
+        ]
+      },
+      "expected": {
+        "data": {
+          "name": "a",
+          "email": "e"
+        },
+        "filtered_keys": [
+          "ssn"
+        ]
+      }
+    },
+    {
+      "id": "wrap/scope-empty-discloses-nothing",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "name": "a"
+        },
+        "purpose": "support",
+        "scope": []
+      },
+      "expected": {
+        "data": {},
+        "filtered_keys": [
+          "name"
+        ]
+      }
+    },
+    {
+      "id": "wrap/deny-basic",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "name": "a",
+          "ssn": "s"
+        },
+        "purpose": "support",
+        "deny_fields": [
+          "ssn"
+        ]
+      },
+      "expected": {
+        "data": {
+          "name": "a"
+        },
+        "filtered_keys": [
+          "ssn"
+        ]
+      }
+    },
+    {
+      "id": "wrap/scope-nested-dot",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "user": {
+            "name": "a",
+            "ssn": "s"
+          }
+        },
+        "purpose": "support",
+        "scope": [
+          "user.name"
+        ]
+      },
+      "expected": {
+        "data": {
+          "user": {
+            "name": "a"
+          }
+        },
+        "filtered_keys": [
+          "user.ssn"
+        ]
+      }
+    },
+    {
+      "id": "wrap/deny-nested-dot",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "user": {
+            "name": "a",
+            "ssn": "s"
+          }
+        },
+        "purpose": "support",
+        "deny_fields": [
+          "user.ssn"
+        ]
+      },
+      "expected": {
+        "data": {
+          "user": {
+            "name": "a"
+          }
+        },
+        "filtered_keys": [
+          "user.ssn"
+        ]
+      }
+    },
+    {
+      "id": "wrap/scope-list-of-dicts",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "rows": [
+            {
+              "a": 1,
+              "b": 2
+            },
+            {
+              "a": 3,
+              "b": 4
+            }
+          ]
+        },
+        "purpose": "support",
+        "scope": [
+          "rows.a"
+        ]
+      },
+      "expected": {
+        "data": {
+          "rows": [
+            {
+              "a": 1
+            },
+            {
+              "a": 3
+            }
+          ]
+        },
+        "filtered_keys": [
+          "rows.b"
+        ]
+      }
+    },
+    {
+      "id": "wrap/scope-bare-leaf-over-list-drops",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "rows": [
+            {
+              "a": 1
+            }
+          ]
+        },
+        "purpose": "support",
+        "scope": [
+          "rows"
+        ]
+      },
+      "expected": {
+        "data": {},
+        "filtered_keys": [
+          "rows"
+        ]
+      }
+    },
+    {
+      "id": "wrap/deny-subtree-drops-child",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "cfg": {
+            "key": "k",
+            "pub": "p"
+          }
+        },
+        "purpose": "support",
+        "deny_fields": [
+          "cfg"
+        ]
+      },
+      "expected": {
+        "data": {},
+        "filtered_keys": [
+          "cfg"
+        ]
+      }
+    },
+    {
+      "id": "wrap/scope-on-scalar-drops",
+      "surface": "wrap",
+      "since": "0.9.3",
+      "input": {
+        "data": {
+          "n": 5
+        },
+        "purpose": "support",
+        "scope": [
+          "n.x"
+        ]
+      },
+      "expected": {
+        "data": {},
+        "filtered_keys": [
+          "n"
+        ]
+      }
+    },
+    {
+      "id": "doctor/permissive-empty-policy",
+      "surface": "doctor.check",
+      "since": "0.9.3",
+      "input": {
+        "plan": {
+          "purpose": "support",
+          "action_type": "send",
+          "data_requested": [
+            "name"
+          ],
+          "destinations": [
+            "internal_reply"
+          ]
+        },
+        "policy": null
+      },
+      "expected": {
+        "outcome": "ALLOW",
+        "allowed_data": [
+          "name"
+        ],
+        "blocked_data": [],
+        "reason_codes": [],
+        "receipt_required": false
+      }
+    },
+    {
+      "id": "doctor/never-field-blocks",
+      "surface": "doctor.check",
+      "since": "0.9.3",
+      "input": {
+        "plan": {
+          "purpose": "support",
+          "action_type": "send",
+          "data_requested": [
+            "ssn",
+            "name"
+          ],
+          "destinations": [
+            "internal_reply"
+          ]
+        },
+        "policy": {
+          "never_fields": [
+            "ssn"
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "BLOCK",
+        "allowed_data": [],
+        "blocked_data": [
+          "name",
+          "ssn"
+        ],
+        "reason_codes": [
+          "FORBIDDEN_FIELD_REQUESTED"
+        ],
+        "receipt_required": true
+      }
+    },
+    {
+      "id": "doctor/never-parent-blocks-child",
+      "surface": "doctor.check",
+      "since": "0.9.3",
+      "input": {
+        "plan": {
+          "purpose": "support",
+          "action_type": "send",
+          "data_requested": [
+            "config.api_key"
+          ],
+          "destinations": [
+            "internal_reply"
+          ]
+        },
+        "policy": {
+          "never_fields": [
+            "config"
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "BLOCK",
+        "allowed_data": [],
+        "blocked_data": [
+          "config.api_key"
+        ],
+        "reason_codes": [
+          "FORBIDDEN_FIELD_REQUESTED"
+        ],
+        "receipt_required": true
+      }
+    },
+    {
+      "id": "doctor/malformed-path-fails-closed",
+      "surface": "doctor.check",
+      "since": "0.9.3",
+      "input": {
+        "plan": {
+          "purpose": "support",
+          "action_type": "send",
+          "data_requested": [
+            "../etc/passwd"
+          ],
+          "destinations": [
+            "internal_reply"
+          ]
+        },
+        "policy": null
+      },
+      "expected": {
+        "outcome": "BLOCK",
+        "allowed_data": [],
+        "blocked_data": [
+          "../etc/passwd"
+        ],
+        "reason_codes": [
+          "MALFORMED_FIELD_PATH"
+        ],
+        "receipt_required": true
+      }
+    },
+    {
+      "id": "doctor/multi-destination",
+      "surface": "doctor.check",
+      "since": "0.9.3",
+      "input": {
+        "plan": {
+          "purpose": "support",
+          "action_type": "send",
+          "data_requested": [
+            "name"
+          ],
+          "destinations": [
+            "internal_reply",
+            "external_api"
+          ]
+        },
+        "policy": null
+      },
+      "expected": {
+        "outcome": "ALLOW",
+        "allowed_data": [
+          "name"
+        ],
+        "blocked_data": [],
+        "reason_codes": [],
+        "receipt_required": false
+      }
+    }
+  ],
+  "breaking_changes": []
+}

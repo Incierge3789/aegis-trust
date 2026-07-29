@@ -1,0 +1,431 @@
+{
+  "$comment": "Backend registry, v0 — the enumeration of what must be tested.\n\ninvariants.v0.json says what must HOLD. This file says what it must hold FOR.\nNeither is useful alone: an invariant with no enumerated configurations is a\nsentence, and a configuration list with no invariants is an inventory.\n\nWHY IT EXISTS. The SDK has no plugin registry and no backend interface — the\nextension points are hand-written and statically exported. That is exactly the\ncondition in which a new adapter can be added without anyone deciding what it\nmust satisfy. By the time enough of them exist for the question to feel urgent,\ndeclaring an invariant means finding out that some existing configuration\nviolates it. This file is written now, while the count is small enough that the\nanswer is still cheap.\n\nWHAT IS ENFORCED (python/tests/test_backend_registry.py, node/tests/backendRegistry.test.ts):\n  1. EXTRACTION MATCHES SOURCE. Each surface declares where its backends are\n     exported; the guard parses that file's AST and compares. An adapter added\n     to the source without an entry here fails CI. This is the backend form of\n     the existing contract gate that stops an HTTP path being added without\n     declaring it in openapi.json.\n  2. THE PRODUCT IS COMPLETE. Every (backend x invariant) cell resolves to a\n     declared state. A new backend cannot be registered without a decision\n     recorded for all seven invariants — including, honestly, 'none'.\n  3. CROSS-LANGUAGE ASYMMETRY IS DECLARED, NOT DISCOVERED. A backend present\n     in one SDK and absent in the other must say why. Undeclared asymmetry is\n     how two SDKs stop being the same product without anyone noticing.\n\nON THE HONESTY OF THIS MATRIX. Almost every cell reads 'none'. That is not an\nunfinished form — it is the measurement. Adapter tests today assert that each\nbinder produces the right shape; they do not assert the invariants hold across\nthe binder. Recording that as 'none' is what makes the gap actionable. Marking\ncells 'partial' because a test file exists with a matching name is how a matrix\nbecomes decorative.",
+  "version": 0,
+  "invariant_ids": [
+    "INV-1-undeclared-never-egresses",
+    "INV-2-undecidable-never-passes",
+    "INV-3-lite-does-not-egress",
+    "INV-4-same-input-same-decision-across-versions",
+    "INV-5-decisions-independently-verifiable",
+    "INV-6-no-secrets-on-the-surface",
+    "INV-7-no-irreversible-destruction-from-a-single-trigger"
+  ],
+  "cell_states": {
+    "none": "No test exercises this invariant through this backend.",
+    "partial": "Some path is covered through this backend; the invariant's enumerated sub-clauses are not all covered.",
+    "full": "Every sub-clause of the invariant is verified through this backend. Requires the three enforcement_full_criteria in invariants.v0.json."
+  },
+  "surfaces": [
+    {
+      "id": "framework-adapters",
+      "kind": "adapter",
+      "what": "Binders that wrap a shielded tool for a specific agent framework. The extension mechanism is dependency injection of the framework factory: each binder is hand-written, not registered.",
+      "extraction": {
+        "python": {
+          "file": "python/src/aegis_trust/adapters/__init__.py",
+          "symbol_source": "__all__"
+        },
+        "node": {
+          "file": "node/src/adapters/index.ts",
+          "symbol_source": "named exports"
+        }
+      },
+      "backends": [
+        {
+          "id": "core-tool",
+          "python": "shielded_tool",
+          "node": "shieldedTool"
+        },
+        {
+          "id": "stream-tool",
+          "python": "shielded_stream_tool",
+          "node": "shieldedStreamTool"
+        },
+        {
+          "id": "langchain",
+          "python": "to_langchain_tool",
+          "node": "toLangChainTool"
+        },
+        {
+          "id": "llamaindex",
+          "python": "to_llamaindex_tool",
+          "node": "toLlamaIndexTool"
+        },
+        {
+          "id": "crewai",
+          "python": "to_crewai_tool",
+          "node": "toCrewaiTool"
+        },
+        {
+          "id": "vercel",
+          "python": null,
+          "node": "toVercelTool",
+          "asymmetry_reason": "The Vercel AI SDK is JavaScript-only, so there is no Python surface to bind. Declared rather than discovered: this is the one adapter asymmetry between the two SDKs, and it is intentional."
+        }
+      ],
+      "classification_excluded": {
+        "python": {
+          "ShieldedTool": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "ShieldedStreamTool": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own."
+        },
+        "node": {}
+      }
+    },
+    {
+      "id": "execution-modes",
+      "kind": "mode",
+      "what": "LITE filters locally and must not egress; FULL consults the gateway before deciding. Selected by AEGIS_MODE, with auto-detection. Not a pluggable interface — two code paths behind one surface — but it is a configuration the invariants must hold across, which is what this registry enumerates.",
+      "extraction": {
+        "python": {
+          "file": "python/src/aegis_trust/types.py",
+          "symbol_source": "Mode enum members"
+        },
+        "node": {
+          "file": "node/src/types.ts",
+          "symbol_source": "Mode enum members"
+        }
+      },
+      "backends": [
+        {
+          "id": "mode-lite",
+          "python": "LITE",
+          "node": "LITE"
+        },
+        {
+          "id": "mode-full",
+          "python": "FULL",
+          "node": "FULL"
+        },
+        {
+          "id": "mode-auto",
+          "python": "AUTO",
+          "node": "AUTO",
+          "note": "AUTO is not a third execution path — it resolves to LITE or FULL by probing for a token and a reachable backend. It is registered because the RESOLUTION is itself a place an invariant can fail: picking FULL when the gateway is unreachable, or picking LITE when the caller expected enforcement, are both boundary decisions. Found by the registry gate during authoring: the matrix had been written with two modes because the enum was assumed to have two."
+        }
+      ],
+      "classification_excluded": {
+        "python": {},
+        "node": {}
+      }
+    },
+    {
+      "id": "doctor-decision-source",
+      "kind": "decision-source",
+      "what": "Two implementations of one boundary-decision contract: a local deterministic policy evaluation, and a Core-authoritative check. Same contract, different authority — the closest thing in the SDK to two backends behind one surface.",
+      "extraction": {
+        "python": {
+          "file": "python/src/aegis_trust/doctor/__init__.py",
+          "symbol_source": "named exports"
+        },
+        "node": {
+          "file": "node/src/doctor/index.ts",
+          "symbol_source": "named exports"
+        }
+      },
+      "backends": [
+        {
+          "id": "doctor-local",
+          "python": "check",
+          "node": "check"
+        },
+        {
+          "id": "doctor-core",
+          "python": "check_with_core",
+          "node": "checkWithCore"
+        }
+      ],
+      "classification_excluded": {
+        "python": {
+          "check_with_core_receipt": "Same decision authority as doctor-core, differing only in emitting a receipt alongside the decision. Registering it as a separate backend would double every cell in its row without adding a configuration the invariants could fail in differently. If the receipt path ever diverges in how the DECISION is reached, it becomes a backend.",
+          "to_core_verified_receipt": "Pure projection from an existing decision to a receipt shape. Reaches no authority.",
+          "ActionPlan": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "BoundaryDecision": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "BoundaryOutcome": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "BoundaryReceipt": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "TrustContext": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "CoreEvidenceLink": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "LocalPolicy": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "PurposeRule": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "ActionRule": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "DOCTOR_SCHEMA_VERSION": "Schema-version constant. Data, not a code path."
+        },
+        "node": {
+          "checkWithCoreReceipt": "Same decision authority as doctor-core, differing only in emitting a receipt alongside the decision. See the Python note.",
+          "toCoreVerifiedReceipt": "Pure projection from an existing decision to a receipt shape. Reaches no authority.",
+          "toReceipt": "Pure projection from an existing decision to a receipt shape. Reaches no authority.",
+          "scopeForShield": "Derives a scope list from a decision so shield() can consume it. A translation helper between two already-made decisions; reaches no authority.",
+          "BoundaryOutcome": "Type/dataclass describing the shape of a decision or its inputs. Not an authority and not a binder: nothing can be exercised through it, so it carries no invariant obligations of its own.",
+          "DOCTOR_SCHEMA_VERSION": "Schema-version constant. Data, not a code path."
+        }
+      }
+    }
+  ],
+  "coverage": {
+    "core-tool": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "partial",
+        "note": "Adapter tests assert the filtered record is serialised and blocked fields are absent from the normal return. Other egress paths through this binder (exceptions, diagnostics) are not asserted."
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "none"
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "partial",
+        "note": "wrap() has 10 golden entries replayed by both SDKs. Not full: the snapshot proves cross-version stability only from the next release onward."
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "stream-tool": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "partial",
+        "note": "Bilateral: 'never emits blocked fields in any record' plus fail-closed on producer-side raise. Consumer-side abort is not covered."
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "none"
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "langchain": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "none"
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "llamaindex": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "none"
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "crewai": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "none"
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "vercel": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "none"
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "mode-lite": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "none"
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "partial",
+        "note": "Python observes wrap/shield/doctor.check at the socket layer (all egress routes); Node observes the shield path at the fetch layer only. Not full: shielded_stream_tool, mcp_proxy and the CLI LITE paths are unobserved on both sides."
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "mode-full": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "partial",
+        "note": "Ingest-500 and gateway-unreachable fail closed. Truncated payloads and read timeouts are untested."
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "doctor-local": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "partial",
+        "note": "Empty policy is permissive but deterministic; 'never' semantics cannot be escaped by dot-notation, casing, or parent/child confusion."
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "partial",
+        "note": "doctor.check has 5 golden entries, replayed by Python only. Node has no doctor entries in the snapshot."
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "doctor-core": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "partial",
+        "note": "All six undecidable conditions fail closed, bilaterally. The refusal is only guaranteed at this layer -- AegisClient.check_boundary one level down still raises."
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "none"
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "partial",
+        "note": "Keyless structural verification and no-fabrication-on-missing-evidence, bilaterally. No key binding, no issuer-free chain membership."
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    },
+    "mode-auto": {
+      "INV-1-undeclared-never-egresses": {
+        "state": "none"
+      },
+      "INV-2-undecidable-never-passes": {
+        "state": "partial",
+        "note": "Node asserts AUTO with no token resolves to LITE without calling the gateway, and that AUTO with an unreachable backend yields a refusal rather than an allow. Python has no equivalent resolution test."
+      },
+      "INV-3-lite-does-not-egress": {
+        "state": "partial",
+        "note": "Python asserts AUTO with no token resolves without any socket or DNS activity; Node asserts it without calling the gateway. Resolution under a PRESENT token with an unreachable backend is unobserved on both sides."
+      },
+      "INV-4-same-input-same-decision-across-versions": {
+        "state": "none"
+      },
+      "INV-5-decisions-independently-verifiable": {
+        "state": "none"
+      },
+      "INV-6-no-secrets-on-the-surface": {
+        "state": "none"
+      },
+      "INV-7-no-irreversible-destruction-from-a-single-trigger": {
+        "state": "none"
+      }
+    }
+  },
+  "known_gap": "No backend satisfies any invariant at 'full', and most cells are 'none'. The adapters are the starkest: langchain, llamaindex, crewai and vercel have tests that assert each binder produces the right shape, and nothing that asserts an invariant survives the binding. A boundary that holds for wrap() and leaks through toCrewaiTool is not a boundary, and today nothing would detect that.",
+  "classification_rule": "Every symbol a surface exports must be CLASSIFIED, not merely registered: it is either a backend (gets a row in `coverage`, with a decision recorded for all seven invariants) or it appears in `classification_excluded` with a stated reason. A new export satisfies neither until someone decides which it is, so the gate fails and the decision has to be made. The exclusion list is written the same way as not_corpora_reasons in runners.v0.json: an exemption with no reason is refused, because an unaudited exemption list is where a gate quietly stops meaning anything."
+}
