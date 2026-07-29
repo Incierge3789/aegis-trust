@@ -85,7 +85,12 @@ jobs:
         # PEP 621 [project.optional-dependencies].dev → `uv sync --extra dev`.
         # `uv sync --dev` (PEP 735 [dependency-groups]) is wrong here because
         # the project uses PEP 621 extras, not PEP 735 groups.
-        run: uv sync --extra dev
+        #
+        # `--locked` fails the job instead of re-resolving when uv.lock has
+        # drifted from pyproject.toml. Without it a pyproject edit can land with
+        # a stale lock and CI stays green while testing a dependency set nobody
+        # committed (cross-review P1, 2026-07-29).
+        run: uv sync --extra dev --locked
 
       - name: ruff check
         working-directory: python

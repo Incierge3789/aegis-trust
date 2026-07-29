@@ -61,9 +61,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "optionalDependencies": {
-    "yaml": "^2.3.0"
-  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "ajv": "^8.20.0",
