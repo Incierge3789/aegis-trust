@@ -50,8 +50,8 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("AEGIS_AGENT_ID", raising=False)
 
 
-def _client(handler) -> AegisClient:
-    c = AegisClient(base_url="https://localhost:8443/api/v1", verify_ssl=False)
+def _client(handler, base_url: str = "https://localhost:8443/api/v1") -> AegisClient:
+    c = AegisClient(base_url=base_url, verify_ssl=False)
     c._httpx = httpx.Client(
         base_url=c._base_url,
         transport=httpx.MockTransport(handler),
@@ -504,13 +504,20 @@ def test_stream_session_does_not_attach_through_a_different_client():
     )
     handler, calls = _recording_handler(routes)
     minting = _client(handler)
-    other = _client(handler)
-    other._base_url = "https://other.invalid/api/v1"
+    # Constructed at a different base URL, not mutated after the fact — the
+    # binding must hold for a client that was never the minting one.
+    other = _client(handler, base_url="https://other.invalid/api/v1")
     with delegate("a", ["p"], client=minting):
         with stream_session({"principal": {}}, heartbeat_interval=1.0, client=other):
             pass
-    open_body = next(b for p, b in calls if p.endswith("/stream/open"))
-    assert "delegation" not in open_body["envelope"]
+        with stream_session({"principal": {}}, heartbeat_interval=1.0, client=minting):
+            pass
+    opens = [b for p, b in calls if p.endswith("/stream/open")]
+    assert len(opens) == 2
+    # Negative AND positive in one case: an always-refuse regression would pass
+    # the negative alone, so the pair is what makes this non-vacuous.
+    assert "delegation" not in opens[0]["envelope"]
+    assert opens[1]["envelope"]["delegation"]["capability"] == "cap-token-1"
 
 
 def test_stream_session_validation():
