@@ -88,7 +88,15 @@ frameworks = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-    "ruff>=0.4",
+    # PINNED EXACTLY, not a floor. ruff decides whether ci-matrix.sh passes, so an
+    # unbounded range means an upstream release can fail the gate on code nobody
+    # touched. That happened: ruff 0.16.0 (2026-07-23) enabled new default rules
+    # and turned 187 findings red on a tree whose last green CI run was 07-16.
+    # Bumps arrive as reviewable dependabot PRs (.github/dependabot.yml) so the
+    # new rules get triaged deliberately instead of landing as a surprise gate
+    # failure. Every other gate input in this repo is pinned (actions to 40-char
+    # SHAs); this is the same discipline applied to the linter.
+    "ruff==0.15.22",
     "mypy>=1.8",
     "pyyaml>=6.0",
     "pip-audit>=2.7",
