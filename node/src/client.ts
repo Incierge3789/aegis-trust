@@ -544,7 +544,19 @@ export class AegisClient {
     // mapView → BoundaryDecision.allowedData), so a full-width answer inside a
     // denied window is a widening even though this method only asks a
     // question. Same local fail-closed as guardTool / streamSession.
-    if (args.capability === undefined && delegationDenied()) {
+    //
+    // The condition is "no concrete token supplied", NOT "argument unset".
+    // Scoping it to `undefined` left the explicit opt-out (`capability: null`)
+    // as a way to walk straight past the refusal and ask at parent width —
+    // the same widening this block exists to stop, reachable by one keystroke.
+    // Opting out of attachment is meaningful in a GRANTED window (ask this one
+    // question unnarrowed on purpose); inside a DENIED window it is exactly
+    // the thing being denied. Only a caller who brings their own token may
+    // proceed. Found by cross-review (codex + cursor, independently, 2026-07-29)
+    // — the hole adjacent to the hole the previous round closed.
+    // `""` counts as no token: it cannot narrow anything, so letting it through
+    // would reopen the same door with an extra keystroke.
+    if (!(typeof args.capability === "string" && args.capability !== "") && delegationDenied()) {
       throw new AegisValidationError({
         code: "aegis.boundary.delegationDenied",
         remediation:

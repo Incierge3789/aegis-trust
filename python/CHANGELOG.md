@@ -25,6 +25,16 @@
   `BoundaryDecision.allowed_data`). Same local fail-closed as `guard_tool` /
   `stream_session`. An explicit `capability` still works inside a denied
   window: a hand-carried token is not a guess.
+- The denied-window refusal now triggers on "no concrete token supplied", not
+  on "argument unset". Scoping it to the `_Unset` sentinel left the explicit
+  opt-out (`capability=None`, and `""`) as a one-keystroke way past the refusal
+  and straight to a parent-width query — the same widening the refusal exists
+  to stop. Opting out is meaningful in a GRANTED window; inside a DENIED one it
+  is precisely the thing being denied. An explicit `None` outside denial still
+  opts out, unchanged. Found by a second cross-review round (codex and cursor
+  independently, on the same lines), which also named the test gap: opt-out had
+  only ever been exercised after a SUCCESSFUL mint, and denial only with unset
+  or an explicit string, never the combination. Node twin: same fix.
 - `acheck_boundary` is now a plain `def` returning a coroutine, not an
   `async def`. The ambient token is read when you CALL it, not when the
   coroutine is awaited: `coro = c.acheck_boundary(...)` created inside a

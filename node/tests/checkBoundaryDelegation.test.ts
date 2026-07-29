@@ -155,6 +155,57 @@ describe("checkBoundary — automatic delegation attachment", () => {
     expect(calls.map((c2) => c2.path.split("/").pop())).toEqual(["mint"]);
   });
 
+  // The refusal above was scoped to "argument unset", which left the explicit
+  // opt-out as a one-keystroke way past it. `capability: null` and `""` carry
+  // no token, so inside a denied window they are the widening being denied,
+  // not a legitimate opt-out. Cross-review (codex + cursor, 2026-07-29) found
+  // this hole adjacent to the one the previous round closed; both models also
+  // noted the test gap — opt-out was only ever exercised after a SUCCESSFUL
+  // mint, denial only with unset or an explicit string, never the combination.
+  for (const [label, cap] of [
+    ["null", null],
+    ["empty string", ""],
+  ] as const) {
+    it(`a denied window refuses even with an explicit ${label} opt-out`, async () => {
+      const calls = mockRoutes({
+        "/capability/mint": () =>
+          new Response(JSON.stringify({ error: "widening" }), { status: 422 }),
+        "/check-boundary": boundaryOk,
+      });
+      const c = client();
+      await delegate({ forAgent: "child", purposes: ["p"], client: c }, async (grant) => {
+        expect(grant).toBeNull();
+        const err = await c
+          .checkBoundary({ purpose: "customer_support", scope: ["name"], capability: cap })
+          .then(() => null)
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(AegisValidationError);
+        expect((err as AegisValidationError).code).toBe("aegis.boundary.delegationDenied");
+      });
+      // Same oracle as the unset case: nothing but the failed mint may reach
+      // the wire. If /check-boundary appears here, the opt-out asked at the
+      // parent's full width.
+      expect(calls.map((c2) => c2.path.split("/").pop())).toEqual(["mint"]);
+    });
+  }
+
+  it("an explicit null opt-out is still honoured in a GRANTED window", async () => {
+    // The fix must not turn opt-out into a no-op. Outside denial, `null` still
+    // means "ask this one question without attaching the ambient token".
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/check-boundary": boundaryOk,
+    });
+    const c = client();
+    await delegate({ forAgent: "child", purposes: ["p"], client: c }, async (grant) => {
+      expect(grant).not.toBeNull();
+      await c.checkBoundary({ purpose: "customer_support", scope: ["name"], capability: null });
+    });
+    const boundary = calls.find((c2) => c2.path.endsWith("/check-boundary"));
+    expect(boundary).toBeDefined();
+    expect(boundary?.body).not.toHaveProperty("capability");
+  });
+
   it("an EXPLICIT capability still works inside a denied window", async () => {
     // The refusal is about the ambient path (nothing to attach). A caller
     // carrying a token across a process boundary by hand is not guessing.

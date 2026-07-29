@@ -171,6 +171,47 @@ def test_denied_window_refuses_locally():
     assert [p.rsplit("/", 1)[-1] for p, _ in calls] == ["mint"]
 
 
+@pytest.mark.parametrize("cap", [None, ""], ids=["none", "empty-string"])
+def test_denied_window_refuses_even_with_an_explicit_opt_out(cap):
+    # The refusal above was scoped to "argument unset", which left the explicit
+    # opt-out as a one-keystroke way past it. ``None`` and ``""`` carry no
+    # token, so inside a denied window they are the widening being denied, not
+    # a legitimate opt-out. Cross-review (codex + cursor, 2026-07-29) found this
+    # hole adjacent to the one the previous round closed; both models also noted
+    # the test gap — opt-out was only ever exercised after a SUCCESSFUL mint,
+    # denial only with unset or an explicit string, never the combination.
+    handler, calls = _recording_handler(
+        {
+            "/capability/mint": lambda b: httpx.Response(
+                422, json={"error": "widening"}
+            ),
+            "/check-boundary": _boundary_ok,
+        }
+    )
+    c = _client(handler)
+    with delegate("child", ["p"], client=c) as grant:
+        assert grant is None
+        with pytest.raises(AegisValidationError) as ei:
+            c.check_boundary("customer_support", ["name"], capability=cap)
+    assert ei.value.code == "aegis.boundary.delegationDenied"
+    # Same oracle as the unset case: nothing but the failed mint may reach the
+    # wire. A /check-boundary here means the opt-out asked at parent width.
+    assert [p.rsplit("/", 1)[-1] for p, _ in calls] == ["mint"]
+
+
+def test_explicit_none_opt_out_is_still_honoured_in_a_granted_window():
+    # The fix must not turn opt-out into a no-op. Outside denial, ``None`` still
+    # means "ask this one question without attaching the ambient token".
+    handler, calls = _recording_handler(
+        {"/capability/mint": _mint_ok, "/check-boundary": _boundary_ok}
+    )
+    c = _client(handler)
+    with delegate("child", ["p"], client=c) as grant:
+        assert grant is not None
+        c.check_boundary("customer_support", ["name"], capability=None)
+    assert "capability" not in _boundary_body(calls)
+
+
 def test_explicit_capability_still_works_inside_a_denied_window():
     # The refusal is about the ambient path (nothing to attach). A caller
     # carrying a token across a process boundary by hand is not guessing.

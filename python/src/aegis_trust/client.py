@@ -499,15 +499,28 @@ class AegisClient:
             body["attribution"] = attribution
         if synthetic is not None:
             body["synthetic"] = synthetic
-        if isinstance(capability, _Unset):
-            # A denied window refuses HERE, before the wire: the mint failed,
-            # so there is no token to narrow with, and asking un-narrowed would
-            # answer at the PARENT's full width. ``allowed_fields`` on that
-            # answer is what Doctor hands the agent as authorization
-            # (doctor.check_with_core → BoundaryDecision.allowed_data), so a
-            # full-width answer inside a denied window is a widening even
-            # though this method only asks a question. Same local fail-closed
-            # as guard_tool / stream_session.
+        # A denied window refuses HERE, before the wire: the mint failed, so
+        # there is no token to narrow with, and asking un-narrowed would answer
+        # at the PARENT's full width. ``allowed_fields`` on that answer is what
+        # Doctor hands the agent as authorization (doctor.check_with_core →
+        # BoundaryDecision.allowed_data), so a full-width answer inside a denied
+        # window is a widening even though this method only asks a question.
+        # Same local fail-closed as guard_tool / stream_session.
+        #
+        # The condition is "no concrete token supplied", NOT "argument unset".
+        # Scoping it to ``_Unset`` left the explicit opt-out
+        # (``capability=None``) as a way to walk straight past the refusal and
+        # ask at parent width — the same widening this block exists to stop,
+        # reachable by one keystroke. Opting out of attachment is meaningful in
+        # a GRANTED window (ask this one question unnarrowed on purpose); inside
+        # a DENIED window it is exactly the thing being denied. Only a caller
+        # who brings their own token may proceed. Found by cross-review (codex +
+        # cursor, independently, 2026-07-29) — the hole adjacent to the hole the
+        # previous round closed. Node twin: client.ts checkBoundary.
+        #
+        # ``""`` counts as no token: it cannot narrow anything, so letting it
+        # through would reopen the same door with an extra keystroke.
+        if not (isinstance(capability, str) and capability):
             if _delegation_denied():
                 raise AegisValidationError(
                     "check-boundary: the enclosing delegation window is "
@@ -523,9 +536,12 @@ class AegisClient:
                     ),
                     docs_url=aegis_docs_url("aegis.boundary.delegationDenied"),
                 )
-            resolved = current_capability()
-        else:
-            resolved = capability
+        # Resolution is unchanged by the fix above: unset attaches the ambient
+        # token, an explicit ``None`` still opts out for one call (now only
+        # reachable outside a denied window), an explicit string wins.
+        resolved = (
+            current_capability() if isinstance(capability, _Unset) else capability
+        )
         if resolved is not None:
             body["capability"] = resolved
         return body

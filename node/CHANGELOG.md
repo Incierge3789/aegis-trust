@@ -21,6 +21,16 @@
   `mapView` → `BoundaryDecision.allowedData`). Same local fail-closed as
   `guardTool` / `streamSession`. An explicit `capability` still works inside a
   denied window: a hand-carried token is not a guess.
+- The denied-window refusal now triggers on "no concrete token supplied", not
+  on "argument unset". Scoping it to `undefined` left the explicit opt-out
+  (`capability: null`, and `""`) as a one-keystroke way past the refusal and
+  straight to a parent-width query — the same widening the refusal exists to
+  stop. Opting out is meaningful in a GRANTED window; inside a DENIED one it
+  is precisely the thing being denied. An explicit `null` outside denial still
+  opts out, unchanged. Found by a second cross-review round (codex and cursor
+  independently, on the same lines), which also named the test gap: opt-out
+  had only ever been exercised after a SUCCESSFUL mint, and denial only with
+  unset or an explicit string, never the combination.
 - New error code `aegis.boundary.delegationUnsupported` (`AegisHttpError`,
   `status: 501`): a deployment that cannot evaluate a presented capability
   refuses rather than deciding at full width. The generic non-2xx envelope
