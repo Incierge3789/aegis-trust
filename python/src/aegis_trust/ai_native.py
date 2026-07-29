@@ -42,7 +42,13 @@ from aegis_trust._delegation_context import (
     _capability_var,
     _delegation_denied,
     _DelegationDenied,
-    current_capability,
+    # Re-export: `current_capability` is public API through this module even
+    # though nothing here calls it any more (every send path is origin-bound
+    # via `current_capability_for`). The `as` alias marks it as an intentional
+    # re-export so `ruff --fix` cannot strip it as unused — it did exactly that
+    # once, and the whole suite failed on ImportError.
+    current_capability as current_capability,
+    current_capability_for,
 )
 from aegis_trust.errors import (
     AegisStreamDenied,
@@ -182,14 +188,15 @@ def guard_tool(
                 )
                 return False
             try:
-                allowed = _resolve_client(client).tool_allowed(
+                _gc = _resolve_client(client)
+                allowed = _gc.tool_allowed(
                     tool_name,
                     purpose,
                     owner_val,
                     fields=_fields,
                     session_id=session_id,
                     destination=destination,
-                    capability=current_capability(),
+                    capability=current_capability_for(_gc._base_url),
                 )
             except Exception:
                 # tool_allowed is itself fail-closed and non-raising; a raise
@@ -223,14 +230,15 @@ def guard_tool(
                 )
                 return False
             try:
-                allowed = await _resolve_client(client).atool_allowed(
+                _gc = _resolve_client(client)
+                allowed = await _gc.atool_allowed(
                     tool_name,
                     purpose,
                     owner_val,
                     fields=_fields,
                     session_id=session_id,
                     destination=destination,
-                    capability=current_capability(),
+                    capability=current_capability_for(_gc._base_url),
                 )
             except Exception:
                 allowed = False
@@ -362,9 +370,14 @@ def delegate(
                 scope=list(scope) if scope is not None else None,
                 tools=list(tools) if tools is not None else None,
                 ttl_secs=ttl_secs,
-                parent_capability=current_capability(),
+                parent_capability=current_capability_for(resolved._base_url),
             )
-            token = _Grant(grant.capability, client._base_url)
+            # `resolved`, not `client`: the argument may be None (module
+            # client). Reading `client._base_url` raised AttributeError,
+            # which the except below swallowed into a DENIED window — so
+            # default usage broke entirely. Found by cross-review (cursor,
+            # 2026-07-29); the tests all passed an explicit client.
+            token = _Grant(grant.capability, resolved._base_url)
         except Exception:
             # Mint refused or unreachable. The exception detail is withheld
             # (fixed strings only — house diagnostic discipline).
@@ -478,7 +491,10 @@ class StreamSession:
         return _resolve_client(self._client_arg)
 
     def _envelope_with_capability(self) -> dict[str, Any]:
-        tok = current_capability()
+        # Origin-bound: a stream envelope is a send path too, so a token minted
+        # against another boundary must not ride on it (cross-review, cursor
+        # 2026-07-29). Node twin: aiNative.ts streamSession.
+        tok = current_capability_for(self._client()._base_url)
         if tok is None:
             return self._envelope
         env = dict(self._envelope)

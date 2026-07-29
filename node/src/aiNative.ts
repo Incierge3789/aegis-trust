@@ -271,7 +271,7 @@ export async function delegate<T>(
         scope: options.scope,
         tools: options.tools,
         ttlSecs: options.ttlSecs,
-        parentCapability: currentCapability() ?? undefined,
+        parentCapability: currentCapabilityFor(client.baseUrl) ?? undefined,
       });
       store = { token: grant.capability, origin: client.baseUrl };
     } catch {
@@ -393,7 +393,10 @@ export async function streamSession<T>(
 
   // Attach an enclosing delegation capability (never hand-carried).
   let body = envelope;
-  const capability = currentCapability();
+  // Origin-bound: a stream envelope is a send path too, so a token minted
+  // against another boundary must not ride on it (cross-review, cursor
+  // 2026-07-29). Python twin: ai_native.py _envelope_with_capability.
+  const capability = currentCapabilityFor(client.baseUrl);
   if (capability !== null) {
     const delegation = {
       capability,

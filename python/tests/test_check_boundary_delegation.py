@@ -212,6 +212,24 @@ def test_explicit_none_opt_out_is_still_honoured_in_a_granted_window():
     assert "capability" not in _boundary_body(calls)
 
 
+def test_delegate_without_an_explicit_client_still_mints(monkeypatch):
+    # Regression: the origin was first read off the `client` ARGUMENT, which is
+    # None when the caller relies on the module client. That raised
+    # AttributeError inside delegate(), the broad except swallowed it, and every
+    # default-usage window silently became DENIED. Every existing test passed an
+    # explicit client, so nothing caught it — found by cross-review (cursor,
+    # 2026-07-29). The origin now comes from the RESOLVED client.
+    handler, calls = _recording_handler(
+        {"/capability/mint": _mint_ok, "/check-boundary": _boundary_ok}
+    )
+    c = _client(handler)
+    monkeypatch.setattr("aegis_trust.ai_native._resolve_client", lambda _arg: c)
+    with delegate("child", ["p"]) as grant:
+        assert grant is not None, "default-client window was denied"
+        c.check_boundary("customer_support", ["name"])
+    assert "capability" in _boundary_body(calls)
+
+
 def test_ambient_token_does_not_attach_to_a_different_client():
     # The store used to hold a bare bearer string, so any client built inside
     # the window picked it up — including one pointed at a different base URL.
