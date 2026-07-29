@@ -133,6 +133,18 @@ def test_audit_pip_audit_strict_via_locked_env():
     assert "uv sync --extra dev" in run_text, (
         "audit env must be uv.lock-synced (PEP 621 dev extras), not pip-resolved"
     )
+    # This function is named `..._via_locked_env`, but until 2026-07-29 nothing
+    # here checked that the env was actually locked: a bare `uv sync` re-resolves
+    # and rewrites uv.lock when pyproject.toml has drifted from it, so the
+    # audited set was whatever resolution produced, not what was committed. The
+    # assertion asserted its own name. Same shape as the S025 finding — a check
+    # that does not check that it checks. `--locked` makes uv fail instead of
+    # re-resolve, restoring symmetry with `npm ci` in the npm-audit job.
+    assert "uv sync --extra dev --locked" in run_text, (
+        "audit env must be locked (`--locked`), not merely synced: without it "
+        "uv silently re-resolves a drifted lockfile and the audit reports on a "
+        "dependency set that was never committed"
+    )
     assert re.search(r"uv==[0-9.]+", run_text), "uv itself must be version-pinned"
 
 

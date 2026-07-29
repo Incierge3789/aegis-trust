@@ -71,8 +71,13 @@ jobs:
       - name: Install uv (pinned)
         run: pip install 'uv==0.5.30'
 
+      # `--locked` is what makes "lockfile-exact" true. Without it `uv sync`
+      # silently re-resolves and updates uv.lock when pyproject.toml has drifted
+      # from it, so the audited dependency set would not be the locked one — the
+      # exact asymmetry with `npm ci` that this job's invariant 7 exists to
+      # prevent (cross-review P1, 2026-07-29).
       - name: uv sync (dev extras, lockfile-exact)
-        run: uv sync --extra dev
+        run: uv sync --extra dev --locked
 
       - name: pip-audit (fail-closed)
         run: uv run pip-audit --strict

@@ -26,8 +26,12 @@
 version: 2
 
 updates:
-  # Node SDK — devDependencies only; `node/package.json` declares no runtime
-  # dependencies and that must stay true (LITE zero-dep claim).
+  # Node SDK. `node/package.json` declares no runtime dependencies and that must
+  # stay true (LITE zero-dep claim, machine-checked by
+  # node/tests/zeroRuntimeDeps.test.ts). The group is scoped with
+  # `dependency-type: development` — `patterns: "*"` alone does NOT mean
+  # dev-only, it means every ecosystem entry, so a runtime dependency would be
+  # swept into a PR labelled "dev-dependencies" (cross-review P1, 2026-07-29).
   - package-ecosystem: npm
     directory: /node
     schedule:
@@ -38,6 +42,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       dev-dependencies:
+        dependency-type: development
         patterns:
           - "*"
         update-types:
@@ -49,8 +54,12 @@ updates:
     labels:
       - dependencies
 
-  # Python SDK.
-  - package-ecosystem: pip
+  # Python SDK. Ecosystem is `uv`, NOT `pip`: the source of truth here is
+  # python/uv.lock plus `uv sync`, and the pip ecosystem updates pyproject
+  # constraints without reliably relocking. Using pip would reproduce exactly
+  # the failure this file was created to stop — a pyproject edit landing while
+  # uv.lock stays stale (cross-review P1, 2026-07-29).
+  - package-ecosystem: uv
     directory: /python
     schedule:
       interval: weekly
@@ -60,6 +69,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       dev-dependencies:
+        dependency-type: development
         patterns:
           - "*"
         update-types:
