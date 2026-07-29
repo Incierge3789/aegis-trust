@@ -1,0 +1,87 @@
+# Dependency update automation for aegis-trust.
+#
+# WHY THIS FILE EXISTS.
+# `audit.yml` runs a weekly scheduled scan (Monday 03:17 UTC) whose stated
+# purpose is to "surface newly-published CVEs in unchanged code". It does that
+# correctly — and then stops. On 2026-07-27 the audit job went red on commit
+# c134804 with no code change: the same commit had passed on 07-16 and 07-20,
+# and two advisories (GHSA-v2hh-gcrm-f6hx / GHSA-4c8g-83qw-93j6 on fast-uri,
+# GHSA-r28c-9q8g-f849 on postcss) had simply been published in between. Both
+# were transitive dev-only dependencies with fixes already available, and the
+# gate stayed red until a human noticed and ran `npm audit fix` by hand.
+#
+# A detector with no remediation path converts every upstream advisory into a
+# manual event. Dependabot closes that loop: advisories arrive as pull requests
+# against a green baseline instead of as a red gate on an unchanged commit.
+# `audit.yml` remains the fail-closed backstop — this file is what keeps it
+# from being the only thing that moves.
+#
+# NOTE ON ACTION PINS: `audit.yml` invariant 4 and `ci.yml` require every
+# third-party action to be pinned to a full 40-char commit SHA, and
+# `python/tests/adversarial/test_redteam_S002_audit_workflow.py` enforces it.
+# Dependabot preserves SHA pinning when it bumps a `github-actions` entry (it
+# rewrites the SHA and updates the trailing version comment), so the invariant
+# survives its PRs. Review the diff anyway before merging.
+
+version: 2
+
+updates:
+  # Node SDK — devDependencies only; `node/package.json` declares no runtime
+  # dependencies and that must stay true (LITE zero-dep claim).
+  - package-ecosystem: npm
+    directory: /node
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    labels:
+      - dependencies
+
+  # Python SDK.
+  - package-ecosystem: pip
+    directory: /python
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    labels:
+      - dependencies
+
+  # Pinned GitHub Actions. Kept separate and ungrouped: each bump changes a
+  # SHA pin that a security invariant depends on, so each gets its own diff.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(actions)"
+    labels:
+      - dependencies
