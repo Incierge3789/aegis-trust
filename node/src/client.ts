@@ -27,11 +27,7 @@ import {
   AegisIngestError,
   AegisValidationError,
 } from "./errors.js";
-import {
-  currentCapability,
-  currentCapabilityFor,
-  delegationDenied,
-} from "./delegationContext.js";
+import { currentCapabilityFor, delegationDenied } from "./delegationContext.js";
 import {
   AEGIS_API_VERSION,
   AEGIS_API_VERSION_HEADER,

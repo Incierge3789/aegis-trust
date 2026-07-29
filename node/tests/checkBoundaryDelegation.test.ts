@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AegisClient } from "../src/client.js";
+import { AegisClient, getModuleClient, resetModuleClient } from "../src/client.js";
 import { AegisHttpError, AegisValidationError } from "../src/errors.js";
 import { delegate } from "../src/aiNative.js";
 
@@ -204,6 +204,35 @@ describe("checkBoundary — automatic delegation attachment", () => {
     const boundary = calls.find((c2) => c2.path.endsWith("/check-boundary"));
     expect(boundary).toBeDefined();
     expect(boundary?.body).not.toHaveProperty("capability");
+  });
+
+  it("delegate WITHOUT an explicit client still mints and attaches", async () => {
+    // Python twin. There the origin was first read off the `client` ARGUMENT,
+    // which is None on the module-client path — AttributeError, swallowed by
+    // the mint block's except, every default window silently DENIED. Node
+    // resolves the client before writing the store so it was never exposed,
+    // but the pin belongs on both sides: this is the path every quickstart
+    // uses, and it had no test in either SDK (cross-review, cursor 2026-07-29).
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/check-boundary": boundaryOk,
+    });
+    const prevUrl = process.env.AEGIS_BASE_URL;
+    process.env.AEGIS_BASE_URL = "https://localhost:8443/api/v1";
+    resetModuleClient();
+    try {
+      const c = getModuleClient();
+      await delegate({ forAgent: "child", purposes: ["p"] }, async (grant) => {
+        expect(grant, "default-client window was denied").not.toBeNull();
+        await c.checkBoundary({ purpose: "customer_support", scope: ["name"] });
+      });
+    } finally {
+      if (prevUrl === undefined) delete process.env.AEGIS_BASE_URL;
+      else process.env.AEGIS_BASE_URL = prevUrl;
+      resetModuleClient();
+    }
+    const boundary = calls.find((c2) => c2.path.endsWith("/check-boundary"));
+    expect(boundary?.body).toHaveProperty("capability");
   });
 
   it("the ambient token does NOT attach to a DIFFERENT client in the window", async () => {
