@@ -1,0 +1,506 @@
+{
+  "$comment": "Aegis product-identity invariant suite, v0.\n\nWHAT THIS IS.\nThis file is not a quality checklist. It is the declaration of what Aegis is:\nthe set of things that must never happen, in any configuration, for any backend,\nin any version. A backend, adapter, or execution mode that violates any entry\nhere is not a variant of Aegis. It is a different product.\n\nDECLARATION ORDER IS DEDUCTIVE, AND THIS MATTERS.\nEvery entry below was written from the Aegis axioms (AO-001..006) and from the\nD8 incident record, WITHOUT consulting the existing test suite. Existing tests\nare attached afterwards, as evidence, in the `evidence` array.\n\nThe inverse order (reading the tests and summarising them into invariants) was\nconsidered and rejected. Induction promotes the current implementation to\nspecification: whatever the code happens to do becomes the invariant, and no\ngap can ever appear, because the gaps are exactly what induction cannot see.\nThe purpose of this file is to EXPOSE DIFFERENCE, not to aggregate coverage.\nAt declaration time every `evidence` array is empty. Entries that stay empty\nafter attachment are the holes, and the holes are the point.\n\nNO EXEMPTIONS.\nAn invariant is never waived for a configuration on the grounds that the\nconfiguration \"cannot violate it structurally\". Structural impossibility is a\nclaim, and unverified claims are what this suite exists to eliminate. Where one\nside currently satisfies an invariant only indirectly (by absence of a\ncapability rather than by observation of behaviour), that is recorded as\n`partial` and scheduled for promotion to direct observation. It is not recorded\nas satisfied. A suite that admits exemptions proves nothing when it passes.\n\nVACUOUS SATISFACTION IS A FORM OF EXEMPTION.\nAn obligation that passes because the surface it guards does not exist in this\nrepository is not satisfied; it is untested. Obligations are therefore written\nagainst the reachable effect, not against local syntax. See INV-7, where the\nSDK obligation is \"cannot cause the destruction\" rather than \"does not contain\ndestructive calls\" -- the latter passes trivially in this repo and would have\nhidden the exact incident it is meant to prevent.\n\nENFORCEMENT STATE IS DECLARED, NOT ASSUMED.\nBecause declaration precedes enforcement, entries legitimately exist here before\nthey are enforced anywhere. That state is correct and expected. What is not\nacceptable is for it to be invisible. Each entry carries `enforcement` per\nrepository, and one operational rule governs external use:\n\n  ONLY ENTRIES WHERE EVERY APPLICABLE SIDE IS \"full\" MAY APPEAR IN ANY\n  CUSTOMER-FACING MATERIAL.\n\nThe `customer_facing` field is derived from `enforcement` by that rule and is\nmachine-checked, so it cannot drift from reality by hand-editing. This is what\nmakes it safe to show the invariant list to a customer instead of a feature\nlist: a promise made from this file is never withdrawn later, because a promise\nis only emitted once the machine that keeps it exists.\n\nDISCLOSURE NOTE.\nThe invariant statements are product promises. The enforcement mechanism names\n(vector file paths, gate names, repository structure) are NOT covered by the\nexternal disclosure catalogue and must not be published as-is. Customer-facing\nuse requires the catalogue entry for the intermediate form -- existence and kind\nof the enforcing machine may be shown, internal paths and filenames may not.\n\nADDING A BACKEND.\nA new backend, adapter, execution mode, signer, or store is accepted only when\nevery entry in this file has a passing vector for it. The registry is the\nenumeration of what must be tested; this file is the enumeration of what must\nhold. Neither is optional.\n\nRELATION TO filter_parity.v0.json.\nThat corpus is the working proof that one vector file can be read by both the\nPython and the Node implementation, giving genuine cross-language identity\nrather than hand-mirrored twins. This file generalises that mechanism from\nwrap() filtering to the whole product surface.",
+  "version": 0,
+  "declared_at": "2026-07-19",
+  "declaration_order": "deductive",
+  "sources_consulted_at_declaration": [
+    "AO-001 sole trust boundary",
+    "AO-002 minimum disclosure",
+    "AO-003 tamper-evident audit",
+    "AO-004 capsule integrity",
+    "AO-005 host binding",
+    "AO-006 secrets hygiene",
+    "D8 SecureWipe misfire incident record (2 actual incidents)"
+  ],
+  "sources_deliberately_not_consulted_at_declaration": [
+    "python/tests/**",
+    "node/tests/**",
+    "conformance/filter_parity.v0.json case list"
+  ],
+  "enforcement_values": {
+    "full": "Machine-enforced by direct observation of the guarded behaviour, in CI, non-vacuously.",
+    "partial": "Enforced indirectly, incompletely, or only for a subset of paths. Counts as a hole.",
+    "none": "Declared, not yet enforced. Counts as a hole.",
+    "not_applicable": "The invariant has no surface on this side. Must be justified in `not_applicable_reason`, and the justification must be about absence of surface, not about difficulty."
+  },
+  "customer_facing_rule": "customer_facing === every applicable side in `enforcement` is \"full\". Machine-checked; never hand-set.",
+  "enforcement_full_criteria": {
+    "$comment": "`full` is what customer_facing derives from, so a loose definition of `full` becomes a loose promise in a sales conversation. All three criteria must hold; any one failing means `partial` at best.",
+    "1_has_evidence": "At least one test is attached in `evidence`. An entry with no evidence is `none`, whatever the implementation happens to do.",
+    "2_evidence_reaches_shipped_code": "Every attached test exercises the code that ships, and is registered where that is machine-checked (conformance/runners.v0.json). A test that re-derives the behaviour and checks its own reconstruction does not count as evidence -- it proves the primitive it reimplemented is deterministic. This criterion exists because the SDK shipped exactly such a test: the canonical-digest byte anchor never called the shipped hash and was green throughout. Without this clause `full` would mean only 'a test exists'.",
+    "3_holds_across_all_configurations": "The invariant passes for every registered backend, adapter, and execution mode -- the full product of registry x invariants. Until the registry exists, no entry can reach `full` on this criterion, which is why the honest state of every entry at declaration time is `none`.",
+    "no_exemptions": "A configuration is never excused on the grounds that it 'cannot violate the invariant structurally'. Structural impossibility is a claim; unverified claims are what this suite exists to remove. Indirect satisfaction is recorded as `partial` and scheduled for promotion to direct observation."
+  },
+  "invariants": [
+    {
+      "id": "INV-1-undeclared-never-egresses",
+      "title_ja": "宣言されていない項目は、いかなる経路でも境界の外に出ない",
+      "title_en": "Nothing undeclared leaves the boundary, by any path",
+      "derived_from": [
+        "AO-002"
+      ],
+      "statement": "A field that was not declared in scope, or that was declared in deny, does not appear outside the boundary through any egress path whatsoever.",
+      "why": "Minimum disclosure is the differentiator. A filter that holds on the success path and leaks on the error path has not filtered anything; it has merely moved the leak somewhere less observed.",
+      "egress_paths_enumerated": [
+        "normal return value",
+        "exception payloads and error envelopes",
+        "streaming records, including partial and aborted streams",
+        "diagnostics, logs, metrics hooks",
+        "intermediate representations produced by type conversion"
+      ],
+      "obligations": {
+        "sdk": "Every egress path above is observed to carry no undeclared field. The enumeration of egress paths is itself machine-checked: adding a new way for data to leave the boundary without adding it here fails CI.",
+        "core": "Same, for the Core decision and receipt surface."
+      },
+      "enforcement": {
+        "sdk": "partial",
+        "core": "none"
+      },
+      "vectors": [],
+      "evidence": [
+        {
+          "file": "python/tests/test_filter_parity_corpus.py",
+          "line": 36,
+          "lang": "py",
+          "covers": "normal return",
+          "registered": true
+        },
+        {
+          "file": "node/tests/filterParityCorpus.test.ts",
+          "line": 38,
+          "lang": "node",
+          "covers": "normal return",
+          "registered": true
+        },
+        {
+          "file": "python/tests/test_adapters_stream.py",
+          "line": 103,
+          "lang": "py",
+          "covers": "streaming",
+          "registered": false
+        },
+        {
+          "file": "node/tests/adaptersStream.test.ts",
+          "line": 60,
+          "lang": "node",
+          "covers": "streaming",
+          "registered": false
+        },
+        {
+          "file": "python/tests/adversarial/test_redteam_S018_exception_leak.py",
+          "line": 23,
+          "lang": "py",
+          "covers": "exception payloads",
+          "registered": false,
+          "suspect": "Needle assertions sit after `result == \"\"` and cannot fail independently. The load-bearing assertion is `result == \"\"` alone, which proves the exception is swallowed, not that the envelope was scrubbed."
+        },
+        {
+          "file": "python/tests/test_conversion_diagnostic_S018.py",
+          "line": 50,
+          "lang": "py",
+          "covers": "diagnostics/logs + conversion intermediates",
+          "registered": false,
+          "note": "Strongest cluster here: observes real logging records via caplog and asserts no exception message, traceback, class name, type name, repr, or trace_id."
+        }
+      ],
+      "customer_facing": false,
+      "holes": [
+        "Error-envelope CONTENTS are never asserted field-free in either language; existing envelope tests assert shape (code/remediation/docs_url) only.",
+        "Metrics hook is not covered as an egress path. Python asserts what the hook does receive, never that nothing undeclared reaches it. Node's setMetricsHook has no test at all.",
+        "Aborted stream is only tested producer-side (handler raises). Consumer-side abort (break out of for-await, generator .return()/.athrow()) is untested in both languages -- the case where a partially built record is most likely to escape.",
+        "The egress-path enumeration is not itself machine-checked, so adding a new way for data to leave the boundary does not fail CI as the obligation requires."
+      ],
+      "asymmetry": "Node is missing three of five enumerated paths entirely: exception payloads, diagnostics/logs, conversion intermediates. Only normal return and streaming are bilateral."
+    },
+    {
+      "id": "INV-2-undecidable-never-passes",
+      "title_ja": "判定できないときは通さない",
+      "title_en": "What cannot be decided is not allowed",
+      "derived_from": [
+        "AO-001"
+      ],
+      "statement": "When a decision cannot be reached, the result is a refusal. It is never a pass-through, never a raw exception escaping to the caller, and never a default-allow.",
+      "why": "A boundary that opens when its authority is unreachable is not a boundary. This is the invariant that makes the product safe to depend on in exactly the conditions where dependence matters.",
+      "undecidable_conditions_enumerated": [
+        "authority unreachable (network failure, timeout)",
+        "authority returns non-2xx",
+        "authority returns malformed or truncated payload",
+        "required evidence absent, empty, or whitespace-only",
+        "input of unknown type or unrecognised structure",
+        "multiple destinations disagree (resolve to most restrictive, never to first)"
+      ],
+      "obligations": {
+        "sdk": "Each condition above yields a refusal value with an empty allow set. No condition yields a raw throw or an allow.",
+        "core": "Same, at the enforcement point."
+      },
+      "enforcement": {
+        "sdk": "partial",
+        "core": "none"
+      },
+      "vectors": [],
+      "evidence": [
+        {
+          "file": "python/tests/test_doctor_core.py",
+          "line": 125,
+          "lang": "py",
+          "covers": "unreachable authority",
+          "registered": false
+        },
+        {
+          "file": "node/tests/doctorCore.test.ts",
+          "line": 98,
+          "lang": "node",
+          "covers": "unreachable authority",
+          "registered": false
+        },
+        {
+          "file": "python/tests/test_malformed_ingest_response.py",
+          "line": 67,
+          "lang": "py",
+          "covers": "malformed payload (13 shapes)",
+          "registered": false
+        },
+        {
+          "file": "python/tests/test_core_verified_receipt.py",
+          "line": 33,
+          "lang": "py",
+          "covers": "missing/empty/whitespace evidence",
+          "registered": false
+        },
+        {
+          "file": "node/tests/coreVerifiedReceipt.test.ts",
+          "line": 41,
+          "lang": "node",
+          "covers": "missing/empty evidence",
+          "registered": false
+        },
+        {
+          "file": "python/tests/test_doctor_core.py",
+          "line": 232,
+          "lang": "py",
+          "covers": "multiple destinations",
+          "registered": false
+        },
+        {
+          "file": "node/tests/doctorCore.test.ts",
+          "line": 222,
+          "lang": "node",
+          "covers": "multiple destinations",
+          "registered": false
+        }
+      ],
+      "customer_facing": false,
+      "holes": [
+        "'Never a raw throw' is CONTRADICTED on the client surface and untested as a property: python/tests/test_client_boundary.py:197 and :213 prove AegisClient.check_boundary, a public export, DOES raise on non-2xx and on a malformed body. The refusal only materialises one layer up in check_with_core.",
+        "Truncated payload untested in both languages -- every malformed case is well-formed JSON of the wrong shape, never a connection reset mid-body.",
+        "Timeout untested as distinct from connect failure; no read-timeout or deadline case on either side.",
+        "The multi-destination assertion is on REQUEST SHAPING, not on the decision: both assert the outbound destination field equals the sentinel, neither asserts the decision is the most restrictive of what the destinations would individually yield.",
+        "Python has no @shield FULL authority-unreachable test equivalent to node/tests/fullMode.test.ts:204."
+      ],
+      "asymmetry": "py-only: 13-shape malformed corpus, client-layer malformed/missing-field battery, whitespace-only evidence. node-only: shield-level unreachable-authority test."
+    },
+    {
+      "id": "INV-3-lite-does-not-egress",
+      "title_ja": "LITE は境界の外に出ない",
+      "title_en": "LITE performs no outbound communication",
+      "derived_from": [
+        "AO-001",
+        "AO-002"
+      ],
+      "statement": "In LITE mode the SDK performs no outbound network communication of any kind.",
+      "why": "LITE is sold as something you can run where nothing may leave. That claim is only worth what its observation is worth.",
+      "obligations": {
+        "sdk": "Observed DIRECTLY: the outbound surface is instrumented and observed to be zero across the LITE path. Absence of a network dependency is NOT accepted as satisfaction of this invariant -- it is evidence about packaging, not about behaviour, and it stops being true the moment the dependency arrives for an unrelated reason.",
+        "core": "not applicable"
+      },
+      "not_applicable_reason": {
+        "core": "LITE is an SDK-side execution mode; it has no Core-side surface."
+      },
+      "known_asymmetry_at_declaration": "One SDK implementation is expected to satisfy this by direct observation and the other only by dependency absence. Per the no-exemption rule this is `partial`, to be promoted to direct observation on both sides -- not annotated as satisfied.",
+      "enforcement": {
+        "sdk": "partial",
+        "core": "not_applicable"
+      },
+      "vectors": [],
+      "evidence": [
+        {
+          "file": "node/tests/fullMode.test.ts",
+          "line": 322,
+          "lang": "node",
+          "covers": "direct observation of the outbound surface",
+          "registered": false,
+          "note": "globalThis.fetch replaced with a recording mock; the assertion is calls.length === 0 over the ENTIRE fetch surface, not a URL filter. Genuine direct observation."
+        },
+        {
+          "file": "python/tests/test_lite_zero_egress.py",
+          "line": 85,
+          "lang": "py",
+          "covers": "direct observation of the outbound surface at the socket layer (wrap, shield, doctor.check, AUTO resolution)",
+          "registered": false,
+          "note": "Observes socket.socket.connect and socket.getaddrinfo, which sit underneath every Python egress path — httpx, urllib, raw sockets and DNS alike — so it covers routes nobody enumerated. Deliberately stronger than the Node counterpart, which sees globalThis.fetch only. Carries its own non-vacuity test: the observer makes a real connection attempt and asserts it is recorded, so a broken patch target fails loudly instead of reporting a clean run."
+        }
+      ],
+      "customer_facing": false,
+      "holes": [
+        "The Node observation covers only globalThis.fetch. node:http/node:https, raw net.Socket, DNS resolution and child_process are uninstrumented; a LITE path egressing through any of those leaves the test green.",
+        "Node observes globalThis.fetch only: node:http/node:https, raw net.Socket, DNS and child_process are uninstrumented. Python now observes at the socket layer and covers all of these, so the asymmetry has inverted — Node is the weaker side and matching it downward was refused.",
+        "Python covers wrap(), shield(), doctor.check and AUTO resolution. shielded_stream_tool, mcp_proxy and the CLI still have LITE paths with no egress observation on either side."
+      ],
+      "asymmetry": "Inverted by this sprint. Previously: Node had direct observation for one path, Python had none. Now: Python observes four LITE entry points at the socket layer (all egress routes), Node observes one entry point at the fetch layer only. The remaining work is raising Node, not lowering Python.",
+      "refused_as_evidence": [
+        {
+          "file": "python/tests/test_lite_zero_dep.py",
+          "line": 26,
+          "reason": "Regex over pyproject.toml. Config text; no code executes."
+        },
+        {
+          "file": "python/tests/test_lite_zero_dep.py",
+          "line": 47,
+          "reason": "Subprocess with sys.modules['httpx']=None. Proves absence of CAPABILITY, not absence of BEHAVIOUR. This obligation names that exact form and refuses it. It is the entire Python inventory for INV-3, and none of it counts."
+        },
+        {
+          "file": "python/tests/test_lite_zero_dep.py",
+          "line": 109,
+          "reason": "Retained in the suite as packaging evidence but still refused HERE. It proves a LITE install cannot reach the network; INV-3 asks whether it does. The promotion to direct observation (test_lite_zero_egress.py) is what satisfies the obligation — the indirect proof was not annotated as satisfaction, which is the no-exemption rule applied for the first time."
+        }
+      ]
+    },
+    {
+      "id": "INV-4-same-input-same-decision-across-versions",
+      "title_ja": "同じ入力には、バージョン・構成・時間を跨いで同じ判定が返る",
+      "title_en": "The same input yields the same decision across versions, configurations, and time",
+      "derived_from": [
+        "AO-001",
+        "AO-003"
+      ],
+      "statement": "A given input produces the same decision regardless of which version, which backend, which mode, or which moment produced it.",
+      "why": "This is the invariant the customer is actually buying. The value proposition is not 'it worked'; it is 'you already know it will work next time'. Reproducibility WITHIN one version does not deliver that -- an upgrade that silently changes a decision breaks the promise while every same-version determinism test stays green.",
+      "scope_note": "Explicitly NOT same-version reproducibility. Same-version reproducibility is a necessary component and is expected to have inventory already; attaching that inventory here as satisfaction would be the induction error this suite exists to prevent.",
+      "required_artifact": "A golden snapshot: a committed, versioned input-to-decision correspondence carried ACROSS releases, with any change to an existing entry being a deliberate, reviewed, semver-visible act rather than a test update.",
+      "obligations": {
+        "sdk": "The golden snapshot is replayed against the current implementation; any divergence from a previously released decision fails CI.",
+        "core": "Same, for Core decisions."
+      },
+      "enforcement": {
+        "sdk": "none",
+        "core": "none"
+      },
+      "inventory_expected_at_declaration": "zero for the cross-version property",
+      "vectors": [],
+      "evidence": [
+        {
+          "file": "python/tests/test_golden_decisions.py",
+          "line": 60,
+          "lang": "py",
+          "covers": "replay of 15 recorded decisions (wrap + doctor.check) against the shipped implementation",
+          "registered": true,
+          "note": "Registered in runners.v0.json, so the runner is machine-checked to call the shipped functions rather than restate them."
+        },
+        {
+          "file": "node/tests/goldenDecisions.test.ts",
+          "line": 73,
+          "lang": "node",
+          "covers": "replay of the same recorded wrap() decisions against the shipped Node implementation",
+          "registered": true
+        }
+      ],
+      "customer_facing": false,
+      "holes": [
+        "PROVES NOTHING YET, and this is the honest state rather than an omission: the values were recorded from the current build (0.9.3), so replaying them against the current build is circular. The property becomes real at the first release after 0.9.3 that replays the file unchanged.",
+        "Nothing mechanically prevents editing an `expected` value in the same commit as a behaviour change. Detecting that needs a base-branch diff in CI, which is not implemented. What IS enforced is that recorded values must match the shipped functions, so a silent behaviour change fails loudly and forces a deliberate edit.",
+        "Only wrap() and doctor.check are snapshotted. shield(), the adapters, receipt emission and FULL-mode decisions have no golden entries, so a cross-version change in any of those is invisible.",
+        "The Node runner replays the wrap entries only — doctor.check has no Node counterpart in the snapshot, so a Node-side boundary-decision drift would not be caught."
+      ],
+      "refused_as_evidence": [
+        {
+          "file": "conformance/filter_parity.v0.json",
+          "line": 1,
+          "reason": "Attaching it would be the induction error the preamble forbids: same-version cross-language parity is a different property."
+        }
+      ],
+      "asymmetry": "The snapshot is shared, but Python replays both surfaces (wrap + doctor.check) and Node replays wrap only.",
+      "enforcement_note": "Evidence is attached and machine-checked, yet enforcement stays `none` ON PURPOSE. The invariant is about behaviour ACROSS versions; the snapshot was recorded from the current build, so today's replay is circular and evidences nothing about the property as stated. Moving this to `partial` because tests exist would be the induction error this file was built to prevent, one level up: mistaking the existence of a mechanism for the existence of the guarantee. It becomes `partial` at the first release after 0.9.3 that replays the snapshot unchanged."
+    },
+    {
+      "id": "INV-5-decisions-independently-verifiable",
+      "title_ja": "出した判定は、後から独立に検証できる",
+      "title_en": "Every decision issued can later be verified independently",
+      "derived_from": [
+        "AO-003"
+      ],
+      "statement": "Any decision the product issues carries evidence sufficient for a third party to verify it later without the issuer's cooperation. A decision that cannot be verified is not issued.",
+      "why": "Tamper-evidence is the audit claim. If verification requires trusting the issuer, the audit surface is decorative.",
+      "obligations": {
+        "sdk": "Receipts verify under the documented key-sharing model without contacting the issuer; chain membership is provable; missing evidence produces a refusal (see INV-2) rather than a fabricated receipt.",
+        "core": "Issued decisions carry the evidence the SDK-side verifier requires."
+      },
+      "enforcement": {
+        "sdk": "partial",
+        "core": "none"
+      },
+      "vectors": [],
+      "evidence": [
+        {
+          "file": "python/tests/test_receipt_verify.py",
+          "line": 43,
+          "lang": "py",
+          "covers": "keyless structural verification + tamper detection",
+          "registered": false
+        },
+        {
+          "file": "node/tests/receiptVerify.test.ts",
+          "line": 44,
+          "lang": "node",
+          "covers": "keyless structural verification + tamper detection",
+          "registered": false
+        },
+        {
+          "file": "python/tests/test_core_verified_receipt.py",
+          "line": 33,
+          "lang": "py",
+          "covers": "no fabrication on missing evidence",
+          "registered": false
+        },
+        {
+          "file": "node/tests/coreVerifiedReceipt.test.ts",
+          "line": 119,
+          "lang": "node",
+          "covers": "no fabrication on missing evidence",
+          "registered": false
+        }
+      ],
+      "customer_facing": false,
+      "holes": [
+        "NO KEY-BASED VERIFICATION ANYWHERE -- the largest gap in this invariant. The obligation says receipts must verify under the documented key-sharing model. Both verifiers are keyless-structural: they recompute dag_root from the receipt's own fields. A receipt constructed entirely inside a test verifies clean, so a wholly fabricated but self-consistent receipt passes. Nothing binds a receipt to an issuer key.",
+        "Chain membership is not provable without the issuer. No local inclusion proof (Merkle path / signed checkpoint) exists on either side.",
+        "'A decision that cannot be verified is not issued' is untested, and the tested behaviour points the other way: a decision IS issued with core_verified=false when there is no evidence. Whether that satisfies or contradicts the statement needs an explicit ruling."
+      ],
+      "refused_as_evidence": [
+        {
+          "file": "python/tests/test_audit_inclusion_proof.py",
+          "line": 128,
+          "reason": "Verification is performed by asking the ISSUER (GET /audit/verify) and comparing against a high-water mark the issuer itself supplied -- verification WITH the issuer's cooperation, the opposite of what this invariant asks. Valuable for AO-003; not satisfaction here."
+        },
+        {
+          "file": "python/tests/test_ots_verify_external.py",
+          "line": 19,
+          "reason": "Asserts only that a shell script exists, is executable, and exits non-zero on a missing file. No timestamp is verified."
+        }
+      ]
+    },
+    {
+      "id": "INV-6-no-secrets-on-the-surface",
+      "title_ja": "秘密は SDK の面に載らない",
+      "title_en": "Secrets never rest on the SDK surface",
+      "derived_from": [
+        "AO-006"
+      ],
+      "statement": "Secret material does not appear on any surface the SDK exposes, reads broadly, or emits.",
+      "why": "Secrets hygiene fails by accumulation, not by a single dramatic mistake. The invariant has to constrain the shape of the surface, not the intent of each access.",
+      "surfaces_enumerated": [
+        "environment variable read surface (prefixed reads only; no bulk or indirect enumeration)",
+        "source constants",
+        "logs, diagnostics, metrics",
+        "exception payloads",
+        "outbound request payloads"
+      ],
+      "obligations": {
+        "sdk": "Each surface above is machine-checked, and the check asserts its own non-vacuity so that a scan matching nothing fails rather than passes.",
+        "core": "not applicable to this suite; Core secrets hygiene is enforced in the Core boundary suite."
+      },
+      "not_applicable_reason": {
+        "core": "Scoped out of this file deliberately; not a claim that Core is exempt."
+      },
+      "enforcement": {
+        "sdk": "partial",
+        "core": "not_applicable"
+      },
+      "vectors": [],
+      "evidence": [
+        {
+          "file": "python/tests/adversarial/test_redteam_S024_env_surface.py",
+          "line": 220,
+          "lang": "py",
+          "covers": "env read surface",
+          "registered": false,
+          "note": "AST-based, resolves import and assignment aliases, walks the whole src tree, and asserts its own non-vacuity -- which this obligation explicitly requires."
+        },
+        {
+          "file": "node/tests/envSurfaceHygieneS024.test.ts",
+          "line": 231,
+          "lang": "node",
+          "covers": "env read surface",
+          "registered": false,
+          "note": "The only one of the five surfaces that is genuinely bilateral AND non-vacuous."
+        },
+        {
+          "file": "python/tests/test_conversion_diagnostic_S018.py",
+          "line": 79,
+          "lang": "py",
+          "covers": "logs/diagnostics + exception payloads",
+          "registered": false
+        },
+        {
+          "file": "node/tests/trace.test.ts",
+          "line": 26,
+          "lang": "node",
+          "covers": "partial: input validation, not surface observation",
+          "registered": false
+        }
+      ],
+      "customer_facing": false,
+      "holes": [
+        "OUTBOUND REQUEST PAYLOADS: zero coverage in both languages. No test asserts a secret is absent from an outbound request BODY. One of the five enumerated surfaces, entirely empty.",
+        "Metrics surface untested for secret-absence in both languages.",
+        "Source constants are covered only by a check that fails this invariant's own non-vacuity requirement (see refused_as_evidence)."
+      ],
+      "asymmetry": "Node has no exception-payload test, no log/diagnostic secret test, and no source-constant scan. Python has no Bearer-shape trace-id rejection.",
+      "refused_as_evidence": [
+        {
+          "file": "python/tests/test_contract_gate.py",
+          "line": 96,
+          "reason": "Reads exactly ONE file, applies TWO regexes, asserts the offender list is empty, with NO non-vacuity assertion. This obligation requires the opposite in so many words: the check must assert its own non-vacuity so a scan matching nothing fails rather than passes. A typo in either regex leaves it green forever."
+        },
+        {
+          "file": "python/tests/test_clear_sensitive.py",
+          "line": 13,
+          "reason": "Unit tests on a bytearray-zeroing helper. Memory hygiene, not a surface assertion."
+        }
+      ]
+    },
+    {
+      "id": "INV-7-no-irreversible-destruction-from-a-single-trigger",
+      "title_ja": "不可逆な破壊は単一トリガでは起きない",
+      "title_en": "Irreversible destruction never follows from a single trigger",
+      "derived_from": [
+        "AO-004",
+        "AO-005"
+      ],
+      "incident_origin": "D8 -- SecureWipe misfire. Default policy carried auto_wipe_on_violation = true, so a host-fingerprint change alone reached irreversible SecureWipe. Two actual incidents. A technician swapping a PC, or a VM migration, is a sufficient trigger.",
+      "statement": "No single condition, and no single call, causes an irreversible transition (Wiped, Destroyed). Irreversible destruction requires explicit opt-in.",
+      "why": "This is the only invariant in the suite with a demonstrated failure history, and the only one with zero inventory. Every other entry is likely already upheld and merely needs declaring; this one has to be built. A suite that omits it declares invariants while remaining unable to prevent the incident that already happened -- twice.",
+      "obligations": {
+        "sdk": "No call the SDK can emit -- across its entire shipped surface, in any single invocation -- reaches an irreversible Core-side transition. Verified by generating the call set from the SDK's shipped surface and exercising it against the Core contract.\n\nDELIBERATELY NOT written as 'the SDK contains no destructive operations'. The SDK is a consumer surface, so the question is what it can CAUSE, not what it CONTAINS.\n\nA first draft of this entry justified that wording by claiming the containment formulation would pass vacuously here, 'since the SDK holds no destructive calls at all'. That claim was FALSE, and the way it was reached is instructive: the check grepped for local filesystem destruction (os.remove, rmtree, unlink, rmSync) and found none. It never asked what the SDK could cause remotely -- which is the entire point of the invariant. The containment formulation would not have passed vacuously; it would have passed INCORRECTLY, certifying a shipped destructive surface as absent.\n\nWhat is actually shipped: python/src/aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/destroy_capsule.py, whose own docstring reads 'Irreversibly destroy a capsule', reaching POST /capsules/{id}/destroy. Siblings: escape_capsule, recall_capsule_request, recall_capsule_confirm, restore_capsule. python/pyproject.toml packages = [\"src/aegis_trust\", \"src/aegis\"], so the whole _generated subtree ships in the wheel and is importable from an installed aegis-trust. It is not re-exported from __init__.py or client.py, so it is not top-level public API -- but this obligation is written against reachable effect, and one direct call from the shipped package is one call reaching an irreversible transition. There is no opt-in gate, no confirmation step, and no test.\n\nAsymmetry: node/src has no destroy or wipe surface at all. With respect to this invariant the two SDKs are not currently the same product, and no test on either side would notice.",
+        "core": "No single condition reaches Wiped or Destroyed. Destruction is explicit opt-in, not a default. Recovery procedure is documented for the cold-backup envelope."
+      },
+      "enforcement": {
+        "sdk": "none",
+        "core": "none"
+      },
+      "inventory_at_declaration": "zero on both sides",
+      "core_enforcement_route": "Core-side enforcement is a Done condition of the existing D8 containment task, not a separate sprint: that task is already priority-1, unconditional-immediate, and time-boxed to the capsule migration, and a second schedule would only slow it. Marginal cost is approximately zero, since proving the containment correct requires this test regardless.",
+      "vectors": [],
+      "evidence": [],
+      "customer_facing": false,
+      "holes": [
+        "Zero inventory on both sides. Searching both test trees for wipe, destroy, irreversible, destruct and capsule returns only a comment about buffer zeroing and the word 'destructured'.",
+        "THE SDK SHIPS AN IRREVERSIBLE-DESTRUCTION CALL. python/src/aegis_trust/_generated/aegis_gateway_rest_api_client/api/capsules/destroy_capsule.py reaches POST /capsules/{id}/destroy; its own docstring reads 'Irreversibly destroy a capsule'. Siblings: escape_capsule, recall_capsule_request, recall_capsule_confirm, restore_capsule. pyproject.toml packages = [src/aegis_trust, src/aegis] ships the whole _generated subtree in the wheel, importable from an installed aegis-trust. Not re-exported from __init__.py or client.py, so not top-level public API -- but this obligation is written against reachable effect, and one direct call from the shipped package is one call reaching an irreversible transition. No opt-in gate, no confirmation step, no test.",
+        "No generated call-set from the SDK's shipped surface exists, so the obligation's stated verification method has no machinery at all.",
+        "The Core-side obligation has no surface in this repository and no test here."
+      ],
+      "asymmetry": "Structural and severe. node/src has no destroy or wipe surface at all and no generated gateway client. With respect to this invariant the two SDKs are not the same product, and no test on either side would notice."
+    }
+  ],
+  "evidence_attached_at": "2026-07-19",
+  "evidence_attachment_note": "Evidence attached AFTER declaration, per the deductive order. Entries marked registered:false satisfy criterion 1 (has_evidence) but NOT criterion 2 (evidence_reaches_shipped_code): only conformance runners listed in runners.v0.json are machine-checked for that, and only two corpora are registered today. Criterion 2 therefore caps nearly every entry at 'partial' no matter how much inventory attaches, and criterion 3 (all configurations) caps everything until a backend registry exists. Zero entries are customer_facing, and that is the honest state, not a formatting placeholder. `refused_as_evidence` is as load-bearing as `evidence`: it records tests that were considered and REJECTED with the reason, which is where 'we have a test for that' stops being true."
+}

@@ -27,7 +27,7 @@ import pytest
 from aegis_trust import shield
 from aegis_trust._constants import AUDIT_SCHEMA_VERSION
 from aegis_trust.client import AegisClient
-from aegis_trust.history import HistoryStore, _payload_hash, reset_store
+from aegis_trust.history import HistoryStore, reset_store
 from aegis_trust.shield import reset
 from aegis_trust.types import IngestEntry
 
@@ -189,22 +189,9 @@ def test_legacy_db_without_schema_version_column_migrates_to_1(tmp_db):
 # ── idempotency hash invariance / parity (H-2 / D-D) ─────────
 
 
-def test_payload_hash_excludes_schema_version_byte_parity():
-    """Idempotency hash is unchanged by schema_version (cross-lang byte anchor).
-
-    node/tests/schemaVersion.test.ts byte-anchors the same digest over the
-    identical canonical form (its "byte-anchors the canonical idempotency
-    digest" test), so both SDKs pin this exact value. The hash takes no version
-    parameter — adding schema_version must never change it or break py<->node
-    parity.
-    """
-    expected = "4578b3e2eaa20d48e43ab7bd13d0c03b163c8f463b674ce1551a01ba3a4a06e9"
-    got = _payload_hash(
-        function="getUser",
-        purpose="p",
-        scope=["a", "b"],
-        deny_fields=["y", "z"],
-        blocked_fields=["m", "n"],
-        mode="lite",
-    )
-    assert got == expected
+# The cross-language byte anchor moved to the shared corpus
+# (conformance/canonical_digest.v0.json), run by both SDKs against their shipped
+# hash functions — see test_canonical_digest_corpus.py. It previously lived here
+# as a string literal duplicated in the Node suite, with nothing forcing the two
+# copies to agree. Superseded, not dropped: the corpus covers this exact input as
+# `anchor-sorted-input` plus six further vectors.

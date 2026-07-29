@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -142,23 +141,12 @@ describe("idempotency hash invariance (H-2 / D-D)", () => {
     expect(rows[0]!.schemaVersion).toBe(1);
   });
 
-  it("byte-anchors the canonical idempotency digest (py<->node parity)", () => {
-    // Mirrors python test_payload_hash_excludes_schema_version_byte_parity. The
-    // SDK's payloadHash is module-private; this re-derives its canonical form
-    // (function, purpose, sorted scope/denyFields/blockedFields, mode — no
-    // schema_version) and asserts the exact digit the Python anchor asserts.
-    // Pins cross-language byte parity and that schema_version is not in the hash.
-    const canonical = JSON.stringify([
-      "getUser",
-      "p",
-      ["a", "b"],
-      ["y", "z"],
-      ["m", "n"],
-      "lite",
-    ]);
-    const digest = createHash("sha256").update(canonical).digest("hex");
-    expect(digest).toBe(
-      "4578b3e2eaa20d48e43ab7bd13d0c03b163c8f463b674ce1551a01ba3a4a06e9",
-    );
-  });
+  // The byte anchor for the canonical digest lives in the shared corpus
+  // (conformance/canonical_digest.v0.json), exercised by both SDKs against their
+  // shipped hash functions — see canonicalDigestCorpus.test.ts. The test that
+  // stood here re-derived the canonical form inline and hashed its own
+  // reconstruction, so it asserted only that SHA-256 is deterministic and would
+  // have stayed green if the shipped payloadHash drifted. It is superseded, not
+  // dropped: the corpus covers that exact input as `anchor-sorted-input`, plus
+  // six further vectors, and now reaches the real function.
 });
