@@ -52,8 +52,8 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("AEGIS_AGENT_ID", raising=False)
 
 
-def _client(handler) -> AegisClient:
-    c = AegisClient(base_url="https://localhost:8443/api/v1", verify_ssl=False)
+def _client(handler, base_url: str = "https://localhost:8443/api/v1") -> AegisClient:
+    c = AegisClient(base_url=base_url, verify_ssl=False)
     c._httpx = httpx.Client(
         base_url=c._base_url,
         transport=httpx.MockTransport(handler),
@@ -210,6 +210,35 @@ def test_explicit_none_opt_out_is_still_honoured_in_a_granted_window():
         assert grant is not None
         c.check_boundary("customer_support", ["name"], capability=None)
     assert "capability" not in _boundary_body(calls)
+
+
+def test_ambient_token_does_not_attach_to_a_different_client():
+    # The store used to hold a bare bearer string, so any client built inside
+    # the window picked it up — including one pointed at a different base URL.
+    # That ships a capability minted for one boundary to another. Found by
+    # cross-review (codex, 2026-07-29, severity high) on the merged change; the
+    # store now carries the minting origin and the send path refuses mismatches.
+    handler, calls = _recording_handler(
+        {"/capability/mint": _mint_ok, "/check-boundary": _boundary_ok}
+    )
+    minting = _client(handler)
+    other = _client(handler, base_url="https://other.invalid/api/v1")
+    with delegate("child", ["p"], client=minting) as grant:
+        assert grant is not None
+        other.check_boundary("customer_support", ["name"])
+    assert "capability" not in _boundary_body(calls)
+
+
+def test_ambient_token_does_attach_to_the_minting_client():
+    # Non-vacuity for the test above: if binding were always-refuse, the
+    # negative test would pass while auto-attach was dead.
+    handler, calls = _recording_handler(
+        {"/capability/mint": _mint_ok, "/check-boundary": _boundary_ok}
+    )
+    c = _client(handler)
+    with delegate("child", ["p"], client=c):
+        c.check_boundary("customer_support", ["name"])
+    assert "capability" in _boundary_body(calls)
 
 
 def test_explicit_capability_still_works_inside_a_denied_window():

@@ -182,14 +182,18 @@ def test_check_boundary_witness_claims_passed_verbatim():
 def test_check_boundary_synthetic_false_is_an_explicit_claim():
     # `synthetic=False` is SET (an explicit "this is real traffic" claim) and
     # must be sent as false — distinct from omitting the claim entirely.
-    body = AegisClient._check_boundary_body("p", ["name"], synthetic=False)
+    body = AegisClient._check_boundary_body(
+        "p", ["name"], origin="https://localhost:8443/api/v1", synthetic=False
+    )
     assert body["synthetic"] is False
     assert "attribution" not in body
 
 
 def test_check_boundary_body_omits_unset_witness_claims():
     # Body-builder pin: no claims -> no claim keys (byte-identical body).
-    body = AegisClient._check_boundary_body("p", ["name"])
+    body = AegisClient._check_boundary_body(
+        "p", ["name"], origin="https://localhost:8443/api/v1"
+    )
     assert "attribution" not in body
     assert "synthetic" not in body
 

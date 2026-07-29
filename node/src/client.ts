@@ -27,7 +27,11 @@ import {
   AegisIngestError,
   AegisValidationError,
 } from "./errors.js";
-import { currentCapability, delegationDenied } from "./delegationContext.js";
+import {
+  currentCapability,
+  currentCapabilityFor,
+  delegationDenied,
+} from "./delegationContext.js";
 import {
   AEGIS_API_VERSION,
   AEGIS_API_VERSION_HEADER,
@@ -580,7 +584,12 @@ export class AegisClient {
     // dialect — sending `delegation: {capability}` here is refused 422 by the
     // plane (aegis-decide-plane compat.rs decide_flat), precisely so a token
     // in the wrong shape is never silently dropped and answered at full width.
-    const capability = args.capability === undefined ? currentCapability() : args.capability;
+    // Origin-bound read: the ambient token is attached ONLY if this client is
+    // the one it was minted against. A bare bearer read would let a second
+    // client in the same window ship a capability minted for one boundary to
+    // a different base URL (cross-review, codex 2026-07-29, severity high).
+    const capability =
+      args.capability === undefined ? currentCapabilityFor(this._baseUrl) : args.capability;
     if (capability !== null && capability !== undefined) body.capability = capability;
     const resp = await this.req("POST", "/check-boundary", { body });
     // A monolith-gateway deployment refuses a presented capability with 501

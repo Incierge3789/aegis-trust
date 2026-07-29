@@ -206,6 +206,43 @@ describe("checkBoundary — automatic delegation attachment", () => {
     expect(boundary?.body).not.toHaveProperty("capability");
   });
 
+  it("the ambient token does NOT attach to a DIFFERENT client in the window", async () => {
+    // The store used to hold a bare bearer string, so any client constructed
+    // inside the window picked it up — including one pointed at a different
+    // base URL. That ships a capability minted for one boundary to another.
+    // Found by cross-review (codex, 2026-07-29, severity high) on the merged
+    // change; the store now carries the minting origin and the send path
+    // refuses a mismatch locally.
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/check-boundary": boundaryOk,
+    });
+    const minting = client();
+    const other = new AegisClient({ baseUrl: "https://other.invalid/api/v1", verifySsl: false });
+    await delegate({ forAgent: "child", purposes: ["p"], client: minting }, async (grant) => {
+      expect(grant).not.toBeNull();
+      await other.checkBoundary({ purpose: "customer_support", scope: ["name"] });
+    });
+    const boundary = calls.find((c) => c.path.endsWith("/check-boundary"));
+    expect(boundary).toBeDefined();
+    expect(boundary?.body).not.toHaveProperty("capability");
+  });
+
+  it("the ambient token DOES attach to the minting client", async () => {
+    // Non-vacuity for the test above: if binding were simply always-refuse,
+    // the negative test would pass while auto-attach was dead.
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/check-boundary": boundaryOk,
+    });
+    const c = client();
+    await delegate({ forAgent: "child", purposes: ["p"], client: c }, async () => {
+      await c.checkBoundary({ purpose: "customer_support", scope: ["name"] });
+    });
+    const boundary = calls.find((c2) => c2.path.endsWith("/check-boundary"));
+    expect(boundary?.body).toHaveProperty("capability");
+  });
+
   it("an EXPLICIT capability still works inside a denied window", async () => {
     // The refusal is about the ambient path (nothing to attach). A caller
     // carrying a token across a process boundary by hand is not guessing.

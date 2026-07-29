@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 
 from aegis_trust._delegation_context import (
     _DELEGATION_DENIED,
+    _Grant,
     _capability_var,
     _delegation_denied,
     _DelegationDenied,
@@ -363,7 +364,7 @@ def delegate(
                 ttl_secs=ttl_secs,
                 parent_capability=current_capability(),
             )
-            token = grant.capability
+            token = _Grant(grant.capability, client._base_url)
         except Exception:
             # Mint refused or unreachable. The exception detail is withheld
             # (fixed strings only — house diagnostic discipline).

@@ -21,12 +21,63 @@ export const DELEGATION_DENIED: unique symbol = Symbol("aegis.delegation.denied"
 // attached capability; DELEGATION_DENIED = a denied window; no store = no
 // window. AsyncLocalStorage propagates across awaits and into tasks spawned
 // inside the scope — exactly the spawn-boundary semantics delegate() wants.
-export const capabilityStorage = new AsyncLocalStorage<string | typeof DELEGATION_DENIED>();
+export const capabilityStorage = new AsyncLocalStorage<
+  string | DelegationGrant | typeof DELEGATION_DENIED
+>();
 
-/** The delegation capability attached to the current context (or null). */
+/**
+ * A minted capability together with the origin it was minted against.
+ *
+ * The token alone is a bearer credential: whoever reads the store can send it
+ * anywhere. Cross-review (codex, 2026-07-29, severity high) showed the
+ * consequence — a SECOND `AegisClient` constructed inside the window, pointed
+ * at a different base URL, would have the token auto-attached and would ship a
+ * capability minted for one boundary to a different one. `delegate()` knows
+ * which client minted the grant, so the store carries that origin and the send
+ * path refuses a mismatch locally.
+ *
+ * `origin` is the minting client's normalized base URL. Base URL is the
+ * comparable identity that matters here: it is exactly what decides where the
+ * token is sent. Object identity would also refuse a legitimately
+ * re-constructed client pointed at the same boundary.
+ */
+export interface DelegationGrant {
+  readonly token: string;
+  readonly origin: string;
+}
+
+function grantOf(v: unknown): DelegationGrant | null {
+  if (typeof v === "string") return { token: v, origin: "" };
+  if (v && typeof v === "object" && typeof (v as DelegationGrant).token === "string") {
+    return v as DelegationGrant;
+  }
+  return null;
+}
+
+/**
+ * The delegation capability attached to the current context (or null).
+ *
+ * INTROSPECTION ONLY — this ignores origin binding. Anything that puts the
+ * token on the wire must use {@link currentCapabilityFor} instead, so a token
+ * minted for one boundary cannot be shipped to another. Kept unchanged because
+ * it is re-exported as public API.
+ */
 export function currentCapability(): string | null {
-  const v = capabilityStorage.getStore();
-  return typeof v === "string" ? v : null;
+  return grantOf(capabilityStorage.getStore())?.token ?? null;
+}
+
+/**
+ * The capability attached to the current context, but ONLY if it was minted
+ * against `origin`. Returns null on mismatch — fail-closed: an unbound token is
+ * not attached rather than attached hopefully.
+ *
+ * A store entry with an empty origin is a legacy bare-string entry; it is
+ * treated as unbound and therefore never auto-attached to a specific origin.
+ */
+export function currentCapabilityFor(origin: string): string | null {
+  const g = grantOf(capabilityStorage.getStore());
+  if (!g || !g.origin) return null;
+  return g.origin === origin ? g.token : null;
 }
 
 /** True inside a delegate() window whose mint failed. */
