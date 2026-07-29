@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AegisClient, getModuleClient, resetModuleClient } from "../src/client.js";
 import { AegisHttpError, AegisValidationError } from "../src/errors.js";
-import { delegate, guardTool } from "../src/aiNative.js";
+import { delegate, guardTool, streamSession } from "../src/aiNative.js";
 
 const origFetch = globalThis.fetch;
 afterEach(() => {
@@ -307,6 +307,42 @@ describe("checkBoundary — automatic delegation attachment", () => {
     expect(mints.length).toBe(3);
     expect(mints[1]?.body).not.toHaveProperty("parent_capability"); // other client
     expect(mints[2]?.body).toHaveProperty("parent_capability"); // minting client
+  });
+
+  it("streamSession does NOT send the ambient token through a different client", async () => {
+    // The last shared-helper gap: streamSession had a positive attach pin but
+    // no origin-mismatch negative, so a regression there would fail nothing
+    // (cross-review, cursor 2026-07-29, final [P2]).
+    const calls = mockRoutes({
+      "/capability/mint": mintOk,
+      "/stream/open": () =>
+        new Response(JSON.stringify({ decision: { outcome: "PROTECTED" }, stream_id: "st-1" }), {
+          status: 200,
+        }),
+      "/stream/heartbeat": () => new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
+      "/stream/close": () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    });
+    const minting = client();
+    const other = new AegisClient({ baseUrl: "https://other.invalid/api/v1", verifySsl: false });
+    await delegate({ forAgent: "child", purposes: ["p"], client: minting }, async () => {
+      await streamSession({ envelope: "e" }, async () => 1, {
+        heartbeatIntervalMs: 10_000,
+        client: other,
+      }).catch(() => null);
+      await streamSession({ envelope: "e" }, async () => 1, {
+        heartbeatIntervalMs: 10_000,
+        client: minting,
+      }).catch(() => null);
+    });
+    const opens = calls.filter((c) => c.path.endsWith("/stream/open"));
+    expect(opens.length).toBe(2);
+    // Stream uses the ENVELOPE dialect (`delegation: {capability}`), not the
+    // flat top-level `capability` that check-boundary takes. Asserting the
+    // wrong shape here would have made this pin vacuous.
+    const env0 = opens[0]?.body.envelope as Record<string, unknown> | undefined;
+    const env1 = opens[1]?.body.envelope as Record<string, unknown> | undefined;
+    expect(env0?.delegation).toBeUndefined(); // other client: nothing attached
+    expect(env1?.delegation).toMatchObject({ capability: expect.any(String) });
   });
 
   it("an EXPLICIT capability still works inside a denied window", async () => {
