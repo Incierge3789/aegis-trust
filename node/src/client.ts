@@ -27,6 +27,7 @@ import {
   AegisIngestError,
   AegisValidationError,
 } from "./errors.js";
+import { currentCapability, delegationDenied } from "./delegationContext.js";
 import {
   AEGIS_API_VERSION,
   AEGIS_API_VERSION_HEADER,
@@ -256,6 +257,12 @@ export interface CheckBoundaryArgs {
   // Neither ever changes the decision.
   readonly attribution?: AttributionClaim;
   readonly synthetic?: boolean;
+  // AI-native v1 delegation (A-1): the capability token this call was
+  // narrowed by. Normally NOT set by hand — an enclosing `delegate()` window
+  // attaches its token automatically (see checkBoundary). Set it explicitly
+  // only when carrying a token across a process boundary the async context
+  // cannot cross. `null` opts out of the automatic attachment for one call.
+  readonly capability?: string | null;
 }
 
 // T-SDK-FULL-GATE-01: reason a /check-access authorization did not grant.
@@ -530,7 +537,71 @@ export class AegisClient {
     // before relying on `synthetic` for billing exclusion.
     if (args.attribution !== undefined) body.attribution = args.attribution;
     if (args.synthetic !== undefined) body.synthetic = args.synthetic;
+    // A-1 delegation. A denied window refuses HERE, before the wire: the mint
+    // failed, so there is no token to narrow with, and asking un-narrowed
+    // would answer at the PARENT's full width. `allowed_fields` on that answer
+    // is what Doctor hands the agent as authorization (doctor/checkWithCore
+    // mapView → BoundaryDecision.allowedData), so a full-width answer inside a
+    // denied window is a widening even though this method only asks a
+    // question. Same local fail-closed as guardTool / streamSession.
+    //
+    // The condition is "no concrete token supplied", NOT "argument unset".
+    // Scoping it to `undefined` left the explicit opt-out (`capability: null`)
+    // as a way to walk straight past the refusal and ask at parent width —
+    // the same widening this block exists to stop, reachable by one keystroke.
+    // Opting out of attachment is meaningful in a GRANTED window (ask this one
+    // question unnarrowed on purpose); inside a DENIED window it is exactly
+    // the thing being denied. Only a caller who brings their own token may
+    // proceed. Found by cross-review (codex + cursor, independently, 2026-07-29)
+    // — the hole adjacent to the hole the previous round closed.
+    // `""` counts as no token: it cannot narrow anything, so letting it through
+    // would reopen the same door with an extra keystroke.
+    if (!(typeof args.capability === "string" && args.capability !== "") && delegationDenied()) {
+      throw new AegisValidationError({
+        code: "aegis.boundary.delegationDenied",
+        remediation:
+          "The enclosing delegate() window is denied — its capability mint "
+          + "failed, so no narrowed decision can be obtained. Fix the "
+          + "delegation (narrowing, depth, revoked ancestor) or ask outside "
+          + "the window. Nothing was sent; the answer would have been at the "
+          + "parent's full width.",
+        docs_url: aegisDocsUrl("aegis.boundary.delegationDenied"),
+        message:
+          "check-boundary: the enclosing delegation window is denied — "
+          + "not asked (fail-closed)",
+      });
+    }
+    // The token comes from the enclosing delegate() window by default: a
+    // boundary the caller must REMEMBER to carry is fail-open by forgetting,
+    // the same reasoning that put guardTool in the call path. An explicit
+    // `capability` wins; explicit `null` opts out for one call.
+    //
+    // Wire shape: TOP-LEVEL `capability`. This flat face is not the envelope
+    // dialect — sending `delegation: {capability}` here is refused 422 by the
+    // plane (aegis-decide-plane compat.rs decide_flat), precisely so a token
+    // in the wrong shape is never silently dropped and answered at full width.
+    const capability = args.capability === undefined ? currentCapability() : args.capability;
+    if (capability !== null && capability !== undefined) body.capability = capability;
     const resp = await this.req("POST", "/check-boundary", { body });
+    // A monolith-gateway deployment refuses a presented capability with 501
+    // rather than deciding at full width with the token unread (aegis_gateway
+    // rest.rs check_boundary, "A-1 delegation refusal"). That is the correct
+    // fail-closed answer, but a generic non-2xx makes it read as an outage —
+    // name the cause so the operator fixes the deployment, not the code.
+    if (resp.status === 501 && capability !== null && capability !== undefined) {
+      throw new AegisHttpError({
+        code: "aegis.boundary.delegationUnsupported",
+        remediation:
+          "This deployment does not evaluate delegated capabilities: only the "
+          + "decide-plane serves check-boundary with A-1 delegation. Front the "
+          + "deployment with the plane. Do NOT strip the capability to get a "
+          + "200 — that trades a refusal for a full-width answer the "
+          + "delegation was supposed to narrow. Fix the deployment.",
+        docs_url: aegisDocsUrl("aegis.boundary.delegationUnsupported"),
+        message: "check-boundary HTTP 501 — deployment is not plane-fronted",
+        status: 501,
+      });
+    }
     if (!resp.ok) throw httpError("check-boundary", resp.status);
     return (await resp.json()) as BoundaryDecisionView;
   }

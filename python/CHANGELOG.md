@@ -2,6 +2,66 @@
 
 ## [Unreleased]
 
+### Added — `check_boundary` carries the A-1 delegation capability (npm parity)
+- `check_boundary` / `acheck_boundary` accept `capability` (top-level wire
+  field `capability`), and — the load-bearing half — it defaults to the token
+  attached by the enclosing `delegate()` window. Existing call sites are
+  unchanged and start carrying the proof automatically: a capability the
+  developer must REMEMBER to pass is fail-open by omission, the same
+  reasoning that put `guard_tool` in the call path. An explicit value wins;
+  explicit `None` opts out for one call (the `_UNSET` sentinel mirrors Node's
+  `undefined` vs `null`).
+- The delegation store moved to `aegis_trust._delegation_context` so
+  `client.py` can read it without closing an import cycle with `ai_native`.
+  `current_capability` is still importable from `aegis_trust` and
+  `aegis_trust.ai_native` — the public API surface is unchanged. The new
+  module is stdlib-only, so LITE-only installs stay zero-dep.
+- A `delegate()` window whose mint FAILED now refuses `check_boundary`
+  locally (`aegis.boundary.delegationDenied`, `AegisValidationError`) instead
+  of asking un-narrowed. Cross-model review caught this: `current_capability()`
+  flattens the denied sentinel to `None`, so the query would have been
+  answered at the PARENT's full width — and `allowed_fields` on that answer is
+  exactly what Doctor hands the agent as authorization (`check_with_core` →
+  `BoundaryDecision.allowed_data`). Same local fail-closed as `guard_tool` /
+  `stream_session`. An explicit `capability` still works inside a denied
+  window: a hand-carried token is not a guess.
+- The denied-window refusal now triggers on "no concrete token supplied", not
+  on "argument unset". Scoping it to the `_Unset` sentinel left the explicit
+  opt-out (`capability=None`, and `""`) as a one-keystroke way past the refusal
+  and straight to a parent-width query — the same widening the refusal exists
+  to stop. Opting out is meaningful in a GRANTED window; inside a DENIED one it
+  is precisely the thing being denied. An explicit `None` outside denial still
+  opts out, unchanged. Found by a second cross-review round (codex and cursor
+  independently, on the same lines), which also named the test gap: opt-out had
+  only ever been exercised after a SUCCESSFUL mint, and denial only with unset
+  or an explicit string, never the combination. Node twin: same fix.
+- `acheck_boundary` is now a plain `def` returning a coroutine, not an
+  `async def`. The ambient token is read when you CALL it, not when the
+  coroutine is awaited: `coro = c.acheck_boundary(...)` created inside a
+  `delegate()` window and gathered after the window exits would otherwise read
+  a reset `ContextVar` and ask at full width, silently. Node captures at the
+  call expression; this makes the two SDKs identical. `await
+  c.acheck_boundary(...)` is unchanged for callers.
+- Known boundary (pinned by test, not fixed): a bare `threading.Thread` does
+  not inherit the `ContextVar`, so a call made there goes un-narrowed with no
+  signal. Cross a thread with `contextvars.copy_context()` or pass
+  `capability` explicitly.
+- New error code `aegis.boundary.delegationUnsupported` (`AegisHttpError`,
+  `status=501`): a deployment that cannot evaluate a presented capability
+  refuses rather than deciding at full width. The generic non-2xx envelope
+  read as a transient outage; this one names the deployment. A 501 WITHOUT a
+  presented capability stays `aegis.http.nonOk`.
+- Wire shape is the flat face's top-level `capability`, never the envelope
+  dialect `delegation: {capability}` — the plane refuses that shape with 422
+  precisely so a wrong-shape token is not dropped and answered at full width.
+
+  DEPLOYMENT NOTE: only a decide-plane-fronted Core evaluates A-1 delegation
+  on `/check-boundary`. Against a monolith-gateway build, a call inside a
+  `delegate()` window now fails closed with the coded 501 above. That is the
+  correct answer (the alternative is a silent widening), but it is a
+  behavior change for non-plane-fronted deployments — confirm the serving
+  deployment before relying on delegation here.
+
 ### Added — keyless receipt verifier (`aegis_trust.receipt_verify`, 穴1)
 - `session_dag_root` / `verify_session_receipt_structure` /
   `dangling_prior_receipt_refs` / `compute_lineage_root` /

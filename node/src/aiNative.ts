@@ -25,8 +25,12 @@
 // 2026-07-03, additive-only). Python parity: aegis_trust/ai_native.py —
 // error codes are identical across the two SDKs.
 
-import { AsyncLocalStorage } from "node:async_hooks";
-
+import {
+  DELEGATION_DENIED,
+  capabilityStorage,
+  currentCapability,
+  delegationDenied,
+} from "./delegationContext.js";
 import { AegisClient, getModuleClient } from "./client.js";
 import type { CapabilityGrant } from "./client.js";
 import {
@@ -36,26 +40,11 @@ import {
   aegisDocsUrl,
 } from "./errors.js";
 
-// Sentinel stored by delegate() when a mint failed: every guarded call
-// inside the window fails closed locally (no gateway round-trip, no
-// un-narrowed execution).
-const DELEGATION_DENIED: unique symbol = Symbol("aegis.delegation.denied");
-
-// The active delegation token for the current async context. `string` = an
-// attached capability; DELEGATION_DENIED = a denied window; no store = no
-// window. AsyncLocalStorage propagates across awaits and into tasks spawned
-// inside the scope — exactly the spawn-boundary semantics delegate() wants.
-const capabilityStorage = new AsyncLocalStorage<string | typeof DELEGATION_DENIED>();
-
-/** The delegation capability attached to the current context (or null). */
-export function currentCapability(): string | null {
-  const v = capabilityStorage.getStore();
-  return typeof v === "string" ? v : null;
-}
-
-function delegationDenied(): boolean {
-  return capabilityStorage.getStore() === DELEGATION_DENIED;
-}
+// The delegation store lives in delegationContext.ts: client.ts must read it
+// too (checkBoundary attaches the token), and this module imports client.ts,
+// so keeping the store here would close an import cycle. `currentCapability`
+// is re-exported to hold the public API surface unchanged.
+export { currentCapability };
 
 /** `owner` param → AEGIS_OWNER → AEGIS_AGENT_ID (the mcp-proxy resolution
  * order). null means unresolvable — the caller denies. */

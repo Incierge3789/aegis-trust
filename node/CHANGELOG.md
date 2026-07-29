@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Added — `checkBoundary` carries the A-1 delegation capability (PyPI parity)
+- `CheckBoundaryArgs.capability` (top-level wire field `capability`), and —
+  the load-bearing half — it defaults to the token attached by the enclosing
+  `delegate()` window. Existing call sites are unchanged and start carrying
+  the proof automatically: a capability the developer must REMEMBER to pass
+  is fail-open by omission, the same reasoning that put `guardTool` in the
+  call path. Explicit `capability` wins; explicit `null` opts out for one call.
+- The delegation store moved to `src/delegationContext.ts` so `client.ts` can
+  read it without closing an import cycle with `aiNative.ts`.
+  `currentCapability` is re-exported — the public API surface is unchanged.
+- A `delegate()` window whose mint FAILED now refuses `checkBoundary`
+  locally (`aegis.boundary.delegationDenied`, `AegisValidationError`) instead
+  of asking un-narrowed. Cross-model review caught this: `currentCapability()`
+  flattens the denied sentinel to `null`, so the query would have been
+  answered at the PARENT's full width — and `allowed_fields` on that answer is
+  exactly what Doctor hands the agent as authorization (`checkWithCore`
+  `mapView` → `BoundaryDecision.allowedData`). Same local fail-closed as
+  `guardTool` / `streamSession`. An explicit `capability` still works inside a
+  denied window: a hand-carried token is not a guess.
+- The denied-window refusal now triggers on "no concrete token supplied", not
+  on "argument unset". Scoping it to `undefined` left the explicit opt-out
+  (`capability: null`, and `""`) as a one-keystroke way past the refusal and
+  straight to a parent-width query — the same widening the refusal exists to
+  stop. Opting out is meaningful in a GRANTED window; inside a DENIED one it
+  is precisely the thing being denied. An explicit `null` outside denial still
+  opts out, unchanged. Found by a second cross-review round (codex and cursor
+  independently, on the same lines), which also named the test gap: opt-out
+  had only ever been exercised after a SUCCESSFUL mint, and denial only with
+  unset or an explicit string, never the combination.
+- New error code `aegis.boundary.delegationUnsupported` (`AegisHttpError`,
+  `status: 501`): a deployment that cannot evaluate a presented capability
+  refuses rather than deciding at full width. The generic non-2xx envelope
+  read as a transient outage; this one names the deployment. A 501 WITHOUT a
+  presented capability stays `aegis.http.nonOk`.
+- Wire shape is the flat face's top-level `capability`, never the envelope
+  dialect `delegation: {capability}` — the plane refuses that shape with 422
+  precisely so a wrong-shape token is not dropped and answered at full width.
+
+  DEPLOYMENT NOTE: only a decide-plane-fronted Core evaluates A-1 delegation
+  on `/check-boundary`. Against a monolith-gateway build, a call inside a
+  `delegate()` window now fails closed with the coded 501 above. That is the
+  correct answer (the alternative is a silent widening), but it is a
+  behavior change for non-plane-fronted deployments — confirm the serving
+  deployment before relying on delegation here.
+
 ### Added — keyless receipt verifier (`src/receiptVerify.ts`, PyPI parity)
 - `sessionDagRoot` / `verifySessionReceiptStructure` /
   `danglingPriorReceiptRefs` / `computeLineageRoot` / `verifyLineageRoot` /
