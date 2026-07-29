@@ -96,7 +96,7 @@ dev = [
     # new rules get triaged deliberately instead of landing as a surprise gate
     # failure. Every other gate input in this repo is pinned (actions to 40-char
     # SHAs); this is the same discipline applied to the linter.
-    "ruff==0.15.22",
+    "ruff==0.16.0",
     "mypy>=1.8",
     "pyyaml>=6.0",
     "pip-audit>=2.7",
