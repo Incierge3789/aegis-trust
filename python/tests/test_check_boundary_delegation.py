@@ -219,14 +219,31 @@ def test_delegate_without_an_explicit_client_still_mints(monkeypatch):
     # default-usage window silently became DENIED. Every existing test passed an
     # explicit client, so nothing caught it — found by cross-review (cursor,
     # 2026-07-29). The origin now comes from the RESOLVED client.
+    #
+    # This drives the REAL resolution path (shield._get_client singleton), not a
+    # monkeypatched _resolve_client: a stub resolver would still pass if the
+    # resolution itself were the broken part (cursor's follow-up [P2]).
+    # `import aegis_trust.shield as _shield` binds the FUNCTION: the package
+    # re-exports `shield()`, which shadows the submodule attribute. Reach the
+    # module through sys.modules instead.
+    import sys
+
+    import aegis_trust.shield  # noqa: F401  (ensure it is imported)
+
+    _shield = sys.modules["aegis_trust.shield"]
+
     handler, calls = _recording_handler(
         {"/capability/mint": _mint_ok, "/check-boundary": _boundary_ok}
     )
     c = _client(handler)
-    monkeypatch.setattr("aegis_trust.ai_native._resolve_client", lambda _arg: c)
-    with delegate("child", ["p"]) as grant:
-        assert grant is not None, "default-client window was denied"
-        c.check_boundary("customer_support", ["name"])
+    prev = _shield._client
+    _shield._client = c
+    try:
+        with delegate("child", ["p"]) as grant:
+            assert grant is not None, "default-client window was denied"
+            c.check_boundary("customer_support", ["name"])
+    finally:
+        _shield._client = prev
     assert "capability" in _boundary_body(calls)
 
 

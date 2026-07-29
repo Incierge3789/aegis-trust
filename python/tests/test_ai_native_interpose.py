@@ -50,8 +50,8 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("AEGIS_AGENT_ID", raising=False)
 
 
-def _client(handler) -> AegisClient:
-    c = AegisClient(base_url="https://localhost:8443/api/v1", verify_ssl=False)
+def _client(handler, base_url: str = "https://localhost:8443/api/v1") -> AegisClient:
+    c = AegisClient(base_url=base_url, verify_ssl=False)
     c._httpx = httpx.Client(
         base_url=c._base_url,
         transport=httpx.MockTransport(handler),
@@ -489,6 +489,35 @@ def test_stream_session_attaches_delegation_capability():
             pass
     open_body = next(b for p, b in calls if p.endswith("/stream/open"))
     assert open_body["envelope"]["delegation"]["capability"] == "cap-token-1"
+
+
+def test_stream_session_does_not_attach_through_a_different_client():
+    # Node twin: checkBoundaryDelegation.test.ts "streamSession does NOT send
+    # the ambient token through a different client". The positive above proves
+    # attachment happens; without this negative, a regression that attaches
+    # unconditionally would still be green. Cross-review (cursor, 2026-07-29)
+    # called the parity gap after Node closed it.
+    routes = _stream_routes([{"status": "ok"}])
+    routes["/capability/mint"] = httpx.Response(200, json=GRANT)
+    routes["/capability/revoke"] = httpx.Response(
+        200, json={"ok": True, "revoked": GRANT["id"]}
+    )
+    handler, calls = _recording_handler(routes)
+    minting = _client(handler)
+    # Constructed at a different base URL, not mutated after the fact — the
+    # binding must hold for a client that was never the minting one.
+    other = _client(handler, base_url="https://other.invalid/api/v1")
+    with delegate("a", ["p"], client=minting):
+        with stream_session({"principal": {}}, heartbeat_interval=1.0, client=other):
+            pass
+        with stream_session({"principal": {}}, heartbeat_interval=1.0, client=minting):
+            pass
+    opens = [b for p, b in calls if p.endswith("/stream/open")]
+    assert len(opens) == 2
+    # Negative AND positive in one case: an always-refuse regression would pass
+    # the negative alone, so the pair is what makes this non-vacuous.
+    assert "delegation" not in opens[0]["envelope"]
+    assert opens[1]["envelope"]["delegation"]["capability"] == "cap-token-1"
 
 
 def test_stream_session_validation():
