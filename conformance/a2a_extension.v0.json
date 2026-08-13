@@ -1,0 +1,558 @@
+{
+  "$comment": "A2A extension surface corpus, v0 — negotiation, honesty guard, placeholder guard, metadata placement.\n\nWHY A CORPUS AND NOT TWO TEST FILES.\nThe same expectations written twice, once per language, is the defect this repo\nhas already been bitten by: an edit to one copy leaves the other green and the\ndivergence reaches a user instead of CI. Worse for THIS surface -- two SDKs that\nagree with each other can still both be wrong about the protocol. One corpus,\nboth shipped implementations.\n\nWHAT THE HONESTY VECTORS ARE FOR.\nA banned-substring list is escapable by paraphrase. `aegis_backed_assurance` is\nthe exact paraphrase a reviewer produced when asked to defeat a banned-phrase\nguard, and it is pinned here so the guard cannot regress to substring matching\nand still look covered. The negated sentences are pinned for the opposite\nreason: a guard that rejects its own disclaimer would push authors toward saying\nnothing rather than saying the limit out loud.",
+  "version": "v0",
+  "recorded_against": {
+    "a2a_spec": "a2aproject/A2A@0ef1b02547e959d770ebf3460d058f5c3421641c",
+    "sprint": "S027"
+  },
+  "extension_uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+  "negotiation": [
+    {
+      "id": "absent_header",
+      "header": null,
+      "expect": {
+        "activated": false,
+        "reason": "not_requested",
+        "requested": [],
+        "echo": []
+      },
+      "why": "Extensions are inactive by default. Not an error -- but a NAMED outcome, so a caller can tell 'client did not opt in' from 'nothing to report'."
+    },
+    {
+      "id": "empty_header",
+      "header": "",
+      "expect": {
+        "activated": false,
+        "reason": "not_requested",
+        "requested": [],
+        "echo": []
+      },
+      "why": "An empty header is the same as no header."
+    },
+    {
+      "id": "other_extension_only",
+      "header": "https://example.com/extensions/geolocation/v1",
+      "expect": {
+        "activated": false,
+        "reason": "not_requested",
+        "requested": [
+          "https://example.com/extensions/geolocation/v1"
+        ],
+        "echo": []
+      },
+      "why": "Another extension being requested must not activate this one."
+    },
+    {
+      "id": "requested_alone",
+      "header": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect": {
+        "activated": true,
+        "requested": [
+          "urn:x-aegis-placeholder:a2a:boundary-decision:v0"
+        ],
+        "echo": [
+          "urn:x-aegis-placeholder:a2a:boundary-decision:v0"
+        ]
+      },
+      "why": "The ordinary opt-in."
+    },
+    {
+      "id": "requested_among_others_with_spaces",
+      "header": "https://example.com/extensions/geolocation/v1 ,  urn:x-aegis-placeholder:a2a:boundary-decision:v0 ,https://standards.org/extensions/citations/v1",
+      "expect": {
+        "activated": true,
+        "requested": [
+          "https://example.com/extensions/geolocation/v1",
+          "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+          "https://standards.org/extensions/citations/v1"
+        ],
+        "echo": [
+          "urn:x-aegis-placeholder:a2a:boundary-decision:v0"
+        ]
+      },
+      "why": "Spec 14.2.2: comma-separated list. Whitespace around entries is not significant, and the other requested extensions are preserved in order."
+    },
+    {
+      "id": "duplicate_entries",
+      "header": "urn:x-aegis-placeholder:a2a:boundary-decision:v0,urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect": {
+        "activated": true,
+        "requested": [
+          "urn:x-aegis-placeholder:a2a:boundary-decision:v0"
+        ],
+        "echo": [
+          "urn:x-aegis-placeholder:a2a:boundary-decision:v0"
+        ]
+      },
+      "why": "Duplicates collapse; the echo is never a multiset."
+    },
+    {
+      "id": "case_sensitive_uri",
+      "header": "URN:X-AEGIS-PLACEHOLDER:A2A:BOUNDARY-DECISION:V0",
+      "expect": {
+        "activated": false,
+        "reason": "not_requested",
+        "requested": [
+          "URN:X-AEGIS-PLACEHOLDER:A2A:BOUNDARY-DECISION:V0"
+        ],
+        "echo": []
+      },
+      "why": "Extension identifiers are matched exactly. Case-folding URIs would let a near-miss identifier silently activate a different vocabulary."
+    }
+  ],
+  "honesty": [
+    {
+      "id": "shipped_agent_card_description",
+      "text": "Reports Aegis boundary decisions using existing A2A TaskState values plus a substate in metadata. It is a reporting vocabulary: activating it does not enforce anything and is not proof that anything was enforced. Field names are carried; payload values are not. PRERELEASE: the identifier is a placeholder and is not registered.",
+      "expect_rejected": false,
+      "why": "The shipped description states the limit explicitly. A guard that rejects its own disclaimer would push authors toward silence."
+    },
+    {
+      "id": "aegis_backed_assurance",
+      "text": "Aegis-backed assurance active for this task.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "The exact paraphrase produced when a reviewer was asked to defeat a banned-phrase list. Substring matching does not catch it."
+    },
+    {
+      "id": "enforcement_verified",
+      "text": "Policy enforcement verified by the Aegis boundary.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Affirmative and unqualified."
+    },
+    {
+      "id": "protected_by_aegis",
+      "text": "This agent is protected by Aegis.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "The claim the extension must never make on a counterparty's behalf."
+    },
+    {
+      "id": "bare_value_free",
+      "text": "The receipt is value-free.",
+      "expect_rejected": true,
+      "expect_code": "banned_claim_term",
+      "why": "Field-name sets, reason codes, counts and timings all disclose something. 'value-free' overstates it."
+    },
+    {
+      "id": "negated_enforcement",
+      "text": "Carrying this extension does not mean access was enforced.",
+      "expect_rejected": false,
+      "why": "A negation is the honest form and must stay sayable."
+    },
+    {
+      "id": "unrelated_text",
+      "text": "Returns a list of restaurants near the requested location.",
+      "expect_rejected": false,
+      "why": "No claim, no subject. The guard must not fire on ordinary prose."
+    },
+    {
+      "id": "trailing_negation_does_not_launder",
+      "text": "Aegis assurance active (readers remain unverified).",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Round-1 cursor bypass: an unrelated negation-ish word APPENDED after the claim exempted it under the old any-negation-in-window rule. A negation only counts when it precedes the assurance term in the same sentence segment; 'unverified' is a status word, not a negation, and is no longer on the list at all."
+    },
+    {
+      "id": "borrowed_negation_from_previous_clause",
+      "text": "The extension is not decorative; policy enforcement is verified.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Round-1 codex bypass: 'is not' in the FIRST clause exempted an affirmative claim in the second. Sentence-segment clipping stops the borrow — the claim clause contains no negation of its own."
+    },
+    {
+      "id": "confirms_coverage_paraphrase",
+      "text": "This surface confirms Aegis coverage is in effect.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Round-1 cursor paraphrase outside the old assurance vocabulary. 'confirms', 'coverage' and 'in effect' are assurance words now."
+    },
+    {
+      "id": "structural_claim_still_blocked_by_design",
+      "text": "The policy was verified for syntactic completeness only.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "PINNED CONSERVATIVE BIAS, not an accident (round-1, both vendors flagged it as a false positive): on THIS surface an affirmative 'verified' about a policy is blocked even when the intended meaning is structural. The cost asymmetry is deliberate — a false block costs the producer a rephrase ('structure recomputed', 'schema-checked'); a false pass is enforcement fraud. Consumers derive verification status from deriveVerificationStatus, never from prose."
+    },
+    {
+      "id": "unrelated_negation_same_segment_does_not_launder",
+      "text": "Aegis does not log, policy enforced.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Round-2 codex: a negation about LOGGING must not exempt a claim about ENFORCEMENT just because they share a sentence. Comma is a clause boundary now — the negation and the assurance it negates must share a clause."
+    },
+    {
+      "id": "establishes_gated_paraphrase_caught",
+      "text": "This extension establishes that access was gated.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Round-3 cursor bypass: 'establishes'/'gated' were outside the vocabulary. Added."
+    },
+    {
+      "id": "upholds_paraphrase_caught",
+      "text": "Aegis upholds the access policy for this task.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Round-3 cursor bypass: 'upholds' added."
+    },
+    {
+      "id": "fullwidth_verified_caught",
+      "text": "Policy ｖｅｒｉｆｉｅｄ by the Aegis boundary.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Round-3 cursor P1: the honesty guard now NFKC-normalizes, so a full-width 'verified' folds to ASCII and is caught — parity with the key normalizer."
+    },
+    {
+      "id": "inaccessible_is_not_access_claim",
+      "text": "Records were certified inaccessible.",
+      "expect_rejected": false,
+      "why": "Round-3 cursor P1 (cause corrected): substring matching found the SUBJECT 'access' inside 'inaccessible', so 'certified ... inaccessible' fired with no real subject present. Word-boundary matching fixes it — 'inaccessible' is not the word 'access', and with no genuine subject the assurance word 'certified' does not fire. (A sentence naming a real subject near an affirmative assurance word is still blocked by the pinned conservative bias.)"
+    },
+    {
+      "id": "soc2_compliance_prose_allowed",
+      "text": "Our SOC 2 report confirms coverage of access-control reviews.",
+      "expect_rejected": false,
+      "why": "Round-3 cursor P1 false positive: 'confirms' and 'coverage' were too broad and hit honest compliance prose. Dropped as standalone assurance words; the round-1 case they guarded is still caught by 'in effect'."
+    },
+    {
+      "id": "blocks_access_claim_caught",
+      "text": "Aegis blocks unauthorized access.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Round-3 codex bypass: 'blocks'/'prevents' added. 'Aegis blocks access' is an enforcement claim this extension must never make."
+    },
+    {
+      "id": "policy_establishes_document_format_allowed",
+      "text": "The policy establishes the document format.",
+      "expect_rejected": false,
+      "why": "Round-3 codex false positive: 'establishes' was too generic (dropped). This honest sentence about document format no longer trips; cursor's 'establishes that access was gated' is still caught via 'gated'."
+    },
+    {
+      "id": "establishes_gated_still_caught_via_gated",
+      "text": "This extension establishes that access was gated.",
+      "expect_rejected": true,
+      "expect_code": "enforcement_claim_detected",
+      "why": "Confirms dropping 'establishes' did not reopen cursor's round-3 bypass: 'gated' near 'access'/'extension' still fires."
+    }
+  ],
+  "placeholder": [
+    {
+      "id": "shipped_v0_uri",
+      "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect_placeholder": true,
+      "why": "The shipped identifier is a placeholder and must be detectable as one until an owner registers a real URI."
+    },
+    {
+      "id": "hypothetical_registered_uri",
+      "uri": "https://aegis-trust.dev/extensions/boundary-decision/v0",
+      "expect_placeholder": false,
+      "why": "What a registered identifier would look like. Pinned so the guard is falsifiable rather than 'always true'."
+    }
+  ],
+  "metadata_placement": [
+    {
+      "id": "activated_places_under_uri_key",
+      "activated": true,
+      "existing_metadata": {
+        "traceId": "abc123"
+      },
+      "substate": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_key": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect_value": {
+        "version": "v0",
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_preserves": {
+        "traceId": "abc123"
+      },
+      "why": "Spec 4.6.1/4.6.2: metadata is keyed BY the extension URI, and unrelated metadata is left alone."
+    },
+    {
+      "id": "not_activated_refuses",
+      "activated": false,
+      "existing_metadata": {},
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_error": "extension_not_activated",
+      "why": "Writing extension metadata a client never opted into is the quiet version of the disclosure problem."
+    },
+    {
+      "id": "producer_assertion_refused_at_emission",
+      "activated": true,
+      "existing_metadata": {},
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "coreVerified": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Emission is the other half of round 3/A2: this SDK must be unable to PRODUCE the producer-asserted trust field its consumer side exists to reject."
+    },
+    {
+      "id": "undeclared_key_refused_at_emission",
+      "activated": true,
+      "existing_metadata": {},
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "note": "Policy enforcement verified by the Aegis boundary."
+      },
+      "expect_error": "undeclared_metadata_field",
+      "why": "Round-1 critique (both vendors): the privacy validator must sit ON the emission path, not beside it. An unknown key dies before the wire — which also closes the free-text covert channel it would have carried."
+    },
+    {
+      "id": "withheld_alice_refused_at_emission",
+      "activated": true,
+      "existing_metadata": {},
+      "substate": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "alice"
+        ]
+      },
+      "provenance": {
+        "declared_field_names": [
+          "email",
+          "ssn"
+        ]
+      },
+      "expect_error": "withheld_field_provenance_unknown",
+      "why": "H-006 at the producer: the documented mapping-to-placement flow was the exact path that shipped 'alice' to the wire. Emission now validates provenance itself."
+    },
+    {
+      "id": "declared_withheld_places_clean",
+      "activated": true,
+      "existing_metadata": {
+        "traceId": "abc123"
+      },
+      "substate": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "email"
+        ]
+      },
+      "provenance": {
+        "declared_field_names": [
+          "email",
+          "ssn"
+        ]
+      },
+      "expect_key": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect_value": {
+        "version": "v0",
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "email"
+        ]
+      },
+      "expect_preserves": {
+        "traceId": "abc123"
+      },
+      "why": "The guarded path must still WORK: declared field names pass, and the emission guards do not block the honest vocabulary."
+    },
+    {
+      "id": "sibling_assertion_refused_at_emission",
+      "activated": true,
+      "existing_metadata": {
+        "coreVerified": true
+      },
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Round-1 codex: a sibling coreVerified in the caller's own metadata must not be couriered onto the wire. The carrier is scanned for trust-assertion keys at the top level and inside non-namespace nested objects; other extensions' URI-keyed bags are left opaque (see other_extension_bag_preserved)."
+    },
+    {
+      "id": "runtime_enforcement_claim_refused_at_emission",
+      "activated": true,
+      "existing_metadata": {},
+      "substate": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client",
+        "approver": "Aegis-backed assurance active"
+      },
+      "provenance": {
+        "approver_roles": [
+          "Aegis-backed assurance active"
+        ]
+      },
+      "expect_error": "enforcement_claim_detected",
+      "why": "H-003's runtime mutant at the emission door, updated for layered guards: with the key vocabulary closed, the remaining string carrier is a value inside a LEGAL field whose provenance the caller poisoned (a declared 'role label' that is really a claim). The honesty walk over runtime string values is the layer that catches it."
+    },
+    {
+      "id": "other_extension_bag_preserved",
+      "activated": true,
+      "existing_metadata": {
+        "https://example.com/ext/auth/v1": {
+          "authenticated": false
+        }
+      },
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_key": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect_value": {
+        "version": "v0",
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_preserves": {
+        "https://example.com/ext/auth/v1": {
+          "authenticated": false
+        }
+      },
+      "why": "Round-2 both vendors: A2A permits independently typed extension metadata, and 'authenticated' is a perfectly legal word in someone ELSE'S vocabulary. Recursing Aegis's reserved-key policy into other extensions' URI bags made this SDK incompatible with innocent co-installed extensions. Their bags are opaque; only the carrier's TOP-LEVEL keys and OUR value are policed."
+    },
+    {
+      "id": "honest_sibling_prose_preserved",
+      "activated": true,
+      "existing_metadata": {
+        "note": "The access policy was verified last quarter."
+      },
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_key": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect_value": {
+        "version": "v0",
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_preserves": {
+        "note": "The access policy was verified last quarter."
+      },
+      "why": "Round-2 cursor: the caller's own prose is the caller's own claim — this SDK polices what IT emits (its value, and machine-readable authority keys at the top level), not the integrator's unrelated notes. The honesty guard applies to our value only."
+    },
+    {
+      "id": "closure_status_update_places",
+      "activated": true,
+      "existing_metadata": {},
+      "substate": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client",
+        "correlation_id": "q7",
+        "generation": 1,
+        "obligation_status": "rejected"
+      },
+      "expect_key": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect_value": {
+        "version": "v0",
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client",
+        "correlation_id": "q7",
+        "generation": 1,
+        "obligation_status": "rejected"
+      },
+      "why": "Round-2 liveness fix, wire half: the buildObligationStatusUpdate output places cleanly, so a poller can distinguish a denied-and-waiting AUTH_REQUIRED from an actionable one."
+    },
+    {
+      "id": "nested_sibling_assertion_refused_at_emission",
+      "activated": true,
+      "existing_metadata": {
+        "notes": {
+          "coreVerified": true
+        }
+      },
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Round-3 cursor P1: the round-2 top-level-only scan left a depth-1 courier hole. 'notes' is not a namespace, so its contents ARE scanned — a nested coreVerified is refused just like a top-level one."
+    },
+    {
+      "id": "nested_in_other_extension_bag_preserved",
+      "activated": true,
+      "existing_metadata": {
+        "https://example.com/ext/auth/v1": {
+          "nested": {
+            "authenticated": true
+          }
+        }
+      },
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_key": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect_value": {
+        "version": "v0",
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_preserves": {
+        "https://example.com/ext/auth/v1": {
+          "nested": {
+            "authenticated": true
+          }
+        }
+      },
+      "why": "The opacity is by NAMESPACE, at any depth: a trust word nested arbitrarily deep inside ANOTHER extension's URI bag is still theirs, and stays untouched. Only the round-3 nested-courier hole (non-namespace parents) is closed."
+    },
+    {
+      "id": "generic_authenticated_sibling_preserved",
+      "activated": true,
+      "existing_metadata": {
+        "authenticated": false
+      },
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_key": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+      "expect_value": {
+        "version": "v0",
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_preserves": {
+        "authenticated": false
+      },
+      "why": "Round-3 codex P2: a top-level 'authenticated: false' from the integrator's own auth system is not an Aegis authority claim. The carrier scan uses the NARROW impersonation list, so generic fields pass; only keys naming OUR output are refused."
+    },
+    {
+      "id": "impersonating_enforced_sibling_refused",
+      "activated": true,
+      "existing_metadata": {
+        "enforced": true
+      },
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "'enforced' names this extension's never-claim directly — a sibling 'enforced: true' would read as 'Aegis enforced this task'. It is in the narrow impersonation list and refused, even though 'authenticated' is not."
+    },
+    {
+      "id": "nested_impersonating_enforcement_status_refused",
+      "activated": true,
+      "existing_metadata": {
+        "audit": {
+          "enforcementStatus": "ENFORCED"
+        }
+      },
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "The narrow scan still recurses into non-namespace nested objects: a nested enforcementStatus impersonates our output at depth 1 and is refused."
+    }
+  ]
+}

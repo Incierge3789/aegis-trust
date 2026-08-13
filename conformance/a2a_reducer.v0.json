@@ -1,0 +1,2282 @@
+{
+  "$comment": "A2A task-state reducer corpus, v0 -- obligation lifecycle, credential binding, terminal monotonicity, and the section 7.6.1 authorization-request contract.\n\nWHY THESE TRACES EXIST.\nThe reducer's one-line spec is 'only a decision that halts the task drives TaskState'. Every trace here is a way that line dies in implementation: a pre-played credential that resolves an obligation before it opens (the tombstone attack -- order invariance itself was the vulnerability, retracted in Plan Review round 3/A1), a denied approval that quietly resumes the task, a terminal state that un-freezes, a duplicate late credential that re-interrupts a resumed task, a permutation of commuting decisions that changes the answer.\n\nTHE CAUSAL RULE IS THE CENTERPIECE. A closure with no matching OPEN obligation is rejected and recorded, never remembered. Traces preplay_* pin both halves: the injected event is refused AND the genuine obligation behind it survives. An implementation that throws on the first bad event fails the second half; an implementation that tombstones the event fails the first.\n\nExpectations on obligations are compared as (correlation_id, generation, state) sets; rejected events as (index, code) lists in order.",
+  "version": "v0",
+  "recorded_against": {
+    "a2a_spec": "a2aproject/A2A@0ef1b02547e959d770ebf3460d058f5c3421641c",
+    "decision_engine": "aegis-boundary-core@324efd18 engine/aegis-decision/src/decision.rs:118-142",
+    "sprint": "S027"
+  },
+  "traces": [
+    {
+      "id": "resume_after_client_approval",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "resolved"
+          }
+        ],
+        "rejected": []
+      },
+      "why": "The section 7.6.1 resume duty: interrupt over, task processing again. WORKING and never a success state -- COMPLETED is the executor's call."
+    },
+    {
+      "id": "denial_holds_halt",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "rejected",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "rejected"
+          }
+        ],
+        "rejected": []
+      },
+      "why": "A denied approval is not permission to proceed. The halt lifts only when the boundary speaks again -- resuming here would be the widening H-002 exists to prevent."
+    },
+    {
+      "id": "denial_then_policy_block",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "rejected",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "BLOCKED",
+            "reason_code": "policy_denied"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_REJECTED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "rejected"
+          }
+        ],
+        "rejected": []
+      },
+      "why": "The boundary's follow-up decision is what moves a denied task, and a policy refusal is a decision, not an error: REJECTED, not FAILED."
+    },
+    {
+      "id": "expiry_reissue_resume_and_stale_credential",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "expired",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 2,
+            "server_nonce": "nonce-2"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 2,
+            "server_nonce": "nonce-2"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 2,
+              "server_nonce": "nonce-2"
+            }
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "expired"
+          },
+          {
+            "correlation_id": "q7",
+            "generation": 2,
+            "state": "resolved"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 4,
+            "code": "no_matching_open_obligation"
+          }
+        ]
+      },
+      "why": "H-007b: a lapsed approval holds the halt; re-issue is a NEW obligation at generation+1; and the credential for the expired generation is refused after resume -- expiry is not a second door."
+    },
+    {
+      "id": "preplay_credential_rejected_then_genuine_auth_survives",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "stolen-nonce"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "stolen-nonce"
+            }
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "stolen-nonce"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "stolen-nonce"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 0,
+            "code": "no_matching_open_obligation"
+          },
+          {
+            "index": 2,
+            "code": "no_matching_open_obligation"
+          }
+        ]
+      },
+      "why": "H-008, both halves. The pre-played closure is REJECTED (a tombstone here would let it swallow the later genuine APPROVAL_REQUIRED and walk a destructive action through as WORKING), and the genuine obligation opened after it SURVIVES -- which also rules out implementations that abort the stream on the first bad event. The replay after opening still misses: the server nonce issued at open time is not the guessed one."
+    },
+    {
+      "id": "late_duplicate_does_not_reopen",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            }
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "resolved"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 2,
+            "code": "no_matching_open_obligation"
+          }
+        ]
+      },
+      "why": "G4's required trace: a delayed duplicate approval event must not re-open the obligation or re-interrupt the resumed task."
+    },
+    {
+      "id": "terminal_monotonic_frozen",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "BLOCKED",
+            "reason_code": "policy_denied"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_REJECTED",
+        "obligations": [],
+        "rejected": [
+          {
+            "index": 1,
+            "code": "event_after_terminal"
+          }
+        ]
+      },
+      "why": "H-002c: a terminal state never un-freezes. The late decision is recorded as rejected, not applied."
+    },
+    {
+      "id": "completed_stays_completed_under_access_reduced_storm",
+      "task_id": "t1",
+      "context_id": "c1",
+      "prior_state": "TASK_STATE_COMPLETED",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f1"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f2"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f3"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f4"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f5"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f6"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f7"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f8"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f9"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "f10"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_COMPLETED",
+        "obligations": [],
+        "rejected": [
+          {
+            "index": 0,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 1,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 2,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 3,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 4,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 5,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 6,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 7,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 8,
+            "code": "event_after_terminal"
+          },
+          {
+            "index": 9,
+            "code": "event_after_terminal"
+          }
+        ]
+      },
+      "why": "H-002's original oracle, on the reducer: ten narrowings do not degrade a completed task. Narrowing is the product working; it rides in the record, not the state."
+    },
+    {
+      "id": "non_halting_never_sets_state",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "email"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "task_state": null,
+        "obligations": [],
+        "rejected": []
+      },
+      "why": "Round 2/F3: the reducer cannot know whether a withheld field was required for the result, so it makes NO state claim. null, not COMPLETED."
+    },
+    {
+      "id": "permutation_commuting_ab",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "email"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "CHECK_REQUIRED",
+            "reason_code": "check_required"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [],
+        "rejected": []
+      },
+      "why": "Commuting decisions (no interrupt, no terminal) in one order."
+    },
+    {
+      "id": "permutation_commuting_ba",
+      "permutation_of": "permutation_commuting_ab",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "CHECK_REQUIRED",
+            "reason_code": "check_required"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": [
+              "email"
+            ]
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [],
+        "rejected": []
+      },
+      "why": "H-002b, scoped as round 3/A1 left it: order invariance holds for COMMUTING decisions only (the runner asserts this pair reduces identically). It is deliberately NOT a property across obligation events -- demanding it there is the tombstone attack."
+    },
+    {
+      "id": "foreign_task_credential_refused",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t2",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t2",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 1,
+            "code": "foreign_task_obligation"
+          }
+        ]
+      },
+      "why": "An approval minted for another task names another task. It does not even reach the matching logic."
+    },
+    {
+      "id": "credential_binding_nonce_mismatch",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-2"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 1,
+            "code": "credential_binding_mismatch"
+          }
+        ]
+      },
+      "why": "The credential binds to the WHOLE 7-field tuple or not at all. Six matching fields and a wrong nonce is a forgery, not a near-miss."
+    },
+    {
+      "id": "missing_obligation_key_fail_closed",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": null,
+        "obligations": [],
+        "rejected": [
+          {
+            "index": 0,
+            "code": "missing_obligation_key"
+          }
+        ]
+      },
+      "why": "An AUTH_REQUIRED transition without the obligation it opens would be an interrupt no credential can ever answer. The decision is refused whole -- no substate, no half-applied state."
+    },
+    {
+      "id": "input_required_then_repair",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "BLOCKED",
+            "reason_code": "invalid_scope"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": null,
+        "obligations": [],
+        "rejected": []
+      },
+      "why": "Round 1/F2: invalid_scope is correctable, and the corrected resubmission's own decision supersedes the interrupt. The result is null -- not WORKING -- because unlike the 7.6.1 resume duty there is no spec obligation to announce resumption, and PROTECTED makes no state claim (F3)."
+    },
+    {
+      "id": "resolved_without_credential_refused",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 1,
+            "code": "credential_required"
+          }
+        ]
+      },
+      "why": "Spec 7.6: the credential is 'the object that represents the approved authorization'. A resolution without it is an assertion, not an approval."
+    },
+    {
+      "id": "approval_agent_owner_stays_working",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "agent"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [],
+        "rejected": []
+      },
+      "why": "Round 2/G1: AUTH_REQUIRED is spec-defined as DELEGATING fulfilment to the client. An approval the boundary resolves itself must not interrupt the client and opens no client obligation."
+    },
+    {
+      "id": "auth_supersedes_earlier_input_interrupt",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "BLOCKED",
+            "reason_code": "invalid_scope"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": []
+      },
+      "why": "Each decision supersedes the pending interrupt of the one before; the open obligation then pins AUTH_REQUIRED."
+    },
+    {
+      "id": "prior_auth_without_open_obligation_stays_halted",
+      "task_id": "t1",
+      "context_id": "c1",
+      "prior_state": "TASK_STATE_AUTH_REQUIRED",
+      "events": [],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [],
+        "rejected": []
+      },
+      "why": "A checkpointed AUTH_REQUIRED with no carried open obligation is NOT silently resumed. Fail-closed: losing the obligation record must not unlock the task."
+    },
+    {
+      "id": "unknown_event_kind_rejected",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "status",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 1,
+            "code": "unknown_event_kind"
+          }
+        ]
+      },
+      "why": "Round-1 critique (cursor P0): compile-time unions do not survive JSON. An implementation that treats 'everything that is not a decision' as a closure lets a forged kind:'status' event carry a well-formed key and credential straight into the resolution path — approval-free resume. The kind vocabulary is checked at runtime, in both languages."
+    },
+    {
+      "id": "unknown_closure_rejected",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "approved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 1,
+            "code": "invalid_field_value"
+          }
+        ]
+      },
+      "why": "The closure vocabulary is closed. 'approved' is not a closure — accepting it would store an obligation state no other rule reasons about, and the open obligation must remain open."
+    },
+    {
+      "id": "closed_tuple_cannot_reopen",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            }
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-1",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "nonce-1"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "resolved"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 2,
+            "code": "obligation_key_reused"
+          }
+        ]
+      },
+      "why": "A closed tuple is closed forever; re-asking is a NEW obligation at generation+1. Re-opening the same tuple would make the already-received credential valid for the new question."
+    },
+    {
+      "id": "malformed_event_rejected_stream_survives",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        null,
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "CHECK_REQUIRED",
+            "reason_code": "check_required"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [],
+        "rejected": [
+          {
+            "index": 0,
+            "code": "unknown_event_kind"
+          }
+        ]
+      },
+      "why": "Round-2 codex: the per-event-refusal rule applies to shape garbage too. A null event is recorded as rejected — not thrown — and the genuine event behind it still applies."
+    },
+    {
+      "id": "two_concurrent_obligations_one_resolved_holds",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-q7",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "n7"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "resolved"
+          },
+          {
+            "correlation_id": "q8",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": []
+      },
+      "why": "Completeness: two DISTINCT obligations open at once. Resolving one leaves the task halted because the other is still open — the state follows the open SET, not the last event. The single-obligation traces never exercised anyOpen with more than one member."
+    },
+    {
+      "id": "two_concurrent_obligations_both_resolved_resumes",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-q7",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "n7"
+            }
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-q8",
+              "correlation_id": "q8",
+              "generation": 1,
+              "server_nonce": "n8"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "resolved"
+          },
+          {
+            "correlation_id": "q8",
+            "generation": 1,
+            "state": "resolved"
+          }
+        ],
+        "rejected": []
+      },
+      "why": "Only when EVERY open obligation is resolved does the task resume. Each credential binds to its own tuple; q7's credential cannot resolve q8."
+    },
+    {
+      "id": "two_concurrent_one_resolved_one_rejected_holds",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-q7",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "n7"
+            }
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "rejected",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "resolved"
+          },
+          {
+            "correlation_id": "q8",
+            "generation": 1,
+            "state": "rejected"
+          }
+        ],
+        "rejected": []
+      },
+      "why": "A rejected obligation holds the halt even when its sibling resolved: closure of one obligation never widens access while another is denied. The boundary must speak again."
+    },
+    {
+      "id": "cross_obligation_credential_does_not_resolve_sibling",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-q7",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "n7"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "open"
+          },
+          {
+            "correlation_id": "q8",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": [
+          {
+            "index": 2,
+            "code": "credential_binding_mismatch"
+          }
+        ]
+      },
+      "why": "With two obligations open, a credential bound to q7 presented to close q8 must be refused — binding is to the WHOLE tuple, and q7's approval is not q8's. Both stay open."
+    },
+    {
+      "id": "reject_then_resolve_sibling_holds_halt",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "rejected",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-q8",
+              "correlation_id": "q8",
+              "generation": 1,
+              "server_nonce": "n8"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "rejected"
+          },
+          {
+            "correlation_id": "q8",
+            "generation": 1,
+            "state": "resolved"
+          }
+        ],
+        "rejected": []
+      },
+      "why": "Round-3 cursor P2 required kill: open A, open B, REJECT A, then resolve B. A denied obligation set unresolvedHalt; resolving the sibling must NOT lift it. The single-obligation traces never had a live unresolvedHalt at the moment of a resolve, so a mutant that drops unresolvedHalt on resolve survived them — here it flips the result to WORKING (approval-free resume after a denial) and is caught."
+    },
+    {
+      "id": "checkpoint_split_denial_holds_across_restore",
+      "task_id": "t1",
+      "context_id": "c1",
+      "prior_state": "TASK_STATE_AUTH_REQUIRED",
+      "prior_obligations": [
+        {
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          },
+          "state": "rejected"
+        },
+        {
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          },
+          "state": "open"
+        }
+      ],
+      "prior_unresolved_halt": true,
+      "events": [
+        {
+          "kind": "obligation",
+          "closure": "resolved",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          },
+          "credential": {
+            "binding": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-q8",
+              "correlation_id": "q8",
+              "generation": 1,
+              "server_nonce": "n8"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "rejected"
+          },
+          {
+            "correlation_id": "q8",
+            "generation": 1,
+            "state": "resolved"
+          }
+        ],
+        "rejected": [],
+        "unresolved_halt": true
+      },
+      "why": "Round-3 codex P1: a checkpoint taken after 'open q7, open q8, reject q7' carries q7=rejected next to q8=open. Restoring and resolving q8 must NOT resume the task — the denial's halt is still live. Because that fact is invisible in (state, obligations) when an open sibling exists, the checkpoint MUST persist unresolved_halt and pass it back as prior_unresolved_halt; here it does, and the halt holds."
+    },
+    {
+      "id": "producing_reduction_exposes_unresolved_halt",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          }
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "APPROVAL_REQUIRED",
+            "reason_code": "approval_required",
+            "fulfillment_owner": "client"
+          },
+          "obligation": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q8",
+            "correlation_id": "q8",
+            "generation": 1,
+            "server_nonce": "n8"
+          }
+        },
+        {
+          "kind": "obligation",
+          "closure": "rejected",
+          "key": {
+            "task_id": "t1",
+            "context_id": "c1",
+            "requesting_agent": "agent-a",
+            "request_digest": "digest-q7",
+            "correlation_id": "q7",
+            "generation": 1,
+            "server_nonce": "n7"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "obligations": [
+          {
+            "correlation_id": "q7",
+            "generation": 1,
+            "state": "rejected"
+          },
+          {
+            "correlation_id": "q8",
+            "generation": 1,
+            "state": "open"
+          }
+        ],
+        "rejected": [],
+        "unresolved_halt": true
+      },
+      "why": "The other half of the checkpoint contract: the reduction that PRODUCES the checkpoint exposes unresolved_halt=true, so a correct caller knows to persist it. Without this field a caller could not carry the fact forward."
+    },
+    {
+      "id": "null_decision_rejected_stream_survives",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": null
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "CHECK_REQUIRED",
+            "reason_code": "check_required"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_WORKING",
+        "obligations": [],
+        "rejected": [
+          {
+            "index": 0,
+            "code": "unknown_outcome"
+          }
+        ]
+      },
+      "why": "Round-3 codex P1 cross-language divergence: a null decision must be recorded as unknown_outcome (not throw a raw TypeError that aborts the stream), and the genuine second event must still apply. Node threw and lost the second event; Python survived. Both now record and continue."
+    },
+    {
+      "id": "scalar_decision_rejected_stream_survives",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": "PROTECTED"
+        },
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": null,
+        "obligations": [],
+        "rejected": [
+          {
+            "index": 0,
+            "code": "unknown_outcome"
+          }
+        ]
+      },
+      "why": "A scalar decision string is malformed too — the reducer's `or {}` mask would have hidden it. Recorded as unknown_outcome; the genuine event follows."
+    },
+    {
+      "id": "string_withheld_in_decision_rejected",
+      "task_id": "t1",
+      "context_id": "c1",
+      "events": [
+        {
+          "kind": "decision",
+          "decision": {
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "withheld_fields": "ssn"
+          }
+        }
+      ],
+      "expect": {
+        "task_state": null,
+        "obligations": [],
+        "rejected": [
+          {
+            "index": 0,
+            "code": "invalid_withheld_fields"
+          }
+        ]
+      },
+      "why": "Round-3 codex P1 through the reducer: a decision whose withheld_fields is a bare string is malformed. Node used to spread it to ['s','s','n'] and emit it; both languages now reject invalid_withheld_fields, recorded per-event."
+    }
+  ],
+  "input_errors": [
+    {
+      "id": "duplicate_prior_obligation",
+      "input": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "prior_obligations": [
+          {
+            "key": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            },
+            "state": "open"
+          },
+          {
+            "key": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            },
+            "state": "resolved"
+          }
+        ],
+        "events": []
+      },
+      "expect_error": "duplicate_obligation",
+      "why": "One tuple, one obligation. Two records for the same tuple with different states is a corrupted checkpoint, not an input to reconcile."
+    },
+    {
+      "id": "foreign_prior_obligation",
+      "input": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "prior_obligations": [
+          {
+            "key": {
+              "task_id": "t9",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            },
+            "state": "open"
+          }
+        ],
+        "events": []
+      },
+      "expect_error": "foreign_task_obligation",
+      "why": "Obligations never cross tasks, including at checkpoint restore."
+    },
+    {
+      "id": "empty_task_id",
+      "input": {
+        "task_id": "",
+        "context_id": "c1",
+        "events": []
+      },
+      "expect_error": "invalid_reduction_input",
+      "why": "The task id scopes every obligation check; without it nothing below is meaningful."
+    },
+    {
+      "id": "invalid_prior_obligation_state",
+      "input": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "prior_obligations": [
+          {
+            "key": {
+              "task_id": "t1",
+              "context_id": "c1",
+              "requesting_agent": "agent-a",
+              "request_digest": "digest-1",
+              "correlation_id": "q7",
+              "generation": 1,
+              "server_nonce": "nonce-1"
+            },
+            "state": "bogus"
+          }
+        ],
+        "events": []
+      },
+      "expect_error": "invalid_obligation_key",
+      "why": "Round-1 critique (codex parity): a checkpoint record with an unknown obligation state is a corrupted checkpoint in both languages, not a value one of them quietly coerces."
+    }
+  ],
+  "authorization_request": [
+    {
+      "id": "declared_role_full_contract",
+      "key": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "requesting_agent": "agent-a",
+        "request_digest": "digest-1",
+        "correlation_id": "q7",
+        "generation": 1,
+        "server_nonce": "nonce-1"
+      },
+      "approver_role": "data-owner",
+      "approver_roles": [
+        "data-owner",
+        "security-officer"
+      ],
+      "expect": {
+        "task_state": "TASK_STATE_AUTH_REQUIRED",
+        "substate": {
+          "outcome": "APPROVAL_REQUIRED",
+          "reason_code": "approval_required",
+          "fulfillment_owner": "client",
+          "approver": "data-owner",
+          "correlation_id": "q7",
+          "generation": 1,
+          "obligation_status": "open",
+          "credential_receipt": "out_of_band",
+          "accepts_task_messages": true,
+          "resume_on": "credential_resolution"
+        },
+        "message_contains": [
+          "data-owner",
+          "q7",
+          "generation 1",
+          "out of band",
+          "the boundary will bind",
+          "negotiate, correct, or reject",
+          "resumes",
+          "No payload values"
+        ],
+        "message_and_substate_omit": [
+          "nonce-1",
+          "digest-1"
+        ]
+      },
+      "why": "The section 7.6.1 duties, made emittable field by field: state transition, explanation in TaskStatus, out-of-band credential receipt, messages accepted on the task, resume trigger. The credential-synthesis contract is explicit (round-1 critique, both vendors): the BOUNDARY binds the received approval; the client's only correlates are correlation_id and generation, and the server nonce / request digest are producer-side capability material that must never appear in the message or substate. The runner additionally passes the message through the honesty guard and the substate through the privacy validator -- the builder's output must satisfy the same law as everyone else's."
+    },
+    {
+      "id": "undeclared_role_refused",
+      "key": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "requesting_agent": "agent-a",
+        "request_digest": "digest-1",
+        "correlation_id": "q7",
+        "generation": 1,
+        "server_nonce": "nonce-1"
+      },
+      "approver_role": "alice",
+      "approver_roles": [
+        "data-owner"
+      ],
+      "expect_error": "approver_not_declared_role",
+      "why": "The approver field carries a role label from the caller's own policy. A person's name passing through here is exactly the leak T-019 exists to stop."
+    },
+    {
+      "id": "invalid_key_refused",
+      "key": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "requesting_agent": "agent-a",
+        "request_digest": "digest-1",
+        "correlation_id": "q7",
+        "generation": 0,
+        "server_nonce": "nonce-1"
+      },
+      "approver_role": "data-owner",
+      "approver_roles": [
+        "data-owner"
+      ],
+      "expect_error": "invalid_obligation_key",
+      "why": "Generation counts re-issues starting at 1; a zero-generation obligation cannot be the target of any credential."
+    }
+  ],
+  "obligation_status_update": [
+    {
+      "id": "rejected_update_emitted",
+      "key": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "requesting_agent": "agent-a",
+        "request_digest": "digest-1",
+        "correlation_id": "q7",
+        "generation": 1,
+        "server_nonce": "nonce-1"
+      },
+      "status": "rejected",
+      "expect": {
+        "substate": {
+          "outcome": "APPROVAL_REQUIRED",
+          "reason_code": "approval_required",
+          "fulfillment_owner": "client",
+          "correlation_id": "q7",
+          "generation": 1,
+          "obligation_status": "rejected"
+        },
+        "omit": [
+          "nonce-1",
+          "digest-1"
+        ]
+      },
+      "why": "Round-2 both vendors: the liveness disposition claimed pollers can distinguish via obligation_status, but nothing emitted it. This is the supported closure-emission path — a wire-visible 'rejected' that the privacy validator accepts and that leaks neither nonce nor digest."
+    },
+    {
+      "id": "expired_update_emitted",
+      "key": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "requesting_agent": "agent-a",
+        "request_digest": "digest-1",
+        "correlation_id": "q7",
+        "generation": 1,
+        "server_nonce": "nonce-1"
+      },
+      "status": "expired",
+      "expect": {
+        "substate": {
+          "outcome": "APPROVAL_REQUIRED",
+          "reason_code": "approval_required",
+          "fulfillment_owner": "client",
+          "correlation_id": "q7",
+          "generation": 1,
+          "obligation_status": "expired"
+        },
+        "omit": [
+          "nonce-1",
+          "digest-1"
+        ]
+      },
+      "why": "Same path for expiry."
+    },
+    {
+      "id": "unknown_status_refused",
+      "key": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "requesting_agent": "agent-a",
+        "request_digest": "digest-1",
+        "correlation_id": "q7",
+        "generation": 1,
+        "server_nonce": "nonce-1"
+      },
+      "status": "approved",
+      "expect_error": "invalid_field_value",
+      "why": "The status vocabulary is closed here exactly as it is in the reducer."
+    },
+    {
+      "id": "invalid_key_refused",
+      "key": {
+        "task_id": "t1",
+        "context_id": "c1",
+        "requesting_agent": "agent-a",
+        "request_digest": "digest-1",
+        "correlation_id": "q7",
+        "generation": 0,
+        "server_nonce": "nonce-1"
+      },
+      "status": "rejected",
+      "expect_error": "invalid_obligation_key",
+      "why": "A status report must name a real obligation tuple."
+    }
+  ]
+}

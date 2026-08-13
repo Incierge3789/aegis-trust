@@ -2,6 +2,63 @@
 
 ## [Unreleased]
 
+### Added — A2A extension surface v0 (prerelease, unpublished; S027)
+- `src/a2a/` — reports Aegis boundary decisions as an **A2A protocol
+  extension**: existing `TaskState` values plus a substate in `metadata`,
+  never a new enum value (the A2A extension rules forbid one). The
+  identifier is a machine-detectable placeholder
+  (`urn:x-aegis-placeholder:a2a:boundary-decision:v0`); registering a real
+  URI is an ownership decision this change does not make. Normative
+  contract: `docs/a2a/EXTENSION.md`; shared cross-language conformance
+  corpora: `conformance/a2a_{mapping,extension,reducer,privacy}.v0.json`.
+- `mapDecisionToA2A` / `validateOutcomeReason`: fail-closed mapping over the
+  **7 legal (outcome, reason_code) pairs** the decision engine can actually
+  produce — unknown outcomes, unknown reason codes and the 23 illegal pairs
+  are rejected, never guessed. The mapping returns a recommendation and
+  never selects a success state: whether a task COMPLETED is the executor's
+  call.
+- `negotiateExtensions` / `buildAgentCardExtension` /
+  `placeDecisionMetadata`: header-negotiated activation (inactive by
+  default, named `not_requested` outcome), AgentCard declaration pinned to
+  `required: false`, and metadata keyed by the extension URI
+  (spec §4.6.1/§4.6.2). Emission is guarded in four layers: producer
+  trust-assertion fields (`coreVerified`, `enforcementStatus`, …) are
+  refused with their specific code; the final versioned value is validated
+  per-field against the producer's own provenance declaration (the optional
+  4th parameter — `withheld_fields: ["alice"]` dies before the wire); the
+  COMPLETE merged carrier is rescanned so a sibling assertion in the
+  caller's metadata is refused too; and every string value is held to the
+  honesty guard. This SDK cannot produce the self-report its consumer side
+  rejects.
+- `reduceTaskState` / `buildAuthorizationRequest`: deterministic task-state
+  reducer with an authorization-obligation lifecycle. Obligations are
+  identified by a 7-field tuple (incl. a server-issued nonce) and approval
+  credentials bind to the WHOLE tuple; a closure with no matching open
+  obligation is rejected, never remembered — the remembered-event
+  implementation is a named pre-play attack. Terminal states freeze; a
+  denied or expired approval holds the halt. The §7.6.1 MUSTs are
+  discharged field by field.
+- `validateDecisionSubstate`: provenance-aware per-field validation —
+  closed key vocabulary, fields scoped to their outcome, `reason_label`
+  pinned to the engine's fixed phrases, and `withheld_fields` / `approver`
+  validated by membership in caller-DECLARED sets (character-shape checking
+  cannot tell `alice` from a field name; declared-set membership can).
+- `deriveVerificationStatus` / `assertNoProducerTrustAssertions`:
+  verification is derived by the CONSUMER from checks it ran itself, capped
+  at `structure_verified` — `issuer_authenticated` is not a member of the
+  type, because a keyless SDK cannot prove it. Producer trust assertions
+  are rejected before derivation, so "derived unverified next to embedded
+  coreVerified:true" is unrepresentable.
+- `bindActivation` / `filterDecisionMetadataForDelivery`: activation bound
+  as state (principal, task, URI, version, delivery channel). Deliveries to
+  unbound readers get a zero-content withheld marker — existence disclosed,
+  content not; absence is never faked.
+- Non-vacuity: `scripts/a2a_mapping_mutation_battery.py` (15/15) and
+  `scripts/a2a_increment3_mutation_battery.py` (17/17) inject the named
+  must-kill defects (tombstone reducer, character-shape validator,
+  guardless derivation, channel-ignoring filter, …) and require the corpora
+  to fail.
+
 ### Added — `checkBoundary` carries the A-1 delegation capability (PyPI parity)
 - `CheckBoundaryArgs.capability` (top-level wire field `capability`), and —
   the load-bearing half — it defaults to the token attached by the enclosing

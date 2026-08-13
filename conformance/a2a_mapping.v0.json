@@ -1,0 +1,287 @@
+{
+  "$comment": "A2A decision->TaskState mapping corpus, v0.\n\nWHAT THIS PINS.\nOne fixed vector per LEGAL (outcome, reason_code) pair, plus the fulfillment_owner\nsplit for APPROVAL_REQUIRED, plus negative vectors for pairs the decision engine\ncannot produce. Both SDKs must feed these through the SHIPPED mapping function\n(see conformance/runners.v0.json) -- a runner that re-derives the table inline\nproves nothing.\n\nWHY THE LEGAL SET IS 7, NOT 30.\nreason_code is DERIVED from the outcome by the decision engine\n(aegis-boundary-core@324efd18, engine/aegis-decision/src/decision.rs:118-142\n`ReasonCode::derive`). Only BLOCKED branches, and it branches on a substring scan\nof the recorded reason text with the scope test running FIRST. So the reachable\npair set is exactly the 7 rows in `legal_pairs`. A corpus built from the 5x6\nproduct would spend most of its vectors on states that cannot occur, and -- worse\n-- would let a real missing pair hide among unreachable ones. `legal_pairs` is\ndeclared here so completeness itself is testable.\n\nSCOPE LIMIT.\nThis inventory holds for the check-boundary decision surface only. Other endpoints\nemit reason codes outside this enum (e.g. `capsule_scope_denied` from the gateway's\nbackup-roots surface), which is why the validator is surface-scoped and\nfail-closed on unknown values rather than an allowlist of everything seen on the\nwire.\n\nSTATE OWNERSHIP.\n`task_state_recommendation: null` means the mapping sets NO state. PROTECTED and\nACCESS_REDUCED do not make a task successful -- only the task executor knows\nwhether a withheld field was required for the requested result. The mapping never\nselects a terminal state on the executor's behalf.",
+  "version": "v0",
+  "recorded_against": {
+    "a2a_spec": "a2aproject/A2A@0ef1b02547e959d770ebf3460d058f5c3421641c",
+    "decision_engine": "aegis-boundary-core@324efd18",
+    "sprint": "S027"
+  },
+  "legal_pairs": [
+    [
+      "PROTECTED",
+      "minimum_disclosure"
+    ],
+    [
+      "ACCESS_REDUCED",
+      "minimum_disclosure"
+    ],
+    [
+      "CHECK_REQUIRED",
+      "check_required"
+    ],
+    [
+      "APPROVAL_REQUIRED",
+      "approval_required"
+    ],
+    [
+      "BLOCKED",
+      "policy_denied"
+    ],
+    [
+      "BLOCKED",
+      "invalid_scope"
+    ],
+    [
+      "BLOCKED",
+      "internal_failure"
+    ]
+  ],
+  "entries": [
+    {
+      "id": "protected",
+      "decision": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect": {
+        "task_state_recommendation": null,
+        "halts_task": false,
+        "substate": {
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "why": "Served within boundary. Nothing about the task lifecycle changed."
+    },
+    {
+      "id": "access_reduced",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "ssn",
+          "dob"
+        ]
+      },
+      "expect": {
+        "task_state_recommendation": null,
+        "halts_task": false,
+        "substate": {
+          "outcome": "ACCESS_REDUCED",
+          "reason_code": "minimum_disclosure",
+          "withheld_fields": [
+            "ssn",
+            "dob"
+          ]
+        }
+      },
+      "why": "Narrowing is the product working. The mapping still does not declare the task successful."
+    },
+    {
+      "id": "check_required",
+      "decision": {
+        "outcome": "CHECK_REQUIRED",
+        "reason_code": "check_required"
+      },
+      "expect": {
+        "task_state_recommendation": "TASK_STATE_WORKING",
+        "halts_task": false,
+        "substate": {
+          "outcome": "CHECK_REQUIRED",
+          "reason_code": "check_required"
+        }
+      },
+      "why": "The boundary runs the extra check. WORKING is the only state meaning 'still processing, you need do nothing'."
+    },
+    {
+      "id": "approval_required_client_delegated",
+      "decision": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client"
+      },
+      "expect": {
+        "task_state_recommendation": "TASK_STATE_AUTH_REQUIRED",
+        "halts_task": true,
+        "substate": {
+          "outcome": "APPROVAL_REQUIRED",
+          "reason_code": "approval_required",
+          "fulfillment_owner": "client"
+        }
+      },
+      "why": "A2A spec 7.6.1: requesting that the CLIENT fulfil an authorization MUST transition to AUTH_REQUIRED."
+    },
+    {
+      "id": "approval_required_agent_internal",
+      "decision": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "agent"
+      },
+      "expect": {
+        "task_state_recommendation": "TASK_STATE_WORKING",
+        "halts_task": false,
+        "substate": {
+          "outcome": "APPROVAL_REQUIRED",
+          "reason_code": "approval_required",
+          "fulfillment_owner": "agent"
+        }
+      },
+      "why": "A2A spec 7.6 frames AUTH_REQUIRED as DELEGATING fulfilment to the client. An approval the boundary resolves itself must not interrupt the client."
+    },
+    {
+      "id": "blocked_policy_denied",
+      "decision": {
+        "outcome": "BLOCKED",
+        "reason_code": "policy_denied"
+      },
+      "expect": {
+        "task_state_recommendation": "TASK_STATE_REJECTED",
+        "halts_task": true,
+        "substate": {
+          "outcome": "BLOCKED",
+          "reason_code": "policy_denied",
+          "disposition": "terminal"
+        }
+      },
+      "why": "A policy refusal is a decision, not an error, and resubmitting will not repair it."
+    },
+    {
+      "id": "blocked_invalid_scope",
+      "decision": {
+        "outcome": "BLOCKED",
+        "reason_code": "invalid_scope"
+      },
+      "expect": {
+        "task_state_recommendation": "TASK_STATE_INPUT_REQUIRED",
+        "halts_task": true,
+        "substate": {
+          "outcome": "BLOCKED",
+          "reason_code": "invalid_scope",
+          "disposition": "correctable"
+        }
+      },
+      "why": "A scope that could not be resolved is a request defect the client can repair. REJECTED is terminal and would foreclose the repair."
+    },
+    {
+      "id": "blocked_internal_failure",
+      "decision": {
+        "outcome": "BLOCKED",
+        "reason_code": "internal_failure"
+      },
+      "expect": {
+        "task_state_recommendation": "TASK_STATE_FAILED",
+        "halts_task": true,
+        "substate": {
+          "outcome": "BLOCKED",
+          "reason_code": "internal_failure",
+          "disposition": "terminal"
+        }
+      },
+      "why": "Fail-secure refusal on internal error IS an error, and must stay distinguishable from a policy refusal."
+    }
+  ],
+  "negative_entries": [
+    {
+      "id": "illegal_blocked_minimum_disclosure",
+      "decision": {
+        "outcome": "BLOCKED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_error": "illegal_outcome_reason_pair",
+      "why": "The engine derives minimum_disclosure only for PROTECTED/ACCESS_REDUCED. A BLOCKED decision carrying it did not come from the check-boundary surface."
+    },
+    {
+      "id": "illegal_protected_policy_denied",
+      "decision": {
+        "outcome": "PROTECTED",
+        "reason_code": "policy_denied"
+      },
+      "expect_error": "illegal_outcome_reason_pair",
+      "why": "Contradictory: served within boundary AND refused by policy."
+    },
+    {
+      "id": "illegal_check_required_approval_required",
+      "decision": {
+        "outcome": "CHECK_REQUIRED",
+        "reason_code": "approval_required"
+      },
+      "expect_error": "illegal_outcome_reason_pair",
+      "why": "A review fix in the engine made CHECK_REQUIRED carry its own reason code, distinct from approval_required. Collapsing them again must be caught."
+    },
+    {
+      "id": "unknown_reason_code",
+      "decision": {
+        "outcome": "BLOCKED",
+        "reason_code": "capsule_scope_denied"
+      },
+      "expect_error": "unknown_reason_code",
+      "why": "A real reason code from a DIFFERENT gateway surface. Fail-closed: the mapping is scoped to the check-boundary vocabulary and must not guess."
+    },
+    {
+      "id": "unknown_outcome",
+      "decision": {
+        "outcome": "PARTIALLY_PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "expect_error": "unknown_outcome",
+      "why": "A future or skewed engine value must not be silently mapped to a state."
+    },
+    {
+      "id": "missing_reason_code",
+      "decision": {
+        "outcome": "BLOCKED"
+      },
+      "expect_error": "unknown_reason_code",
+      "why": "Absent reason code must fail closed, not default to policy_denied."
+    },
+    {
+      "id": "approval_missing_fulfillment_owner",
+      "decision": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required"
+      },
+      "expect_error": "missing_fulfillment_owner",
+      "why": "Without knowing who fulfils the approval the mapping cannot choose between AUTH_REQUIRED and WORKING. Guessing either way is a protocol error: guessing 'client' spuriously delegates and takes on 7.6.1 duties the boundary may not meet; guessing 'agent' silently drops a required client action."
+    },
+    {
+      "id": "approval_unknown_fulfillment_owner",
+      "decision": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "someone_else"
+      },
+      "expect_error": "unknown_fulfillment_owner",
+      "why": "Only 'client' and 'agent' are defined."
+    },
+    {
+      "id": "string_withheld_fields_refused",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": "ssn"
+      },
+      "expect_error": "invalid_withheld_fields",
+      "why": "Round-3 codex P1 cross-language divergence: a bare string spread to ['s','s','n'] in Node and shipped as field names, while Python rejected it. Both now reject a non-array withheld_fields as invalid_withheld_fields."
+    },
+    {
+      "id": "empty_string_withheld_element_refused",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "email",
+          ""
+        ]
+      },
+      "expect_error": "invalid_withheld_fields",
+      "why": "An empty field name is not a name; both languages reject it."
+    },
+    {
+      "id": "null_decision_refused",
+      "decision": null,
+      "expect_error": "unknown_outcome",
+      "why": "Round-3 codex P1: a null decision is a malformed input coerced to unknown_outcome, not a raw crash. Node threw a TypeError; both now raise A2AMappingError."
+    }
+  ]
+}

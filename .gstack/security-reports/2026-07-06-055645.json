@@ -1,0 +1,100 @@
+{
+  "version": "2.0.0",
+  "date": "2026-07-06T05:56:45Z",
+  "mode": "daily",
+  "scope": "full",
+  "diff_mode": false,
+  "phases_run": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+  "attack_surface": {
+    "code": {
+      "public_endpoints": 0,
+      "authenticated": 0,
+      "admin": 0,
+      "api": 0,
+      "uploads": 0,
+      "integrations": 2,
+      "background_jobs": 0,
+      "websockets": 0
+    },
+    "infrastructure": {
+      "ci_workflows": 4,
+      "webhook_receivers": 0,
+      "container_configs": 2,
+      "iac_configs": 0,
+      "deploy_targets": 2,
+      "secret_management": "GitHub Actions secrets/vars + env vars"
+    }
+  },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "confidence": 9,
+      "status": "VERIFIED",
+      "phase": 4,
+      "phase_name": "CI/CD Pipeline Security",
+      "category": "CI/CD",
+      "fingerprint": "release-workflow-global-write-oidc-unpinned-registry-code",
+      "title": "Release workflow grants write/OIDC permissions to jobs that execute unpinned registry code",
+      "file": ".github/workflows/release-attestation.yml",
+      "line": 77,
+      "commit": null,
+      "description": "The workflow sets top-level contents:write and id-token:write, so jobs inherit release-class permissions unless overridden. Several inherited-permission jobs execute package-manager-fetched code: npx @cyclonedx/cdxgen@10 in SBOM jobs and pip install build hatchling in the SDK packaging job. A compromised registry package or mutable major version can execute inside a release workflow with unnecessary token/OIDC surface.",
+      "exploit_scenario": "1. Attacker compromises @cyclonedx/cdxgen major tag resolution or a transitive package, or compromises build/hatchling resolution. 2. Maintainer pushes a v* tag or manually dispatches release-attestation. 3. Malicious install/runtime code executes in a job inheriting contents:write/id-token:write and a checkout with persisted credentials. 4. Attacker uses the workflow token/OIDC channel or git credentials to tamper with release artifacts, create repo writes, or mint attestations tied to the trusted workflow identity.",
+      "impact": "Release pipeline compromise: signed SBOMs or package artifacts can be generated from attacker-controlled code, and unnecessary write/OIDC permissions expand blast radius.",
+      "recommendation": "Set workflow-level permissions to contents:read only, then grant contents:write/id-token:write only on jobs that actually upload releases, sign with cosign, or publish via trusted publisher. Add persist-credentials:false to checkouts in jobs that never push. Replace npx @cyclonedx/cdxgen@10 with an exact pinned version plus integrity verification or a locked tool install. Install Python build tooling from a checked-in lock/constraints file inside a venv, not unpinned into system Python.",
+      "playbook": null,
+      "verification": "self-verified by workflow line tracing"
+    },
+    {
+      "id": 2,
+      "severity": "MEDIUM",
+      "confidence": 8,
+      "status": "VERIFIED",
+      "phase": 4,
+      "phase_name": "CI/CD Pipeline Security",
+      "category": "Information Disclosure",
+      "fingerprint": "release-workflow-logs-private-site-repo-variable",
+      "title": "Release notify job prints private site repository identity to public workflow logs",
+      "file": ".github/workflows/release-attestation.yml",
+      "line": 757,
+      "commit": null,
+      "description": "The workflow comments state that SITE_SYNC_REPO is kept in a repository variable so the private site repository name never appears in public source or git history. The notify step then echoes SITE_REPO and also includes it in failure remediation logs. On a public repository, release workflow logs can expose the private repo name to anyone with log access.",
+      "exploit_scenario": "1. Maintainer configures SITE_SYNC_REPO for the private marketing-site repository. 2. A v* tag release runs the notify job. 3. The job prints the private owner/name in Actions logs. 4. An attacker monitoring public release logs learns the private repo identity and uses it for targeted GitHub phishing, dependency confusion reconnaissance, or workflow-dispatch probing.",
+      "impact": "Private infrastructure metadata leaks despite the repo's explicit design goal to keep that identity out of public source.",
+      "recommendation": "Stop printing SITE_REPO and SITE_WORKFLOW values. Log only a masked or hashed target identifier, for example owner/repo hash prefix, and keep failure messages generic. If debugging needs the concrete target, emit it only behind a manual debug flag in a private runner context.",
+      "playbook": null,
+      "verification": "self-verified by workflow line tracing"
+    }
+  ],
+  "supply_chain_summary": {
+    "direct_deps": 0,
+    "transitive_deps": 60,
+    "critical_cves": 0,
+    "high_cves": 0,
+    "install_scripts": 0,
+    "lockfile_present": true,
+    "lockfile_tracked": true,
+    "tools_skipped": []
+  },
+  "filter_stats": {
+    "candidates_scanned": 34,
+    "hard_exclusion_filtered": 12,
+    "confidence_gate_filtered": 20,
+    "verification_filtered": 0,
+    "reported": 2
+  },
+  "totals": {
+    "critical": 0,
+    "high": 1,
+    "medium": 1,
+    "tentative": 0
+  },
+  "trend": {
+    "prior_report_date": null,
+    "resolved": 0,
+    "persistent": 0,
+    "new": 2,
+    "direction": "first_run"
+  }
+}

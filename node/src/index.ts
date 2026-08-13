@@ -173,3 +173,83 @@ export {
   verifyLineageRoot,
   verifySessionReceiptStructure,
 } from "./receiptVerify.js";
+
+// A2A extension surface (v0, prerelease, unpublished) — reports Aegis boundary
+// decisions using A2A's own vocabulary: an existing TaskState plus a substate
+// in metadata. A reporting vocabulary, not an enforcement mechanism; the
+// identifier is a machine-detectable placeholder until registration (which is
+// an ownership decision, not a code change). Shared conformance corpora:
+// conformance/a2a_{mapping,extension,reducer,privacy}.v0.json.
+export {
+  LEGAL_OUTCOME_REASON_PAIRS,
+  A2AMappingError,
+  mapDecisionToA2A,
+  validateOutcomeReason,
+  type BoundaryDecisionInput,
+  type DecisionMapping,
+  type DecisionOutcome,
+  type DecisionSubstate,
+  type Disposition,
+  type FulfillmentOwner,
+  type ReasonCode,
+  type TaskStateRecommendation,
+} from "./a2a/mapping.js";
+export {
+  A2A_EXTENSIONS_HEADER,
+  AEGIS_A2A_EXTENSION_URI_V0,
+  AEGIS_A2A_EXTENSION_VERSION,
+  A2AExtensionError,
+  assertNoEnforcementClaim,
+  buildAgentCardExtension,
+  isPlaceholderExtensionUri,
+  negotiateExtensions,
+  placeDecisionMetadata,
+  type AgentExtensionDeclaration,
+  type NegotiationResult,
+} from "./a2a/extension.js";
+export {
+  TERMINAL_TASK_STATES,
+  A2AReducerError,
+  buildAuthorizationRequest,
+  buildObligationStatusUpdate,
+  obligationKeysEqual,
+  reduceTaskState,
+  type A2ATaskEvent,
+  type A2ATaskStateValue,
+  type ApprovalCredential,
+  type AuthorizationRequest,
+  type Obligation,
+  type ObligationClosure,
+  type ObligationKey,
+  type RejectedEvent,
+  type TaskReduction,
+  type TaskReductionInput,
+} from "./a2a/reducer.js";
+export {
+  REASON_LABELS,
+  A2APrivacyError,
+  validateDecisionSubstate,
+  type ProvenanceDeclaration,
+} from "./a2a/privacy.js";
+export {
+  PRODUCER_TRUST_ASSERTION_KEYS,
+  A2AVerificationError,
+  assertNoProducerTrustAssertions,
+  deriveVerificationStatus,
+  type ConsumerVerificationStatus,
+  type DerivedVerification,
+  type VerificationEvidence,
+} from "./a2a/verification.js";
+export {
+  DELIVERY_CHANNELS,
+  WITHHELD_STATUS,
+  A2AActivationError,
+  bindActivation,
+  bindActivationFromNegotiation,
+  filterDecisionMetadataForDelivery,
+  isActivatedFor,
+  type ActivationBinding,
+  type DeliveryChannel,
+  type DeliveryQuery,
+  type WithheldMarker,
+} from "./a2a/activation.js";

@@ -61,6 +61,86 @@
           }
         }
       }
+    },
+    {
+      "corpus": "a2a_mapping.v0.json",
+      "exercises": "the shipped A2A decision->TaskState mapping and its fail-closed pair validator",
+      "runners": {
+        "python": {
+          "path": "python/tests/test_a2a_mapping_corpus.py",
+          "must_import": {
+            "module": "aegis_trust.a2a.mapping",
+            "symbol": "map_decision_to_a2a"
+          }
+        },
+        "node": {
+          "path": "node/tests/a2aMappingCorpus.test.ts",
+          "must_import": {
+            "module": "../src/a2a/mapping.js",
+            "symbol": "mapDecisionToA2A"
+          }
+        }
+      }
+    },
+    {
+      "corpus": "a2a_extension.v0.json",
+      "exercises": "the shipped A2A extension negotiation, honesty guard, placeholder guard and metadata placement",
+      "runners": {
+        "python": {
+          "path": "python/tests/test_a2a_extension_corpus.py",
+          "must_import": {
+            "module": "aegis_trust.a2a.extension",
+            "symbol": "negotiate_extensions"
+          }
+        },
+        "node": {
+          "path": "node/tests/a2aExtensionCorpus.test.ts",
+          "must_import": {
+            "module": "../src/a2a/extension.js",
+            "symbol": "negotiateExtensions"
+          }
+        }
+      }
+    },
+    {
+      "corpus": "a2a_reducer.v0.json",
+      "exercises": "the shipped A2A task-state reducer (obligation lifecycle, causal credential binding, terminal monotonicity) and the section 7.6.1 authorization-request builder",
+      "runners": {
+        "python": {
+          "path": "python/tests/test_a2a_reducer_corpus.py",
+          "must_import": {
+            "module": "aegis_trust.a2a.reducer",
+            "symbol": "reduce_task_state"
+          }
+        },
+        "node": {
+          "path": "node/tests/a2aReducerCorpus.test.ts",
+          "must_import": {
+            "module": "../src/a2a/reducer.js",
+            "symbol": "reduceTaskState"
+          }
+        }
+      }
+    },
+    {
+      "corpus": "a2a_privacy.v0.json",
+      "exercises": "the shipped provenance-aware substate validator, producer trust-assertion guard, consumer verification derivation, and per-principal delivery filter",
+      "runners": {
+        "python": {
+          "path": "python/tests/test_a2a_privacy_corpus.py",
+          "must_import": {
+            "module": "aegis_trust.a2a.privacy",
+            "symbol": "validate_decision_substate"
+          }
+        },
+        "node": {
+          "path": "node/tests/a2aPrivacyCorpus.test.ts",
+          "must_import": {
+            "module": "../src/a2a/privacy.js",
+            "symbol": "validateDecisionSubstate"
+          }
+        }
+      }
     }
   ],
   "forbidden_imports": {

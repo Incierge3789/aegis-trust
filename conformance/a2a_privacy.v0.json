@@ -1,0 +1,830 @@
+{
+  "$comment": "A2A privacy + verification + activation corpus, v0 -- provenance-aware per-field validation, producer trust-assertion rejection, consumer-derived verification, and per-principal delivery filtering.\n\nTHE THREE MUTANTS THIS CORPUS EXISTS TO KILL.\nH-006: withheld_fields:[\"alice\"] passing a validator that checks character shape. 'alice' is a perfectly-shaped field name; only membership in a caller-DECLARED field-name set can refuse it, and the declaration is the provenance.\nH-010: a payload where the consumer-derived status says 'unverified' while an embedded coreVerified:true sits next to it and wins the reader. Producer trust assertions are rejected at the door, so that state is unrepresentable, not merely discouraged.\nH-009: a principal that never opted in reading the decision substate through GetTask / subscribe / webhook -- and the reverse failure, where stripping makes 'report withheld from you' indistinguishable from 'no report exists'. The withheld marker discloses existence and nothing else.",
+  "version": "v0",
+  "recorded_against": {
+    "a2a_spec": "a2aproject/A2A@0ef1b02547e959d770ebf3460d058f5c3421641c",
+    "decision_engine": "aegis-boundary-core@324efd18 engine/aegis-decision/src/decision.rs (ReasonCode::human_label)",
+    "sprint": "S027"
+  },
+  "extension_uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+  "substate_validation": [
+    {
+      "id": "protected_minimal_valid",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "provenance": {},
+      "expect_valid": true,
+      "why": "The smallest honest substate: outcome + reason code, nothing that needs a provenance declaration."
+    },
+    {
+      "id": "envelope_with_version_valid",
+      "substate": {
+        "version": "v0",
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "email"
+        ]
+      },
+      "provenance": {
+        "declared_field_names": [
+          "email",
+          "ssn"
+        ]
+      },
+      "expect_valid": true,
+      "why": "The versioned envelope as placed on the wire validates as a whole, withheld names checked against the declared schema set."
+    },
+    {
+      "id": "reason_label_fixed_phrase_valid",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released."
+      },
+      "provenance": {},
+      "expect_valid": true,
+      "why": "The label is the enum speaking: the pinned phrase from ReasonCode::human_label, verbatim."
+    },
+    {
+      "id": "withheld_alice_refused",
+      "substate": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "alice"
+        ]
+      },
+      "provenance": {
+        "declared_field_names": [
+          "email",
+          "ssn"
+        ]
+      },
+      "expect_error": "withheld_field_provenance_unknown",
+      "why": "H-006's named mutant. 'alice' matches [A-Za-z0-9._:-]{1,128} perfectly -- a character-shape validator passes it, and this vector is what kills that validator. Only declared-set membership refuses a person's name in a field-name slot."
+    },
+    {
+      "id": "withheld_without_declaration_refused",
+      "substate": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "email"
+        ]
+      },
+      "provenance": {},
+      "expect_error": "withheld_field_provenance_unknown",
+      "why": "No declaration, no provenance, no field. Fail-closed is the point: a validator that waves values through when nobody declared anything has no floor."
+    },
+    {
+      "id": "undeclared_key_refused",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "verification_message": "Policy enforcement verified by the Aegis boundary."
+      },
+      "provenance": {},
+      "expect_error": "undeclared_metadata_field",
+      "why": "H-003's runtime mutant, consumer side. Minimization is enforced by rejecting unknown keys, which also closes the free-text covert channel they would carry."
+    },
+    {
+      "id": "reason_label_free_text_refused",
+      "substate": {
+        "outcome": "ACCESS_REDUCED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "email"
+        ],
+        "reason_label": "narrowed to 2 fields for alice@example.com"
+      },
+      "provenance": {
+        "declared_field_names": [
+          "email"
+        ]
+      },
+      "expect_error": "reason_label_not_fixed_phrase",
+      "why": "The raw recorded reason may embed payload values -- which is exactly why the view carries the fixed phrase instead. Free text in this slot is the leak, reintroduced."
+    },
+    {
+      "id": "approver_person_name_refused",
+      "substate": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client",
+        "approver": "alice"
+      },
+      "provenance": {
+        "approver_roles": [
+          "data-owner",
+          "security-officer"
+        ]
+      },
+      "expect_error": "approver_not_declared_role",
+      "why": "Same disease as withheld_alice, different field: the approver slot carries a role label from declared policy, never an identity."
+    },
+    {
+      "id": "illegal_pair_refused",
+      "substate": {
+        "outcome": "BLOCKED",
+        "reason_code": "minimum_disclosure"
+      },
+      "provenance": {},
+      "expect_error": "illegal_outcome_reason_pair",
+      "why": "The engine cannot produce this pair (4b: BLOCKED carries only three codes). The privacy validator sits on top of the same fail-closed pair inventory."
+    },
+    {
+      "id": "field_outside_outcome_refused",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "email"
+        ]
+      },
+      "provenance": {
+        "declared_field_names": [
+          "email"
+        ]
+      },
+      "expect_error": "field_not_applicable",
+      "why": "withheld_fields is defined for ACCESS_REDUCED. Riding on PROTECTED it is either drift or a covert channel; both are refused."
+    },
+    {
+      "id": "generation_zero_refused",
+      "substate": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client",
+        "correlation_id": "q7",
+        "generation": 0
+      },
+      "provenance": {},
+      "expect_error": "invalid_field_value",
+      "why": "Generation counts re-issues starting at 1."
+    },
+    {
+      "id": "disposition_contradicts_reason_refused",
+      "substate": {
+        "outcome": "BLOCKED",
+        "reason_code": "invalid_scope",
+        "disposition": "terminal"
+      },
+      "provenance": {},
+      "expect_error": "invalid_field_value",
+      "why": "invalid_scope is the correctable refusal (F2). A terminal disposition on it tells the client to give up on a request it could simply fix."
+    },
+    {
+      "id": "unknown_version_refused",
+      "substate": {
+        "version": "v1",
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "provenance": {},
+      "expect_error": "invalid_field_value",
+      "why": "v0 validators do not guess v1 vocabulary. Reject, do not extrapolate."
+    },
+    {
+      "id": "credential_receipt_in_band_refused",
+      "substate": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client",
+        "credential_receipt": "in_band"
+      },
+      "provenance": {},
+      "expect_error": "invalid_field_value",
+      "why": "Spec 7.6.1: the credential arrives out of band. A field that could say otherwise describes a different protocol."
+    },
+    {
+      "id": "not_an_object_refused",
+      "substate": "PROTECTED",
+      "provenance": {},
+      "expect_error": "substate_not_an_object",
+      "why": "The substate is a structured object, not a bare tag."
+    },
+    {
+      "id": "generation_integral_float_valid",
+      "substate": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client",
+        "correlation_id": "q7",
+        "generation": 1.0
+      },
+      "provenance": {},
+      "expect_valid": true,
+      "why": "Round-3 cursor P1 language divergence: JSON {'generation': 1.0} parses to a JS number 1 (accepted) and a Python float (previously rejected). Both now accept an integral float, matching Number.isInteger — same wire bytes, same verdict."
+    },
+    {
+      "id": "generation_nonintegral_float_refused",
+      "substate": {
+        "outcome": "APPROVAL_REQUIRED",
+        "reason_code": "approval_required",
+        "fulfillment_owner": "client",
+        "correlation_id": "q7",
+        "generation": 1.5
+      },
+      "provenance": {},
+      "expect_error": "invalid_field_value",
+      "why": "1.5 is not integral and is rejected in both languages (Number.isInteger(1.5) is false; float.is_integer() is false)."
+    }
+  ],
+  "producer_assertions": [
+    {
+      "id": "core_verified_top_level",
+      "payload": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "coreVerified": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "The exact field round 3/A2 found: inside the SDK it is produced under discipline, on the wire it is the counterparty's self-report."
+    },
+    {
+      "id": "nested_enforcement_status",
+      "payload": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "evidence": {
+          "enforcementStatus": "ENFORCED"
+        }
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Nesting is not laundering. The walk is recursive."
+    },
+    {
+      "id": "snake_case_even_false",
+      "payload": {
+        "core_verified": false
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "The FIELD is the violation, not its value: a false today trains consumers to read the same key as authoritative tomorrow."
+    },
+    {
+      "id": "array_nested_issuer_authenticated",
+      "payload": {
+        "items": [
+          {
+            "issuer_authenticated": true
+          }
+        ]
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Arrays are walked too. issuer_authenticated is doubly banned: it is also a value a keyless SDK could never derive."
+    },
+    {
+      "id": "kebab_case_uppercase",
+      "payload": {
+        "CORE-VERIFIED": 1
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Case and separator games do not make a new key. Matching normalizes before comparing."
+    },
+    {
+      "id": "dot_separator",
+      "payload": {
+        "core.Verified": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Round-1 critique: stripping only _ and - was bypassable by exactly the separators nobody listed. Normalization now strips every non-alphanumeric."
+    },
+    {
+      "id": "zero_width_space",
+      "payload": {
+        "core​Verified": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Round-1 critique: an invisible separator is still a separator. Non-alphanumerics — including format characters — are stripped before matching."
+    },
+    {
+      "id": "space_separator",
+      "payload": {
+        "core Verified": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "A space is the oldest separator there is."
+    },
+    {
+      "id": "fullwidth_letters",
+      "payload": {
+        "ｃｏｒｅＶｅｒｉｆｉｅｄ": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "NFKC folds full-width compatibility characters to ASCII before the strip, so a visually-identical full-width key is the same claim."
+    },
+    {
+      "id": "entry_trusted",
+      "payload": {
+        "trusted": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative (round-1 cursor): without one vector per banned key, deleting a list entry survives every corpus and battery."
+    },
+    {
+      "id": "entry_trust_level",
+      "payload": {
+        "trust_level": "high"
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative."
+    },
+    {
+      "id": "entry_attested",
+      "payload": {
+        "attested": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative."
+    },
+    {
+      "id": "entry_authenticated",
+      "payload": {
+        "authenticated": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative."
+    },
+    {
+      "id": "entry_verified",
+      "payload": {
+        "verified": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative."
+    },
+    {
+      "id": "entry_evidence_mode",
+      "payload": {
+        "evidenceMode": "full"
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative."
+    },
+    {
+      "id": "entry_verification_status",
+      "payload": {
+        "verification_status": "issuer_authenticated"
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative — and the exact field name a producer would use to impersonate the consumer-derived value."
+    },
+    {
+      "id": "entry_enforced",
+      "payload": {
+        "enforced": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative."
+    },
+    {
+      "id": "entry_assurance_level",
+      "payload": {
+        "assurance-level": 3
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative."
+    },
+    {
+      "id": "entry_enforcement_verified",
+      "payload": {
+        "enforcementVerified": true
+      },
+      "expect_error": "producer_trust_assertion",
+      "why": "Per-entry negative."
+    },
+    {
+      "id": "clean_substate_passes",
+      "payload": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "withheld_fields": [
+          "email"
+        ]
+      },
+      "expect_clean": true,
+      "why": "The guard must not fire on the honest vocabulary, or producers route around it."
+    }
+  ],
+  "verification_derivation": [
+    {
+      "id": "valid_substate_no_receipt",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "provenance": {},
+      "receipt_structure": "absent",
+      "expect": {
+        "status": "structure_verified",
+        "basis": [
+          "substate_schema_and_provenance"
+        ]
+      },
+      "why": "With no receipt carried, what the consumer verified is the substate's schema and provenance -- and the status says structure, not truth."
+    },
+    {
+      "id": "valid_substate_receipt_verified",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "provenance": {},
+      "receipt_structure": "verified",
+      "expect": {
+        "status": "structure_verified",
+        "basis": [
+          "substate_schema_and_provenance",
+          "receipt_structure_recomputed"
+        ]
+      },
+      "why": "The consumer ran the keyless structural verifier itself and says so in the basis."
+    },
+    {
+      "id": "receipt_failure_wins",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "provenance": {},
+      "receipt_structure": "failed",
+      "expect": {
+        "status": "unverified",
+        "basis": [
+          "substate_schema_and_provenance",
+          "receipt_structure_failed"
+        ]
+      },
+      "why": "A receipt that does not recompute poisons the whole derivation. Structure that half-verifies is unverified."
+    },
+    {
+      "id": "invalid_substate_unverified",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "verification_message": "ok"
+      },
+      "provenance": {},
+      "receipt_structure": "absent",
+      "expect": {
+        "status": "unverified",
+        "basis": [
+          "substate_invalid:undeclared_metadata_field"
+        ]
+      },
+      "why": "A substate that fails validation derives to unverified with the failure named, not to an exception the caller must map."
+    },
+    {
+      "id": "embedded_core_verified_throws",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure",
+        "coreVerified": true
+      },
+      "provenance": {},
+      "receipt_structure": "absent",
+      "expect_error": "producer_trust_assertion",
+      "why": "H-010's kill vector. The mutant to catch is a derivation that correctly says 'unverified' while coreVerified:true rides alongside and wins the reader. Rejection happens BEFORE any status exists, so the coexistence is unrepresentable."
+    },
+    {
+      "id": "unknown_receipt_structure_refused",
+      "substate": {
+        "outcome": "PROTECTED",
+        "reason_code": "minimum_disclosure"
+      },
+      "provenance": {},
+      "receipt_structure": "attested",
+      "expect_error": "invalid_field_value",
+      "why": "The evidence vocabulary is closed. 'attested' is not a thing a keyless consumer can have observed, so it cannot be an input."
+    }
+  ],
+  "delivery_filter": [
+    {
+      "id": "activated_principal_passes_through",
+      "metadata": {
+        "traceId": "abc",
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "bindings": [
+        {
+          "principal": "p1",
+          "task_id": "t1",
+          "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+          "version": "v0",
+          "channel": "get_task"
+        }
+      ],
+      "query": {
+        "principal": "p1",
+        "task_id": "t1",
+        "channel": "get_task"
+      },
+      "expect": {
+        "kind": "passthrough"
+      },
+      "why": "The principal opted in on this task and this channel; the substate is theirs to read."
+    },
+    {
+      "id": "non_activated_principal_gets_marker",
+      "metadata": {
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "ACCESS_REDUCED",
+          "reason_code": "minimum_disclosure",
+          "withheld_fields": [
+            "email"
+          ]
+        }
+      },
+      "bindings": [],
+      "query": {
+        "principal": "p2",
+        "task_id": "t1",
+        "channel": "get_task"
+      },
+      "expect": {
+        "kind": "withheld"
+      },
+      "why": "H-009 forward: no opt-in, no decision content. The runner asserts the replaced value carries exactly {version,status,reason} and none of outcome / reason_code / withheld_fields."
+    },
+    {
+      "id": "other_principal_while_first_is_activated",
+      "metadata": {
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "bindings": [
+        {
+          "principal": "p1",
+          "task_id": "t1",
+          "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+          "version": "v0",
+          "channel": "get_task"
+        }
+      ],
+      "query": {
+        "principal": "p2",
+        "task_id": "t1",
+        "channel": "get_task"
+      },
+      "expect": {
+        "kind": "withheld"
+      },
+      "why": "H-009's core: activation is per PRINCIPAL. p1's opt-in is not p2's."
+    },
+    {
+      "id": "channel_mismatch_gets_marker",
+      "metadata": {
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "bindings": [
+        {
+          "principal": "p1",
+          "task_id": "t1",
+          "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+          "version": "v0",
+          "channel": "request_response"
+        }
+      ],
+      "query": {
+        "principal": "p1",
+        "task_id": "t1",
+        "channel": "webhook"
+      },
+      "expect": {
+        "kind": "withheld"
+      },
+      "why": "Opting in on the request path says nothing about wanting the substate pushed to a webhook endpoint. The channel is part of the binding, not a detail of it."
+    },
+    {
+      "id": "no_report_stays_absent",
+      "metadata": {
+        "traceId": "abc"
+      },
+      "bindings": [],
+      "query": {
+        "principal": "p2",
+        "task_id": "t1",
+        "channel": "get_task"
+      },
+      "expect": {
+        "kind": "unchanged_absent"
+      },
+      "why": "H-009 reverse, half one: where no report exists, no marker is invented. Absence stays absence."
+    },
+    {
+      "id": "withheld_distinguishable_from_absent",
+      "metadata": {
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "bindings": [],
+      "query": {
+        "principal": "p2",
+        "task_id": "t1",
+        "channel": "subscribe"
+      },
+      "expect": {
+        "kind": "withheld"
+      },
+      "why": "H-009 reverse, half two: the extension key SURVIVES filtering. A reader can tell 'reporting exists and I have not activated it' from 'this task was never reported on' -- stripping to bare absence would erase the governance signal itself."
+    },
+    {
+      "id": "poisoned_binding_unknown_channel_withheld",
+      "metadata": {
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "bindings": [
+        {
+          "principal": "p1",
+          "task_id": "t1",
+          "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+          "version": "v0",
+          "channel": "email"
+        }
+      ],
+      "query": {
+        "principal": "p1",
+        "task_id": "t1",
+        "channel": "email"
+      },
+      "expect": {
+        "kind": "withheld"
+      },
+      "why": "Round-1 codex P0: bind_activation validates only what it creates; a persistence record never went through it. A poisoned binding with an undeclared channel, matched by a same-shaped query, must count as NO activation — raw string matching released the substate here before the read boundary validated both sides."
+    },
+    {
+      "id": "unknown_channel_query_withheld",
+      "metadata": {
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "bindings": [
+        {
+          "principal": "p1",
+          "task_id": "t1",
+          "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+          "version": "v0",
+          "channel": "get_task"
+        }
+      ],
+      "query": {
+        "principal": "p1",
+        "task_id": "t1",
+        "channel": "email"
+      },
+      "expect": {
+        "kind": "withheld"
+      },
+      "why": "A delivery on a channel the module has never heard of cannot be reasoned about, so it is not activated — fail-closed at the filter, not an exception the transport must remember to catch."
+    },
+    {
+      "id": "empty_principal_query_withheld",
+      "metadata": {
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "bindings": [
+        {
+          "principal": "p1",
+          "task_id": "t1",
+          "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+          "version": "v0",
+          "channel": "get_task"
+        }
+      ],
+      "query": {
+        "principal": "",
+        "task_id": "t1",
+        "channel": "get_task"
+      },
+      "expect": {
+        "kind": "withheld"
+      },
+      "why": "An empty principal binds to nobody and must read as nobody."
+    },
+    {
+      "id": "foreign_uri_binding_withheld",
+      "metadata": {
+        "urn:x-aegis-placeholder:a2a:boundary-decision:v0": {
+          "version": "v0",
+          "outcome": "PROTECTED",
+          "reason_code": "minimum_disclosure"
+        }
+      },
+      "bindings": [
+        {
+          "principal": "p1",
+          "task_id": "t1",
+          "uri": "https://evil.example/ext/other/v1",
+          "version": "v0",
+          "channel": "get_task"
+        }
+      ],
+      "query": {
+        "principal": "p1",
+        "task_id": "t1",
+        "channel": "get_task"
+      },
+      "expect": {
+        "kind": "withheld"
+      },
+      "why": "The query here is perfectly legal — which is exactly why this vector exists: it is the case where ONLY the stored-binding validation stands between a poisoned record and a passthrough. A binding for a different extension URI must not satisfy a query about this one, even when principal, task and channel all match."
+    }
+  ],
+  "activation_binding": [
+    {
+      "id": "bind_then_rebind_is_idempotent",
+      "existing": [],
+      "bind": {
+        "principal": "p1",
+        "task_id": "t1",
+        "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+        "version": "v0",
+        "channel": "get_task"
+      },
+      "bind_again": true,
+      "expect_count": 1,
+      "why": "Re-binding an identical tuple is a no-op, not a duplicate row."
+    },
+    {
+      "id": "foreign_uri_refused",
+      "existing": [],
+      "bind": {
+        "principal": "p1",
+        "task_id": "t1",
+        "uri": "https://example.com/ext/other/v1",
+        "version": "v0",
+        "channel": "get_task"
+      },
+      "expect_error": "unknown_extension_uri",
+      "why": "A shared bag of URIs is how a near-miss identifier inherits someone else's opt-in."
+    },
+    {
+      "id": "future_version_refused",
+      "existing": [],
+      "bind": {
+        "principal": "p1",
+        "task_id": "t1",
+        "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+        "version": "v1",
+        "channel": "get_task"
+      },
+      "expect_error": "unsupported_extension_version",
+      "why": "An opt-in to v0 must not silently cover a future vocabulary."
+    },
+    {
+      "id": "empty_principal_refused",
+      "existing": [],
+      "bind": {
+        "principal": "",
+        "task_id": "t1",
+        "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+        "version": "v0",
+        "channel": "get_task"
+      },
+      "expect_error": "invalid_activation_binding",
+      "why": "Activation binds to an authenticated principal identity; an empty one binds to nobody and would read as everybody."
+    },
+    {
+      "id": "unknown_channel_refused",
+      "existing": [],
+      "bind": {
+        "principal": "p1",
+        "task_id": "t1",
+        "uri": "urn:x-aegis-placeholder:a2a:boundary-decision:v0",
+        "version": "v0",
+        "channel": "carrier_pigeon"
+      },
+      "expect_error": "unknown_delivery_channel",
+      "why": "The channel vocabulary is closed; a channel the filter has never heard of cannot be reasoned about."
+    }
+  ]
+}
