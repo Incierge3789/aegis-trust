@@ -15,6 +15,11 @@
 #     Sigstore/cosign signatures and SBOMs from the original run still apply to these bytes.
 #   - It is manual (workflow_dispatch) — never triggered by a tag.
 #
+# Upload tool: a current `twine` from PyPI, not the pinned pypa action — the action's bundled
+# twine rejects the wheel's Metadata-Version 2.5 (produced by the current build backend).
+# The same rejection will hit release-attestation.yml's token-free job once the publisher is
+# re-registered; bump that action when doing so.
+#
 # Once the Trusted Publisher is re-registered under nemotek-inc, delete PYPI_TOKEN and this file.
 name: pypi-token-upload
 on:
@@ -63,10 +68,18 @@ jobs:
           done
           [ "$n" -ge 2 ] || { echo "refuse: expected a wheel and an sdist, found $n file(s)" >&2; exit 2; }
           echo "ok: $n file(s) carry $EXPECTED"
-      - name: Upload with the maintainer API token (no PEP 740 attestations on this path)
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+      - uses: actions/setup-python@v5
         with:
-          packages-dir: dist
-          password: ${{ secrets.PYPI_TOKEN }}
-          skip-existing: true
-          attestations: false
+          python-version: "3.12"
+      - name: Upload with the maintainer API token via current twine (no PEP 740 attestations on this path)
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          TWINE_NON_INTERACTIVE: "1"
+        run: |
+          set -euo pipefail
+          python -m pip install -q -U pip "twine>=6.1" "packaging>=25"
+          python -m twine --version
+          python -m twine check --strict dist/*
+          python -m twine upload --skip-existing --verbose dist/*
