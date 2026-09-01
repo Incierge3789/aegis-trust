@@ -474,16 +474,50 @@ describe("checkBoundary (Doctor v1)", () => {
     expect(sent.mode).toBe("full");
     expect(sent.schema_version).toBe(1);
     expect("principal" in sent).toBe(false);
-    // USAGE_METERING #4: witness claims are opt-in — absent claims must leave
+    // Usage-metering witness claims are opt-in — absent claims must leave
     // the body byte-identical to prior SDKs (no attribution/synthetic keys).
     expect("attribution" in sent).toBe(false);
     expect("synthetic" in sent).toBe(false);
+    // destination_resource_id is opt-in too: absent -> no key (byte-identical body).
+    expect("destination_resource_id" in sent).toBe(false);
     expect(view.outcome).toBe("PROTECTED");
     expect(view.allowed_fields).toEqual(["name"]);
   });
+  it("sends destination_resource_id top-level and verbatim only when set", async () => {
+    // A caller-declared label for the concrete resource behind `destination`.
+    // The SDK neither validates it nor changes its own result on it.
+    const captured: { body: string }[] = [];
+    mockFetch(async (_input, init) => {
+      captured.push({ body: String(init?.body) });
+      return new Response(
+        JSON.stringify({
+          source: "CORE",
+          outcome: "PROTECTED",
+          purpose_label: "p",
+          allowed_fields: ["name"],
+          withheld_fields: [],
+          reason_code: "minimum_disclosure",
+          reason_label: "Minimum disclosure",
+          evidence_available: true,
+          evidence: null,
+        }),
+        { status: 200 },
+      );
+    });
+    const c = new AegisClient({ baseUrl: "https://localhost:8443/api/v1" });
+    await c.checkBoundary({
+      purpose: "p",
+      scope: ["name"],
+      destination: "system_of_record",
+      destinationResourceId: "res_123",
+    });
+    const sent = JSON.parse(captured[0]!.body);
+    expect(sent.destination).toBe("system_of_record");
+    expect(sent.destination_resource_id).toBe("res_123");
+  });
   it("carries enforcement-neutral witness claims verbatim when set", async () => {
-    // USAGE_METERING #4: top-level wire fields `attribution: {human,
-    // on_behalf_of[]}` and `synthetic: bool` (context.rs consumer contract).
+    // Usage-metering witness claims: top-level wire fields `attribution: {human,
+    // on_behalf_of[]}` and `synthetic: bool` (server-side consumer contract).
     // Claims for the receipt chain only — never authorization inputs.
     const captured: { body: string }[] = [];
     mockFetch(async (_input, init) => {

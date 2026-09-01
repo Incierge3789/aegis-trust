@@ -428,7 +428,7 @@ def test_never_nests_the_token_under_delegation():
     with delegate("researcher", ["customer_support"], client=c):
         c.check_boundary("customer_support", ["name"])
     body = _boundary_body(calls)
-    # aegis-decide-plane compat.rs decide_flat refuses a nested `delegation`
+    # The server-side flat-wire handler refuses a nested `delegation`
     # outright, precisely so a wrong-shape token is never dropped silently and
     # answered at full width. Sending the flat key is the contract.
     assert "delegation" not in body

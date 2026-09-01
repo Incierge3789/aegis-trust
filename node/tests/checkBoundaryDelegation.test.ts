@@ -447,7 +447,7 @@ describe("checkBoundary — wire shape (flat face, not the envelope dialect)", (
       await c.checkBoundary({ purpose: "customer_support", scope: ["name"] });
     });
     const body = boundaryBody(calls);
-    // aegis-decide-plane compat.rs decide_flat refuses a nested `delegation`
+    // The server-side flat-wire handler refuses a nested `delegation`
     // outright, precisely so a wrong-shape token is never dropped silently
     // and answered at full width. Sending the flat key is the contract.
     expect(body).not.toHaveProperty("delegation");

@@ -135,18 +135,20 @@ def test_check_boundary_posts_array_scope_and_snake_cases_fields():
     assert body["mode"] == "full"
     assert body["schema_version"] == 1
     assert "principal" not in body
-    # USAGE_METERING #4: witness claims are opt-in — absent claims must leave
+    # Usage-metering witness claims are opt-in — absent claims must leave
     # the body byte-identical to prior SDKs (no attribution/synthetic keys).
     assert "attribution" not in body
     assert "synthetic" not in body
     assert view.outcome == "PROTECTED"
     assert view.allowed_fields == ["name"]
+    # destination_resource_id is opt-in too: absent -> no key (byte-identical body).
+    assert "destination_resource_id" not in captured["body"]
 
 
 def test_check_boundary_witness_claims_passed_verbatim():
-    # USAGE_METERING #4: enforcement-neutral witness claims. When set, the
+    # Enforcement-neutral usage-metering witness claims. When set, the
     # top-level wire fields `attribution: {human, on_behalf_of[]}` and
-    # `synthetic: bool` are carried verbatim (context.rs consumer contract);
+    # `synthetic: bool` are carried verbatim (server-side consumer contract);
     # they are claims for the receipt chain, never authorization inputs.
     captured = {}
 
@@ -196,6 +198,66 @@ def test_check_boundary_body_omits_unset_witness_claims():
     )
     assert "attribution" not in body
     assert "synthetic" not in body
+
+
+def test_check_boundary_body_destination_resource_id_is_top_level_and_verbatim():
+    # A caller-declared label for the concrete resource behind `destination`.
+    # Sent verbatim, top-level, and ONLY when set — the SDK does not validate
+    # it and does not change its own result on it.
+    body = AegisClient._check_boundary_body(
+        "p",
+        ["name"],
+        origin="https://localhost:8443/api/v1",
+        destination="system_of_record",
+        destination_resource_id="res_123",
+    )
+    assert body["destination"] == "system_of_record"
+    assert body["destination_resource_id"] == "res_123"
+
+
+def test_check_boundary_body_omits_unset_destination_resource_id():
+    # Byte-identical body when the label is not given (None == omitted).
+    body = AegisClient._check_boundary_body(
+        "p",
+        ["name"],
+        origin="https://localhost:8443/api/v1",
+        destination="system_of_record",
+    )
+    assert "destination_resource_id" not in body
+    body2 = AegisClient._check_boundary_body(
+        "p",
+        ["name"],
+        origin="https://localhost:8443/api/v1",
+        destination_resource_id=None,
+    )
+    assert "destination_resource_id" not in body2
+
+
+def test_check_boundary_sends_destination_resource_id_on_the_wire():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "source": "CORE",
+                "outcome": "PROTECTED",
+                "purpose_label": "p",
+                "allowed_fields": ["name"],
+                "withheld_fields": [],
+                "reason_code": "minimum_disclosure",
+                "reason_label": "Minimum disclosure",
+                "evidence_available": True,
+                "evidence": None,
+            },
+        )
+
+    c = _client_with_transport(handler)
+    c.check_boundary(
+        "p", ["name"], destination="system_of_record", destination_resource_id="res_123"
+    )
+    assert seen.get("destination_resource_id") == "res_123"
 
 
 def test_check_boundary_raises_on_non_2xx():

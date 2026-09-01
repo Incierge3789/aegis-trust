@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added — `checkBoundary` carries an optional `destinationResourceId` (Python parity)
+- `checkBoundary({ destinationResourceId })` sends top-level
+  `destination_resource_id` (string) verbatim and ONLY when set; absent means
+  a byte-identical body. A caller-declared label for the concrete resource
+  behind `destination`; the SDK neither validates it nor changes its own
+  result on it. Interpretation is server-side policy, not a client guarantee.
+
+### Changed — comments no longer cite internal server file paths or internal ticket ids
+- Wire-contract comments now describe the contract in neutral terms. No behavior change.
+
 ### Added — `checkBoundary` carries the A-1 delegation capability (PyPI parity)
 - `CheckBoundaryArgs.capability` (top-level wire field `capability`), and —
   the load-bearing half — it defaults to the token attached by the enclosing

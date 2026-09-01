@@ -145,7 +145,7 @@ export class HistoryStore {
   // is atomic because Node is single-threaded. Across processes writing the
   // same JSONL concurrently, two callers can both miss the key cache and
   // both append — the SDK does not file-lock the JSONL. Production-grade
-  // cross-process dedup is sprint_002 hardening (D-952 family).
+  // cross-process dedup is a later hardening step.
   recordIdempotent(
     args: {
       function: string;

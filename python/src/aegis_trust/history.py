@@ -137,7 +137,7 @@ def _payload_hash(
     blocked_fields: list[str],
     mode: str,
 ) -> str:
-    """Canonical SHA256 over idempotency-significant fields (D-952 P0-2 parity with TS).
+    """Canonical SHA256 over idempotency-significant fields (parity with TS).
 
     S017 D-D: ``schema_version`` is intentionally excluded — it is record
     metadata, not idempotency-significant, so adding it must not change this

@@ -451,6 +451,7 @@ class AegisClient:
         *,
         origin: str,
         destination: str | None = None,
+        destination_resource_id: str | None = None,
         agent_id: str | None = None,
         environment: str | None = None,
         mode: str | None = None,
@@ -461,16 +462,23 @@ class AegisClient:
     ) -> dict[str, Any]:
         """Build the ``/check-boundary`` request body.
 
+        ``destination_resource_id`` is an OPTIONAL caller-declared identifier
+        of the concrete resource behind ``destination`` (for example a folder
+        id or a channel id). It is sent verbatim as a top-level string and
+        ONLY when set; the SDK neither validates it nor changes its own result
+        on it. What the server does with the label is server-side policy, not
+        a client guarantee.
+
         ``purpose`` + ``scope`` are required; ``scope`` is a *list* here (the
         boundary endpoint's contract, unlike ``/check-access``). The
         authenticated principal is the JWT subject server-side and is NEVER sent
         in the body; ``agent_id`` is advisory.
 
         ``attribution`` / ``synthetic`` are OPTIONAL enforcement-neutral
-        witness claims (USAGE_METERING 残作業 #4). They are NEVER authorization
+        witness claims for usage metering. They are NEVER authorization
         inputs — Core cannot change the decision on them; it only freezes hash
-        witnesses into the receipt chain (INV-6, never the raw ids). Wire shape
-        (aegis-gateway-rh ``context.rs``): top-level ``attribution:
+        witnesses into the receipt chain (a hash witness only, never the raw ids). Wire shape
+        (the server-side consumer of these claims): top-level ``attribution:
         {"human": str, "on_behalf_of": [str]}`` — the human (and delegation
         chain) this request serves — and top-level ``synthetic: bool`` marking
         probe/drill traffic for billing exclusion. Both are sent verbatim and
@@ -484,13 +492,14 @@ class AegisClient:
         path. An explicit value wins; explicit ``None`` opts out for one call.
         Wire shape is TOP-LEVEL ``capability`` — this flat face is not the
         envelope dialect, and sending ``delegation: {capability}`` here is
-        refused 422 by the plane (aegis-decide-plane ``compat.rs``
-        ``decide_flat``), precisely so a token in the wrong shape is never
-        silently dropped and answered at full width.
+        refused 422 by the server-side flat-wire handler, precisely so a token in
+        the wrong shape is never silently dropped and answered at full width.
         """
         body: dict[str, Any] = {"purpose": purpose, "scope": list(scope)}
         if destination is not None:
             body["destination"] = destination
+        if destination_resource_id is not None:
+            body["destination_resource_id"] = destination_resource_id
         if agent_id is not None:
             body["agent_id"] = agent_id
         if environment is not None:
@@ -623,6 +632,7 @@ class AegisClient:
         scope: list[str],
         *,
         destination: str | None = None,
+        destination_resource_id: str | None = None,
         agent_id: str | None = None,
         environment: str | None = None,
         mode: str | None = None,
@@ -664,6 +674,7 @@ class AegisClient:
             scope,
             origin=self._base_url,
             destination=destination,
+            destination_resource_id=destination_resource_id,
             agent_id=agent_id,
             environment=environment,
             mode=mode,
@@ -682,6 +693,7 @@ class AegisClient:
         scope: list[str],
         *,
         destination: str | None = None,
+        destination_resource_id: str | None = None,
         agent_id: str | None = None,
         environment: str | None = None,
         mode: str | None = None,
@@ -710,6 +722,7 @@ class AegisClient:
             scope,
             origin=self._base_url,
             destination=destination,
+            destination_resource_id=destination_resource_id,
             agent_id=agent_id,
             environment=environment,
             mode=mode,
@@ -1108,7 +1121,7 @@ class AegisClient:
     ) -> dict[str, Any]:
         """Decide ONE tool invocation at the boundary (POST /tool-call).
 
-        Arguments never leave the caller — refs and labels only (INV-6).
+        Arguments never leave the caller — refs and labels only.
         Returns ``{"decision": ..., "enforcement": ...}``; a BLOCKED outcome
         is still HTTP 200 — gate on ``decision["outcome"]`` being in
         :data:`PASSING_OUTCOMES` AND ``decision["ledgered"]`` (or use
