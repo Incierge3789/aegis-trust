@@ -227,13 +227,13 @@ export interface BoundaryDecisionView {
   readonly evidence: CoreDecisionEvidence | null;
 }
 
-// Enforcement-neutral attribution witness claim (USAGE_METERING 残作業 #4).
-// Wire shape mirrors the plane's consumer (aegis-gateway-rh context.rs):
+// Enforcement-neutral attribution witness claim (usage metering).
+// Wire shape mirrors the server-side consumer of these claims:
 // `{human, on_behalf_of[]}` — snake_case on the wire, so the field names here
 // ARE the wire names and the object is sent verbatim. Claims the human (and
 // delegation chain) this request serves, for billing 帰属 only: NEVER an
 // authorization input — Core cannot change the decision on it; only hash
-// witnesses reach the receipt chain (INV-6, never the raw ids).
+// witnesses reach the receipt chain (a hash witness only, never the raw ids).
 export interface AttributionClaim {
   readonly human?: string;
   readonly on_behalf_of?: ReadonlyArray<string>;
@@ -246,6 +246,14 @@ export interface CheckBoundaryArgs {
   readonly purpose: string;
   readonly scope: ReadonlyArray<string>;
   readonly destination?: string;
+  /**
+   * Optional caller-declared identifier of the concrete resource behind
+   * `destination` (for example a folder id or a channel id). Sent verbatim as
+   * top-level `destination_resource_id` and ONLY when set; the SDK neither
+   * validates it nor changes its own result on it. What the server does with
+   * the label is server-side policy, not a client guarantee.
+   */
+  readonly destinationResourceId?: string;
   readonly agentId?: string;
   readonly environment?: string;
   readonly mode?: string;
@@ -525,11 +533,12 @@ export class AegisClient {
       scope: [...args.scope],
     };
     if (args.destination !== undefined) body.destination = args.destination;
+    if (args.destinationResourceId !== undefined) body.destination_resource_id = args.destinationResourceId;
     if (args.agentId !== undefined) body.agent_id = args.agentId;
     if (args.environment !== undefined) body.environment = args.environment;
     if (args.mode !== undefined) body.mode = args.mode;
     if (args.schemaVersion !== undefined) body.schema_version = args.schemaVersion;
-    // Enforcement-neutral witness claims (USAGE_METERING #4): verbatim,
+    // Enforcement-neutral witness claims (usage metering): verbatim,
     // only when set — never authorization inputs, hash-witnessed by Core.
     // Deployment caveat (2026-07-16 wire audit): only the decide-plane wire
     // carries both claims; the monolith gateway build ignores these fields
@@ -578,7 +587,7 @@ export class AegisClient {
     //
     // Wire shape: TOP-LEVEL `capability`. This flat face is not the envelope
     // dialect — sending `delegation: {capability}` here is refused 422 by the
-    // plane (aegis-decide-plane compat.rs decide_flat), precisely so a token
+    // server-side flat-wire handler, precisely so a token
     // in the wrong shape is never silently dropped and answered at full width.
     // Origin-bound read: the ambient token is attached ONLY if this client is
     // the one it was minted against. A bare bearer read would let a second
@@ -953,7 +962,7 @@ export class AegisClient {
   }
 
   /** Decide ONE tool invocation at the boundary (POST /tool-call).
-   * Arguments never leave the caller — refs and labels only (INV-6). A
+   * Arguments never leave the caller — refs and labels only. A
    * BLOCKED outcome is still HTTP 200; gate on `decision.outcome` being in
    * PASSING_OUTCOMES AND `decision.ledgered` (or use toolAllowed()). */
   async toolCall(args: ToolCallArgs): Promise<ToolCallResult> {

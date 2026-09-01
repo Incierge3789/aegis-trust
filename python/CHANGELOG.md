@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added — `check_boundary` carries an optional `destination_resource_id` (npm parity)
+- `check_boundary` / `acheck_boundary` accept `destination_resource_id`
+  (top-level wire field `destination_resource_id`, string). It is a
+  caller-declared label for the concrete resource behind `destination` (for
+  example a folder id or a channel id), sent verbatim and ONLY when set — a
+  call without it produces a byte-identical body to before. The SDK neither
+  validates the label nor changes its own result on it; what the server does
+  with it is server-side policy, not a client guarantee.
+
+### Changed — public surfaces no longer cite internal server file paths or internal ticket ids
+- Docstrings and comments that pointed at server-side source files and
+  internal work-item numbers now describe the wire contract in neutral terms.
+  A schema self-test fixture that used a tenant-specific scope token now uses
+  `example_ai_ops`. No behavior change.
+
 ### Added — `check_boundary` carries the A-1 delegation capability (npm parity)
 - `check_boundary` / `acheck_boundary` accept `capability` (top-level wire
   field `capability`), and — the load-bearing half — it defaults to the token

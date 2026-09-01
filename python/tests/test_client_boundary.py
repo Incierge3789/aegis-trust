@@ -198,6 +198,66 @@ def test_check_boundary_body_omits_unset_witness_claims():
     assert "synthetic" not in body
 
 
+def test_check_boundary_body_destination_resource_id_is_top_level_and_verbatim():
+    # A caller-declared label for the concrete resource behind `destination`.
+    # Sent verbatim, top-level, and ONLY when set — the SDK does not validate
+    # it and does not change its own result on it.
+    body = AegisClient._check_boundary_body(
+        "p",
+        ["name"],
+        origin="https://localhost:8443/api/v1",
+        destination="system_of_record",
+        destination_resource_id="res_123",
+    )
+    assert body["destination"] == "system_of_record"
+    assert body["destination_resource_id"] == "res_123"
+
+
+def test_check_boundary_body_omits_unset_destination_resource_id():
+    # Byte-identical body when the label is not given (None == omitted).
+    body = AegisClient._check_boundary_body(
+        "p",
+        ["name"],
+        origin="https://localhost:8443/api/v1",
+        destination="system_of_record",
+    )
+    assert "destination_resource_id" not in body
+    body2 = AegisClient._check_boundary_body(
+        "p",
+        ["name"],
+        origin="https://localhost:8443/api/v1",
+        destination_resource_id=None,
+    )
+    assert "destination_resource_id" not in body2
+
+
+def test_check_boundary_sends_destination_resource_id_on_the_wire():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "source": "CORE",
+                "outcome": "PROTECTED",
+                "purpose_label": "p",
+                "allowed_fields": ["name"],
+                "withheld_fields": [],
+                "reason_code": "minimum_disclosure",
+                "reason_label": "Minimum disclosure",
+                "evidence_available": True,
+                "evidence": None,
+            },
+        )
+
+    c = _client_with_transport(handler)
+    c.check_boundary(
+        "p", ["name"], destination="system_of_record", destination_resource_id="res_123"
+    )
+    assert seen.get("destination_resource_id") == "res_123"
+
+
 def test_check_boundary_raises_on_non_2xx():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="nope")
