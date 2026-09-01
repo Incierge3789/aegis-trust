@@ -166,7 +166,7 @@ describe("validation", () => {
 
 // S015 P0-1 / H5 / H9: an empty spec (neither scope nor deny) must fail
 // closed at construction. rc7 returned the wrapped function's data entirely
-// unfiltered here — every field, incl. PII — which is the leak D-161 found.
+// unfiltered here — every field, incl. PII — which is the leak a review found.
 // Parity with Python (shield.py:761-774, raises "minimum disclosure").
 describe("empty scope and deny → minimum-disclosure error (S015)", () => {
   it("shield() rejects a purpose-only spec", () => {

@@ -474,7 +474,7 @@ describe("checkBoundary (Doctor v1)", () => {
     expect(sent.mode).toBe("full");
     expect(sent.schema_version).toBe(1);
     expect("principal" in sent).toBe(false);
-    // USAGE_METERING #4: witness claims are opt-in — absent claims must leave
+    // Usage-metering witness claims are opt-in — absent claims must leave
     // the body byte-identical to prior SDKs (no attribution/synthetic keys).
     expect("attribution" in sent).toBe(false);
     expect("synthetic" in sent).toBe(false);

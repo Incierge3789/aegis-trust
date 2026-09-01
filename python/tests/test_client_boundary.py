@@ -135,18 +135,20 @@ def test_check_boundary_posts_array_scope_and_snake_cases_fields():
     assert body["mode"] == "full"
     assert body["schema_version"] == 1
     assert "principal" not in body
-    # USAGE_METERING #4: witness claims are opt-in — absent claims must leave
+    # Usage-metering witness claims are opt-in — absent claims must leave
     # the body byte-identical to prior SDKs (no attribution/synthetic keys).
     assert "attribution" not in body
     assert "synthetic" not in body
     assert view.outcome == "PROTECTED"
     assert view.allowed_fields == ["name"]
+    # destination_resource_id is opt-in too: absent -> no key (byte-identical body).
+    assert "destination_resource_id" not in captured["body"]
 
 
 def test_check_boundary_witness_claims_passed_verbatim():
-    # USAGE_METERING #4: enforcement-neutral witness claims. When set, the
+    # Enforcement-neutral usage-metering witness claims. When set, the
     # top-level wire fields `attribution: {human, on_behalf_of[]}` and
-    # `synthetic: bool` are carried verbatim (context.rs consumer contract);
+    # `synthetic: bool` are carried verbatim (server-side consumer contract);
     # they are claims for the receipt chain, never authorization inputs.
     captured = {}
 

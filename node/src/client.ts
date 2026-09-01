@@ -540,10 +540,9 @@ export class AegisClient {
     if (args.schemaVersion !== undefined) body.schema_version = args.schemaVersion;
     // Enforcement-neutral witness claims (usage metering): verbatim,
     // only when set — never authorization inputs, hash-witnessed by Core.
-    // Deployment caveat (2026-07-16 wire audit): only the decide-plane wire
-    // carries both claims; the monolith gateway build ignores these fields
-    // (HTTP 200, nothing witnessed). Confirm the deployment is plane-fronted
-    // before relying on `synthetic` for billing exclusion.
+    // Deployment caveat: only newer server builds carry both claims; older
+    // builds ignore these fields (HTTP 200, nothing witnessed). Confirm the
+    // server build before relying on `synthetic` for billing exclusion.
     if (args.attribution !== undefined) body.attribution = args.attribution;
     if (args.synthetic !== undefined) body.synthetic = args.synthetic;
     // A-1 delegation. A denied window refuses HERE, before the wire: the mint

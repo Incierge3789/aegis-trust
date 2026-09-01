@@ -121,7 +121,7 @@ to blocked|check_required|approval_required"): a receipt that requires a check
 or an approval has not released any data, and a later grant produces its own
 `PROTECTED`/`ACCESS_REDUCED` receipt. Any decision outside this table still
 raises `ProjectionError` (fail-closed skip-and-count, never guessed).
-(design-panel decision; internal record.)
+
 
 ## Known v0 limits (documented, not hidden)
 
