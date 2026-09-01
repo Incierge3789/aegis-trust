@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-01
+
 ### Added — `check_boundary` carries an optional `destination_resource_id` (npm parity)
 - `check_boundary` / `acheck_boundary` accept `destination_resource_id`
   (top-level wire field `destination_resource_id`, string). It is a

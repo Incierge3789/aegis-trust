@@ -12,7 +12,7 @@ overrides = [{ name = "msgpack", specifier = ">=1.2.1" }]
 
 [[package]]
 name = "aegis-trust"
-version = "0.9.3"
+version = "0.10.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
