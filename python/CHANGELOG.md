@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-01
+
+### Fixed — release-gate hygiene (no API change)
+- Public artifacts are English-only again: two internal-label characters in a
+  changelog line and a module docstring were replaced with English.
+- `0.10.0` was tagged but never distributed: the pre-release productization
+  gate stopped it on exactly these findings (fail-closed), so `0.10.1` is the
+  first version of this line on PyPI. Everything listed under `0.10.0` ships
+  here.
+
 ## [0.10.0] - 2026-09-01
 
 ### Added — `check_boundary` carries an optional `destination_resource_id` (npm parity)
@@ -79,7 +89,7 @@
   behavior change for non-plane-fronted deployments — confirm the serving
   deployment before relying on delegation here.
 
-### Added — keyless receipt verifier (`aegis_trust.receipt_verify`, 穴1)
+### Added — keyless receipt verifier (`aegis_trust.receipt_verify`)
 - `session_dag_root` / `verify_session_receipt_structure` /
   `dangling_prior_receipt_refs` / `compute_lineage_root` /
   `verify_lineage_root` / `is_value_free_label` — consumer-side structural

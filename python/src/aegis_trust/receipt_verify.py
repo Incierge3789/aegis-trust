@@ -1,6 +1,6 @@
 """Keyless (LITE) structural verifier for Aegis boundary receipts.
 
-What the SDK CAN verify without any key material (穴1 — the consumer-side
+What the SDK CAN verify without any key material (gap 1 — the consumer-side
 receipt verifier):
 
 * ``session_dag_root`` — recompute the SHA-256 aggregation root over a Session

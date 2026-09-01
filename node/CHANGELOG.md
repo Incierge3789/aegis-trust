@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-01
+
+### Fixed — release-gate hygiene
+- `guardTool({ fields })` type validation and the canonical-JSON helpers in the
+  receipt verifier now throw coded `AegisValidationError` envelopes
+  (`aegis.guard_tool.fields.invalid`, `aegis.receipt.canonical.not_iterable`,
+  `aegis.receipt.canonical.unorderable`) instead of bare `TypeError`, so every
+  error the SDK raises carries `code` / `remediation` / `docs_url`.
+- Public artifacts are English-only again (three internal-label characters in
+  comments replaced with English).
+- `0.10.0` was tagged but never distributed (the pre-release gate stopped it on
+  exactly these findings); `0.10.1` is the first version of this line on npm.
+
 ## [0.10.0] - 2026-09-01
 
 ### Added — `checkBoundary` carries an optional `destinationResourceId` (Python parity)

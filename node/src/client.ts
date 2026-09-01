@@ -231,7 +231,7 @@ export interface BoundaryDecisionView {
 // Wire shape mirrors the server-side consumer of these claims:
 // `{human, on_behalf_of[]}` — snake_case on the wire, so the field names here
 // ARE the wire names and the object is sent verbatim. Claims the human (and
-// delegation chain) this request serves, for billing 帰属 only: NEVER an
+// delegation chain) this request serves, for billing attribution only: NEVER an
 // authorization input — Core cannot change the decision on it; only hash
 // witnesses reach the receipt chain (a hash witness only, never the raw ids).
 export interface AttributionClaim {

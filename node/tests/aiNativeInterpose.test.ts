@@ -167,7 +167,7 @@ describe("guardTool", () => {
     expect(() => guardTool({ purpose: "p", tool: "" })).toThrow(AegisValidationError);
     expect(() =>
       guardTool({ purpose: "p", fields: "name" as unknown as string[] }),
-    ).toThrow(TypeError);
+    ).toThrow(AegisValidationError);   // coded envelope (aegis.guard_tool.fields.invalid), no bare TypeError
   });
 });
 
