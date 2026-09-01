@@ -1,0 +1,72 @@
+# pypi-token-upload — token-based fallback for the PyPI upload step of release-attestation.
+#
+# WHY THIS EXISTS (2026-09-01): the repository moved to the nemotek-inc organization, so the
+# PyPI Trusted Publisher binding (registered under the previous owner) no longer matches the
+# OIDC claims (`repository_owner: nemotek-inc`) and the token-free upload job in
+# release-attestation.yml fails with `invalid-publisher`. Re-registering the publisher is an
+# owner-only action on pypi.org. Until that is done, this workflow uploads the ALREADY BUILT,
+# ALREADY COSIGN-SIGNED wheel + sdist of a finished release-attestation run using the
+# maintainer's PyPI API token stored as the repository secret PYPI_TOKEN.
+#
+# What it does NOT do:
+#   - It does not build anything. It only re-uses the `pypi-dist-for-publish` artifact of the
+#     run you name, and refuses if the files there do not carry the expected version.
+#   - It does not produce PEP 740 attestations (those require Trusted Publishing). The
+#     Sigstore/cosign signatures and SBOMs from the original run still apply to these bytes.
+#   - It is manual (workflow_dispatch) — never triggered by a tag.
+#
+# Once the Trusted Publisher is re-registered under nemotek-inc, delete PYPI_TOKEN and this file.
+name: pypi-token-upload
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "release-attestation run id whose pypi-dist-for-publish artifact to upload"
+        required: true
+        type: string
+      expected_version:
+        description: "version the artifact files must carry (e.g. 0.10.1) — refuses otherwise"
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read     # download an artifact from another run
+concurrency:
+  group: pypi-token-upload
+  cancel-in-progress: false
+jobs:
+  upload:
+    name: Upload already-signed wheel + sdist to PyPI (API token)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download wheel + sdist from the named release-attestation run
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: pypi-dist-for-publish
+          path: dist
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Refuse unless every file carries the expected version
+        shell: bash
+        env:
+          EXPECTED: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          ls -la dist
+          n=0
+          for f in dist/*; do
+            n=$((n+1))
+            case "$(basename "$f")" in
+              *"$EXPECTED"*) ;;
+              *) echo "refuse: $f does not carry version $EXPECTED" >&2; exit 2 ;;
+            esac
+          done
+          [ "$n" -ge 2 ] || { echo "refuse: expected a wheel and an sdist, found $n file(s)" >&2; exit 2; }
+          echo "ok: $n file(s) carry $EXPECTED"
+      - name: Upload with the maintainer API token (no PEP 740 attestations on this path)
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        with:
+          packages-dir: dist
+          password: ${{ secrets.PYPI_TOKEN }}
+          skip-existing: true
+          attestations: false

@@ -581,7 +581,7 @@ jobs:
   # Maintainer one-time setup (owner-only, cannot be delegated to CI/AI): register
   # the Trusted Publisher at pypi.org → manage project `aegis-trust` → Publishing →
   # Add a GitHub publisher:
-  #   owner: Incierge3789   repository: aegis-trust
+  #   owner: nemotek-inc   repository: aegis-trust   (moved from the previous owner on 2026-09-01)
   #   workflow: release-attestation.yml   environment: (leave blank)
   # Until that registration exists, this job fails at the publish step (nothing is
   # uploaded) — it does not leak anything.

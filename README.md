@@ -110,6 +110,14 @@ Package-level guides: [`python/llms.txt`](python/llms.txt) · [`node/llms.txt`](
 > provenance + PyPI PEP 740 attestations, and are attached to the GitHub Release
 > `v0.10.1`. The prior `0.9.0-rc3` (release-integrity incident F-054) remains
 > npm-deprecated and version-scoped.
+>
+> **0.10.1 note.** The repository moved to the `nemotek-inc` organization on
+> 2026-09-01, and both registries' Trusted Publisher bindings still name the
+> previous owner. The Python wheel + sdist for 0.10.1 were therefore uploaded
+> with a maintainer API token from the same cosign-signed artifacts (Sigstore
+> signatures and SBOMs unchanged) — **without PEP 740 attestations** — and the
+> npm release of 0.10.1 is pending until the npm binding is re-registered.
+> Both resume on the token-free, attested path once the bindings are updated.
 
 ## Status
 
