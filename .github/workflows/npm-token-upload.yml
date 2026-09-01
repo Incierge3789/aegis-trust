@@ -1,0 +1,74 @@
+# npm-token-upload — token-based fallback for the npm upload step of release-attestation.
+#
+# WHY THIS EXISTS (2026-09-01): the repository moved to the nemotek-inc organization, so the npm
+# Trusted Publisher binding (registered under the previous owner) no longer matches the OIDC
+# claims and the token-free upload job in release-attestation.yml fails with ENEEDAUTH.
+# Re-registering the binding is an owner-only action on npmjs.com. Until that is done, this
+# workflow uploads the ALREADY BUILT, ALREADY COSIGN-SIGNED tarball of a finished
+# release-attestation run using an npm granular access token stored as the repository secret
+# NPM_TOKEN (publish rights on the `aegis-trust` package; bypass-2FA-for-automation enabled).
+#
+# What it does NOT do:
+#   - It does not build anything. It re-uses the `npm-tarball-for-publish` artifact of the run
+#     you name and refuses if the tarball does not carry the expected version.
+#   - It does not attach npm provenance (that requires the OIDC path). The cosign signature and
+#     SBOM from the original run still apply to these bytes.
+#   - It is manual (workflow_dispatch) — never triggered by a tag.
+#
+# Once the Trusted Publisher is re-registered under nemotek-inc, delete NPM_TOKEN and this file.
+name: npm-token-upload
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "release-attestation run id whose npm-tarball-for-publish artifact to upload"
+        required: true
+        type: string
+      expected_version:
+        description: "version the tarball must carry (e.g. 0.10.1) — refuses otherwise"
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read     # download an artifact from another run
+concurrency:
+  group: npm-token-upload
+  cancel-in-progress: false
+jobs:
+  upload:
+    name: Upload already-signed tarball to npm (access token)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse early when the token secret is not configured
+        shell: bash
+        env:
+          HAVE: ${{ secrets.NPM_TOKEN != '' }}
+        run: |
+          [ "$HAVE" = "true" ] || { echo "refuse: repository secret NPM_TOKEN is not set — nothing uploaded" >&2; exit 2; }
+      - name: Download the signed tarball from the named release-attestation run
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: npm-tarball-for-publish
+          path: tarball
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Refuse unless the tarball carries the expected version, then upload
+        shell: bash
+        env:
+          EXPECTED: ${{ inputs.expected_version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -la tarball
+          TGZ="$(ls tarball/aegis-trust-*.tgz | head -1)"
+          case "$(basename "$TGZ")" in
+            *"$EXPECTED"*) echo "ok: $TGZ carries $EXPECTED" ;;
+            *) echo "refuse: $TGZ does not carry version $EXPECTED" >&2; exit 2 ;;
+          esac
+          npm whoami
+          npm publish "$TGZ" --access public --tag latest
+          npm view aegis-trust version
