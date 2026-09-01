@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-01
+
 ### Added — `checkBoundary` carries an optional `destinationResourceId` (Python parity)
 - `checkBoundary({ destinationResourceId })` sends top-level
   `destination_resource_id` (string) verbatim and ONLY when set; absent means
