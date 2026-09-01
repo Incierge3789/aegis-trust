@@ -118,7 +118,7 @@ def guard_tool(
     deny the function is NEVER invoked and the call returns ``None`` — the
     ``@shield`` convention (no exception to handle, nothing to forget).
 
-    Arguments never leave the process — refs and labels only (INV-6): the
+    Arguments never leave the process — refs and labels only: the
     boundary sees ``tool`` / ``purpose`` / ``owner`` / declared ``fields``,
     never the call arguments or the return value.
 

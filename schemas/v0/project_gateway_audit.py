@@ -366,7 +366,7 @@ def _selftest() -> int:
         "event_type": "access", "fragment_tags": [], "hmac_keyed": True,
         "kind": "receipt", "prev_hash": "sha256:" + "b9dc" + "3" * 60,
         "purpose": "qa:employee_knowledge_qa", "reason_code": "minimum_disclosure",
-        "role": "viewer", "scope": ["nemotek_ai_ops"], "seq": 160,
+        "role": "viewer", "scope": ["example_ai_ops"], "seq": 160,
         "timestamp": "2026-07-05T02:09:46.932481235Z",
     }
 
@@ -389,7 +389,7 @@ def _selftest() -> int:
         validator.validate(ev)
         assert ev["decision"] == "allow" and ev["outcome"] == "protected"
         assert ev["purpose"] == "qa:employee_knowledge_qa"
-        assert ev["scope"] == ["nemotek_ai_ops"]
+        assert ev["scope"] == ["example_ai_ops"]
         assert ev["reason_code"] == "minimum_disclosure"
         assert ev["enforcement_runtime"] == "plane/1.0"
 

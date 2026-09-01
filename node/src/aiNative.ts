@@ -86,7 +86,7 @@ export interface GuardToolOptions {
  * non-200, malformed body, non-passing outcome, or an unledgered decision
  * is a deny). On deny the function is NEVER invoked and the call resolves
  * `null` — the shield convention (nothing to catch, nothing to forget).
- * Arguments never leave the process — refs and labels only (INV-6).
+ * Arguments never leave the process — refs and labels only.
  *
  * An enclosing `delegate()` scope attaches its capability automatically; a
  * DENIED scope (failed mint) denies locally without a gateway round-trip.
