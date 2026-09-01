@@ -141,7 +141,7 @@ export {
   type ShieldHistoryHandle,
 } from "./vitestPlugin.js";
 
-export const VERSION = "0.10.0";
+export const VERSION = "0.10.1";
 
 // Schema version for the audit event format emitted by HistoryStore and
 // the ingest endpoint payload. Bumped when audit record shape changes.
@@ -160,7 +160,7 @@ export const STABILITY_LEVEL: "preview" | "stable" | "deprecated" = "preview";
 // second hardcoded literal there drifted-by-construction).
 export { AEGIS_API_VERSION, AEGIS_API_VERSION_HEADER } from "./constants.js";
 
-// Keyless (LITE) structural receipt verifier — 穴1, the consumer-side
+// Keyless (LITE) structural receipt verifier — gap 1, the consumer-side
 // verification surface (parity with python aegis_trust.receipt_verify;
 // cross-impl pinned vectors in tests/receiptVerify.test.ts).
 export {

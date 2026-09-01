@@ -1,7 +1,7 @@
 // Keyless (LITE) structural verifier for Aegis boundary receipts — parity with
 // python/src/aegis_trust/receipt_verify.py (byte-identical outputs).
 //
-// What the SDK CAN verify without any key material (穴1 — the consumer-side
+// What the SDK CAN verify without any key material (gap 1 — the consumer-side
 // receipt verifier):
 //
 // * `sessionDagRoot` — recompute the SHA-256 aggregation root over a Session
@@ -26,6 +26,7 @@
 // byte-identical to Python's (including Python-`repr` formatting of values).
 
 import { createHash, type Hash } from "node:crypto";
+import { AegisValidationError, aegisDocsUrl } from "./errors.js";
 
 export const SPAN_CRYPTO_SCHEMA_TAG = "aegis-span-crypto.v0";
 export const LINEAGE_ROOT_LEN = 32;
@@ -116,7 +117,12 @@ function pyList(v: unknown): unknown[] {
       return Object.keys(v as object); // Python list(dict) -> keys
     }
   }
-  throw new TypeError(`'${typeof v}' object is not iterable`);
+  throw new AegisValidationError({
+    code: "aegis.receipt.canonical.not_iterable",
+    remediation: "Receipt payloads must be JSON-shaped (objects, arrays, strings, numbers, booleans, null).",
+    docs_url: aegisDocsUrl("aegis.receipt.canonical.not_iterable"),
+    message: `'${typeof v}' object is not iterable`,
+  });
 }
 
 // Python sorted() semantics: homogeneous str (code-point order) or number
@@ -125,9 +131,12 @@ function pyList(v: unknown): unknown[] {
 function pySortCompare(a: unknown, b: unknown): number {
   if (typeof a === "string" && typeof b === "string") return codePointCompare(a, b);
   if (typeof a === "number" && typeof b === "number") return a - b;
-  throw new TypeError(
-    `'<' not supported between instances of '${typeof b}' and '${typeof a}'`,
-  );
+  throw new AegisValidationError({
+    code: "aegis.receipt.canonical.unorderable",
+    remediation: "Receipt lists must be homogeneous strings or numbers to sort canonically.",
+    docs_url: aegisDocsUrl("aegis.receipt.canonical.unorderable"),
+    message: `'<' not supported between instances of '${typeof b}' and '${typeof a}'`,
+  });
 }
 
 // Python `sorted(set(items))`.

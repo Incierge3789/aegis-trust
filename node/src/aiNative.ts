@@ -116,7 +116,12 @@ export function guardTool(options: GuardToolOptions) {
     });
   }
   if (options.fields !== undefined && !Array.isArray(options.fields)) {
-    throw new TypeError("fields must be an array of strings");
+    throw new AegisValidationError({
+      code: "aegis.guard_tool.fields.invalid",
+      remediation: "Pass `fields` as an array of field-name strings, or omit it.",
+      docs_url: aegisDocsUrl("aegis.guard_tool.fields.invalid"),
+      message: "guardTool: fields must be an array of strings",
+    });
   }
 
   return function guard<F extends (...args: never[]) => unknown>(

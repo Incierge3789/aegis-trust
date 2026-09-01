@@ -82,7 +82,7 @@ __all__ = [
     "AUDIT_SCHEMA_VERSION",
     "STABILITY_LEVEL",
 ]
-__version__ = "0.10.0"
+__version__ = "0.10.1"
 
 # Schema version for the audit-event shape — single source in `_constants`
 # (S017 T4 / D-A). Re-exported here for the public API surface (parity with
