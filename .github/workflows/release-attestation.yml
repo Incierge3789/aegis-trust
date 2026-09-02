@@ -142,7 +142,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '20'
 
@@ -184,7 +184,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node (for cdxgen)
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '20'
 
@@ -324,7 +324,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '20'
 
@@ -509,7 +509,7 @@ jobs:
         # .npmrc with _authToken=${NODE_AUTH_TOKEN}, but Trusted Publisher
         # OIDC does not set NODE_AUTH_TOKEN -> npm CLI crashes before the
         # OIDC exchange even starts.
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '24'
 
