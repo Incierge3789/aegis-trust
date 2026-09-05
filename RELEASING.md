@@ -27,10 +27,13 @@ discipline and so that maintainers cut every release the same way.
    six version sources agree and the pin changed in that push; a pushed `v*`
    tag starts the same workflow directly (a manual `workflow_dispatch` is a
    preview run and never uploads). A merge that leaves the version pin
-   unchanged never releases, and an existing tag is never moved; if the
-   release fails after the tag exists, re-run that workflow run (the first
-   job resumes when the tag already points at the merged commit, and both
-   registry uploads skip a version that is already published). Either way
+   unchanged never releases, and an existing tag is never moved: a bump whose
+   tag already exists at another commit fails the run (red, not a quiet
+   skip). Recovery is always a re-run of the bump merge's own workflow run
+   (its pushed range is preserved): if the release failed after the tag
+   exists, the first job resumes and both registry uploads skip a version
+   that is already published; if the first job itself failed before the tag
+   existed, the re-run creates it. Either way
    the release runs in the `release-attestation` workflow itself — it has no
    `workflow_call` entry, so the registries' Trusted Publisher bindings see
    that filename as the publishing identity; `pull_request_target` is never

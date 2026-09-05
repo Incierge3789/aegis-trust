@@ -72,7 +72,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to attest (omit to attest current commit as preview)'
+        description: 'Label for the preview run only (the checked-out ref is the one selected for the dispatch; nothing is uploaded)'
         required: false
         type: string
   # Setup-once release automation (2026-09-05): a push to main whose version
@@ -161,18 +161,23 @@ jobs:
           # lightweight tag has no peeled entry, so fall back to the tag ref.
           EXISTING="$(git ls-remote --tags origin "refs/tags/$TAG^{}" | cut -f1)"
           [ -n "$EXISTING" ] || EXISTING="$(git ls-remote --tags origin "refs/tags/$TAG" | cut -f1)"
-          if [ -n "$EXISTING" ]; then
-            if [ "$EXISTING" = "$GITHUB_SHA" ]; then
-              # Resume: an earlier run of this same commit created the tag and
-              # was cancelled or failed downstream. Uploads are idempotent
-              # (npm: skip when the version exists; PyPI: skip-existing).
-              echo "[resolve-release] $TAG already points at $GITHUB_SHA — resuming the release"
-              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"; exit 0
-            fi
-            none "$TAG already exists at $EXISTING (not this commit) — never moved"
+          if [ -n "$EXISTING" ] && [ "$EXISTING" = "$GITHUB_SHA" ]; then
+            # Resume: an earlier run of this same commit created the tag and
+            # was cancelled or failed downstream. Uploads are idempotent
+            # (npm: skip when the version exists; PyPI: skip-existing).
+            echo "[resolve-release] $TAG already points at $GITHUB_SHA — resuming the release"
+            echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          [ "$PREV_V" != "$NODE_V" ] || none "version pin unchanged ($NODE_V) by this push — nothing to release"
           [ -n "$PREV_V" ] || none "cannot read the previous version pin (before=$BEFORE) — not releasing on an unknown delta"
+          [ "$PREV_V" != "$NODE_V" ] || none "version pin unchanged ($NODE_V) by this push — nothing to release"
+          if [ -n "$EXISTING" ]; then
+            # A real bump whose tag already exists at ANOTHER commit is an
+            # error, not a quiet skip: a green run here would look like a
+            # release that never happened. A tag is never moved.
+            echo "version bump $PREV_V → $NODE_V merged at $GITHUB_SHA, but $TAG already exists at $EXISTING — not this commit." >&2
+            echo "A tag is never moved. Merge a new version, or delete the stale tag and re-run this workflow run." >&2
+            exit 2
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "release $TAG (version bump $PREV_V → $NODE_V merged to main: $GITHUB_SHA)" "$GITHUB_SHA"
