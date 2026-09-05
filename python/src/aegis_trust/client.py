@@ -309,6 +309,9 @@ AUTHORITY_OUTCOMES: tuple[str, ...] = (
     "APPROVAL_REQUIRED",
     "BLOCKED",
 )
+# Validation reads this private copy, so rebinding the public name cannot widen
+# the vocabulary (parity with the Node reader's private frozen set).
+_AUTHORITY_OUTCOME_SET = frozenset(AUTHORITY_OUTCOMES)
 
 
 @dataclass(frozen=True)
@@ -332,8 +335,9 @@ class BoundaryPartialView:
 class AuthorityDecisionView:
     """Typed view of the ``decision`` object the AI-native wire returns
     (``tool_call`` / ``stream_open`` bodies, ``stream_session().decision``).
-    Built ONLY by :func:`parse_authority_decision`, which refuses a malformed
-    object rather than defaulting a field the wire did not send.
+    Intended to be built by :func:`parse_authority_decision`, which refuses a
+    malformed object rather than defaulting a field the wire did not send; an
+    instance constructed by hand carries none of that guarantee.
 
     ``fragment_tags`` are SERVER-DERIVED: the authority classifies the data
     reference and accumulates tags per session; a caller cannot under-declare
@@ -412,7 +416,7 @@ def _optional_str(obj: dict[str, Any], key: str, where: str) -> str | None:
 
 def _required_outcome(obj: dict[str, Any], where: str) -> str:
     v = obj.get("outcome")
-    if not isinstance(v, str) or v not in AUTHORITY_OUTCOMES:
+    if not isinstance(v, str) or v not in _AUTHORITY_OUTCOME_SET:
         raise _decision_shape_error(f"{where}'outcome' missing or unknown")
     return v
 
@@ -490,11 +494,13 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     integer no larger than 2**53 - 1 so both SDKs carry it exactly; a
     whole-number float such as ``3.0`` is the same JSON value as ``3`` and
     reads as 3 in both; never a bool), ``policy_digest``, ``replayed`` (bool;
-    the wire omits it when false). A decision with
-    ``ledgered=True`` must carry non-blank ``decision_id`` /
-    ``receipt_event_id`` (the witness claim is only as good as the ids that
-    make it checkable). Unknown members are ignored (the contract is
-    additive-only). The returned view holds copies —
+    the wire omits it when false). The chain witness is
+    two-way: ``ledgered=True`` must carry non-blank ``decision_id`` /
+    ``receipt_event_id`` (the claim is only as good as the ids that make it
+    checkable), and ``ledgered=False`` is only the hard-fault form —
+    ``outcome`` BLOCKED, blank ids, no ``fragment_tags``, not ``replayed``;
+    an executable outcome or a chain pointer on an unledgered decision is
+    refused. Unknown members are ignored (the contract is additive-only). The returned view holds copies —
     mutating the input afterwards does not change it.
 
     Pass the ``decision`` MEMBER (``body["decision"]``), not the whole
@@ -523,9 +529,12 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
         if not isinstance(rp, bool):
             raise _decision_shape_error("'replayed' not a boolean")
         replayed = rp
-    # A decision that claims the chain witnessed it must carry the ids that
-    # make the claim checkable; a blank id on a ledgered decision is the
-    # receipt precedent (whitespace-only ids fail closed there too).
+    # The chain witness is two-way. ledgered=True must carry the ids that make
+    # the claim checkable (blank counts as missing — receipt precedent).
+    # ledgered=False is ONLY the hard-fault form: the union ledger refused the
+    # write, so the decision is BLOCKED, carries no chain ids, releases no
+    # tags and cannot be a replay. An executable outcome or a chain pointer on
+    # an unledgered decision is a claim the chain never witnessed.
     if ledgered:
         if not decision_id.strip():
             raise _decision_shape_error("'decision_id' empty on a ledgered decision")
@@ -533,9 +542,26 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
             raise _decision_shape_error(
                 "'receipt_event_id' empty on a ledgered decision"
             )
+    else:
+        if outcome != "BLOCKED":
+            raise _decision_shape_error(
+                "'outcome' must be BLOCKED on an unledgered decision"
+            )
+        if decision_id.strip():
+            raise _decision_shape_error(
+                "'decision_id' present on an unledgered decision"
+            )
+        if receipt_event_id.strip():
+            raise _decision_shape_error(
+                "'receipt_event_id' present on an unledgered decision"
+            )
+        if replayed:
+            raise _decision_shape_error("'replayed' set on an unledgered decision")
     allowed_fields = _required_str_list(decision, "allowed_fields", where)
     withheld_fields = _required_str_list(decision, "withheld_fields", where)
     fragment_tags = _required_labels(decision, "fragment_tags", where)
+    if not ledgered and fragment_tags:
+        raise _decision_shape_error("'fragment_tags' present on an unledgered decision")
     parts_raw = decision.get("parts")
     if not isinstance(parts_raw, list):
         raise _decision_shape_error("'parts' missing or not a list")

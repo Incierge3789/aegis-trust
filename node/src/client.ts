@@ -254,10 +254,6 @@ export const AUTHORITY_OUTCOMES: ReadonlyArray<CoreBoundaryOutcome> = Object.fre
 ] as const);
 const AUTHORITY_OUTCOME_SET: ReadonlySet<string> = new Set<string>(AUTHORITY_OUTCOMES);
 
-/** Largest `policy_generation` both SDKs can carry exactly (`Number.MAX_SAFE_INTEGER`).
- *  A larger wire value would be rounded here and kept exact in Python, so both refuse it. */
-const MAX_SAFE_POLICY_GENERATION = Number.MAX_SAFE_INTEGER;
-
 /** One boundary's verdict inside `AuthorityDecisionView.parts` — the attribution
  *  trace (which boundary said what). Field NAMES and server-derived labels only.
  *  Deep-frozen by the reader. */
@@ -273,9 +269,10 @@ export interface BoundaryPartialView {
 
 /**
  * Typed view of the `decision` object the AI-native wire returns (`toolCall` /
- * `streamOpen` bodies, a managed stream session's decision). Built ONLY by
- * {@link parseAuthorityDecision}, which refuses a malformed object rather than
- * defaulting a field the wire did not send.
+ * `streamOpen` bodies, a managed stream session's decision). Intended to be
+ * built by {@link parseAuthorityDecision}, which refuses a malformed object
+ * rather than defaulting a field the wire did not send; an object assembled by
+ * hand carries none of that guarantee.
  *
  * `fragment_tags` are SERVER-DERIVED: the authority classifies the data
  * reference and accumulates tags per session; a caller cannot under-declare
@@ -326,7 +323,15 @@ function decisionShapeError(detail: string): AegisValidationError {
 const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 
 function isStringList(raw: unknown): raw is string[] {
-  return Array.isArray(raw) && raw.every((x) => typeof x === "string");
+  // Index loop, not `every()`: `every` skips holes in a sparse array, so
+  // `new Array(1)` would pass and materialise `undefined` on spread (and the
+  // label regex would then test the string "undefined"). Every index must be
+  // a string.
+  if (!Array.isArray(raw)) return false;
+  for (let i = 0; i < raw.length; i++) {
+    if (typeof raw[i] !== "string") return false;
+  }
+  return true;
 }
 
 function requiredStr(o: Record<string, unknown>, key: string, where: string): string {
@@ -385,12 +390,9 @@ function requiredLabels(
  *  range is refused (a larger value would already have been rounded by
  *  `JSON.parse`, so the "exact policy pin" would be silently wrong). */
 function parsePolicyGeneration(pg: unknown): number {
-  if (
-    typeof pg !== "number"
-    || !Number.isSafeInteger(pg)
-    || pg < 0
-    || pg > MAX_SAFE_POLICY_GENERATION
-  ) {
+  // `Number.isSafeInteger` already bounds the value to ±(2^53 - 1) (Python
+  // refuses the same range so both SDKs carry the pin exactly).
+  if (typeof pg !== "number" || !Number.isSafeInteger(pg) || pg < 0) {
     throw decisionShapeError("'policy_generation' not a non-negative integer");
   }
   return pg;
@@ -431,7 +433,13 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * `policy_generation` (non-negative integer no larger than
  * `Number.MAX_SAFE_INTEGER` so both SDKs carry it exactly; `3.0` is the same
  * JSON value as `3`), `policy_digest`, `replayed` (boolean; the wire omits it
- * when false). The returned view is deep-frozen. A decision with `ledgered: true`
+ * when false). The returned view is deep-frozen. The chain witness is two-way: `ledgered: true` must carry
+ * non-blank `decision_id` / `receipt_event_id` (the claim is only as good as
+ * the ids that make it checkable), and `ledgered: false` is only the
+ * hard-fault form — `outcome` BLOCKED, blank ids, no `fragment_tags`, not
+ * `replayed`; an executable outcome or a chain pointer on an unledgered
+ * decision is refused. Unknown members are ignored (the contract is
+ * additive-only). The returned view is deep-frozen. A decision with `ledgered: true`
  * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
  * is only as good as the ids that make it checkable). Unknown members are
  * ignored (the contract is additive-only). The returned view holds copies — mutating the
@@ -467,9 +475,12 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
     if (typeof rp !== "boolean") throw decisionShapeError("'replayed' not a boolean");
     replayed = rp;
   }
-  // A decision that claims the chain witnessed it must carry the ids that
-  // make the claim checkable; a blank id on a ledgered decision is the receipt
-  // precedent (whitespace-only ids fail closed there too).
+  // The chain witness is two-way. ledgered=true must carry the ids that make
+  // the claim checkable (blank counts as missing — receipt precedent).
+  // ledgered=false is ONLY the hard-fault form: the union ledger refused the
+  // write, so the decision is BLOCKED, carries no chain ids, releases no tags
+  // and cannot be a replay. An executable outcome or a chain pointer on an
+  // unledgered decision is a claim the chain never witnessed.
   if (ledgered) {
     if (decision_id.trim() === "") {
       throw decisionShapeError("'decision_id' empty on a ledgered decision");
@@ -477,13 +488,31 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
     if (receipt_event_id.trim() === "") {
       throw decisionShapeError("'receipt_event_id' empty on a ledgered decision");
     }
+  } else {
+    if (outcome !== "BLOCKED") {
+      throw decisionShapeError("'outcome' must be BLOCKED on an unledgered decision");
+    }
+    if (decision_id.trim() !== "") {
+      throw decisionShapeError("'decision_id' present on an unledgered decision");
+    }
+    if (receipt_event_id.trim() !== "") {
+      throw decisionShapeError("'receipt_event_id' present on an unledgered decision");
+    }
+    if (replayed) throw decisionShapeError("'replayed' set on an unledgered decision");
   }
   const allowed_fields = requiredStrList(o, "allowed_fields", where);
   const withheld_fields = requiredStrList(o, "withheld_fields", where);
   const fragment_tags = requiredLabels(o, "fragment_tags", where);
+  if (!ledgered && fragment_tags.length > 0) {
+    throw decisionShapeError("'fragment_tags' present on an unledgered decision");
+  }
   const partsRaw = hasOwn(o, "parts") ? o.parts : undefined;
   if (!Array.isArray(partsRaw)) throw decisionShapeError("'parts' missing or not a list");
-  const parts = Object.freeze(partsRaw.map((p, i) => parsePart(p, i)));
+  // Index loop, not `map()`: `map` skips holes in a sparse array and would
+  // hand back an unvalidated hole where a partial should be.
+  const partsOut: BoundaryPartialView[] = [];
+  for (let i = 0; i < partsRaw.length; i++) partsOut.push(parsePart(partsRaw[i], i));
+  const parts = Object.freeze(partsOut);
   return Object.freeze({
     outcome,
     ledgered,

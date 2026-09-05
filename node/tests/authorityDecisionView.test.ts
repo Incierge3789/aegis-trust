@@ -114,6 +114,20 @@ describe("parseAuthorityDecision in the client", () => {
     }
   });
 
+  it("refuses sparse arrays (holes are not strings, not partials)", () => {
+    const base = fullDecision();
+    // `every()` skips holes; the reader must not.
+    expect(() =>
+      parseAuthorityDecision({ ...base, allowed_fields: new Array(1) }),
+    ).toThrow(/'allowed_fields' missing or not a list of strings/);
+    expect(() =>
+      parseAuthorityDecision({ ...base, fragment_tags: new Array(1) }),
+    ).toThrow(/'fragment_tags' missing or not a list of strings/);
+    expect(() => parseAuthorityDecision({ ...base, parts: new Array(1) })).toThrow(
+      /'parts\[0\]' is not an object/,
+    );
+  });
+
   it("does not read outcome / ledgered from the prototype chain", () => {
     const decision = fullDecision();
     delete decision.ledgered;

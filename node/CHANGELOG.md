@@ -7,8 +7,8 @@
   `BoundaryPartialView` for its `parts`). It exposes what the AI-native wire
   (`toolCall` / `streamOpen` bodies, a managed stream session's decision)
   already returns but the SDK typed as `Record<string, unknown>`: the
-  **server-derived** `fragment_tags`, the value-free attribution trace
-  `parts`, and the chain pointers `decision_id` / `receipt_event_id` /
+  **server-derived** `fragment_tags`, the attribution trace `parts`
+  (per-boundary field names and labels plus the free-text `reason_label`), and the chain pointers `decision_id` / `receipt_event_id` /
   `ledgered`, plus `outcome`, `verb`, `boundary`, `reason_code` /
   `reason_label`, `allowed_fields` / `withheld_fields`, `policy_generation` /
   `policy_digest`, `replayed`. `AUTHORITY_OUTCOMES` names the five-value
@@ -20,8 +20,10 @@
   refused (the receipt verifier's gate: ASCII label charset, length cap — a
   shape rule, not a semantic classifier; tags are server-derived labels and
   a label-shaped string is surfaced as-is); every member the frozen wire
-  declares is required; a decision that claims `ledgered` must carry
-  non-blank `decision_id` / `receipt_event_id`; `policy_generation` must be
+  declares is required; the chain witness is two-way — a decision that
+  claims `ledgered` must carry non-blank `decision_id` / `receipt_event_id`,
+  and an unledgered decision is accepted only in its hard-fault form (BLOCKED,
+  blank ids, no `fragment_tags`, not `replayed`); `policy_generation` must be
   a non-negative safe integer (`Number.MAX_SAFE_INTEGER`) so both SDKs
   carry it exactly (`3.0` is the same JSON value as `3`). The view, its
   arrays and its partials are deep-frozen, and `AUTHORITY_OUTCOMES` is

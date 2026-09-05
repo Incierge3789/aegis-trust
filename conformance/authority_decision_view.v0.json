@@ -1,5 +1,5 @@
 {
-  "$comment": "AI-native `decision` object reader corpus, v0 -- the typed, fail-closed view of the shared decision object the AI-native wire returns (POST /tool-call, POST /stream/open; contract AI_NATIVE_V1_CONTRACT.md, additive-only).\n\nWHAT THIS CORPUS PINS. Both SDKs expose the SERVER-DERIVED `fragment_tags[]`, the value-free attribution trace `parts[]`, and the chain pointers `decision_id` / `receipt_event_id` / `ledgered` through one reader with one refusal code. The reader never defaults a field the wire did not send: an absent `fragment_tags` is a malformed decision, not an empty tag set, because a defaulted [] would claim 'no tags released' for a plane that never said so (the same class of silent no-op the request side is being held back to avoid).\n\nTHE MUTANTS THIS CORPUS EXISTS TO KILL. (1) A reader that defaults absent members and turns a malformed object into a clean-looking view. (2) A tag or a partial's tag outside the value-free label SHAPE reaching the surface (INV-6; the gate is the receipt verifier's shape rule — ASCII label charset, length cap — not a semantic classifier: tags are server-derived labels and a label-shaped string is surfaced as-is). (3) A cross-language number gap -- a boolean accepted as an integer in one SDK and refused in the other, a whole-number float (3.0) refused by one and accepted by the other, or a value beyond 2^53-1 rounded by one and kept exact by the other. (4) Passing the whole response body where the `decision` member was expected and getting an empty view instead of an error.\n\nEach invalid vector pins the refusal code AND a message fragment so both SDKs name the same member in the same words.",
+  "$comment": "AI-native `decision` object reader corpus, v0 -- the typed, fail-closed view of the shared decision object the AI-native wire returns (POST /tool-call, POST /stream/open; contract AI_NATIVE_V1_CONTRACT.md, additive-only).\n\nWHAT THIS CORPUS PINS. Both SDKs expose the SERVER-DERIVED `fragment_tags[]`, the attribution trace `parts[]` (per-boundary field names and labels plus the response-surface free text `reason_label`), and the chain pointers `decision_id` / `receipt_event_id` / `ledgered` through one reader with one refusal code. The reader never defaults a field the wire did not send: an absent `fragment_tags` is a malformed decision, not an empty tag set, because a defaulted [] would claim 'no tags released' for a plane that never said so (the same class of silent no-op the request side is being held back to avoid).\n\nTHE MUTANTS THIS CORPUS EXISTS TO KILL. (1) A reader that defaults absent members and turns a malformed object into a clean-looking view. (2) A tag or a partial's tag outside the value-free label SHAPE reaching the surface (INV-6; the gate is the receipt verifier's shape rule — ASCII label charset, length cap — not a semantic classifier: tags are server-derived labels and a label-shaped string is surfaced as-is). (3) A cross-language number gap -- a boolean accepted as an integer in one SDK and refused in the other, a whole-number float (3.0) refused by one and accepted by the other, or a value beyond 2^53-1 rounded by one and kept exact by the other. (4) Passing the whole response body where the `decision` member was expected and getting an empty view instead of an error. (5) An unledgered decision that is not the BLOCKED hard-fault form -- an executable outcome, a chain pointer, released tags or a replay flag on a decision the chain never witnessed.\n\nEach invalid vector pins the refusal code AND a message fragment so both SDKs name the same member in the same words.",
   "version": "v0",
   "recorded_against": {
     "wire_contract": "AI-native v1 shared `decision` object (frozen 2026-07-03, additive-only)",
@@ -2663,6 +2663,358 @@
       "expect_error": "aegis.aiNative.decisionShape",
       "expect_detail": "'policy_generation' not a non-negative integer",
       "why": "Whole-number floats are read as integers, so the sign rule applies to them too."
+    },
+    {
+      "id": "unledgered_with_executable_outcome",
+      "decision": {
+        "outcome": "PROTECTED",
+        "verb": "allow",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'outcome' must be BLOCKED on an unledgered decision",
+      "why": "The inverse invariant: ledgered=false exists only as the BLOCKED hard-fault form. An executable outcome the chain never witnessed is an impossible authorization-shaped object (Review round 2, both reviewers)."
+    },
+    {
+      "id": "unledgered_with_chain_ids",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'decision_id' present on an unledgered decision",
+      "why": "A chain pointer on a decision the chain refused to write is a claim without a witness."
+    },
+    {
+      "id": "unledgered_with_receipt_event_id",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'receipt_event_id' present on an unledgered decision",
+      "why": "Same rule for the receipt pointer alone."
+    },
+    {
+      "id": "unledgered_with_fragment_tags",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [
+          "pii:contact"
+        ],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'fragment_tags' present on an unledgered decision",
+      "why": "Tags 'released into the session' by a decision the chain never witnessed are not released; the docstring rule is now enforced, not merely stated."
+    },
+    {
+      "id": "unledgered_replayed",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false,
+        "replayed": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'replayed' set on an unledgered decision",
+      "why": "A replay re-serves an ORIGINAL witnessed decision; an unledgered replay is contradictory."
+    },
+    {
+      "id": "part_fragment_tags_absent",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'parts[1]' 'fragment_tags' missing or not a list of strings",
+      "why": "The top-level absence vector alone does not bind the trace; a partial without its tag list is malformed too."
+    },
+    {
+      "id": "fragment_tag_empty_string",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          ""
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'fragment_tags' member is not a value-free label",
+      "why": "The label shape requires at least one character; an empty tag is not a label."
+    },
+    {
+      "id": "policy_generation_null",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": null,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'policy_generation' not a non-negative integer",
+      "why": "An explicit null is present-but-mistyped, not absent."
+    },
+    {
+      "id": "policy_digest_null",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3,
+        "policy_digest": null,
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'policy_digest' not a string",
+      "why": "Same for the digest: present-but-null is refused, absent is allowed."
     }
   ]
 }

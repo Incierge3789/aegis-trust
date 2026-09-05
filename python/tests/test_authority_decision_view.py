@@ -146,6 +146,19 @@ def test_outcome_vocabulary_matches_the_flat_view_and_the_gate() -> None:
     assert set(AegisClient.PASSING_OUTCOMES) < set(AUTHORITY_OUTCOMES)
 
 
+def test_rebinding_the_public_vocabulary_cannot_widen_it(monkeypatch) -> None:
+    """The reader validates against a private frozenset captured at import,
+    so a caller rebinding ``AUTHORITY_OUTCOMES`` gains nothing (Node parity:
+    frozen export + private Set)."""
+    import aegis_trust.client as client_mod
+
+    monkeypatch.setattr(
+        client_mod, "AUTHORITY_OUTCOMES", (*AUTHORITY_OUTCOMES, "UNKNOWN")
+    )
+    with pytest.raises(ValueError, match="outcome"):
+        parse_authority_decision({**_full_decision(), "outcome": "UNKNOWN"})
+
+
 def test_flat_check_boundary_view_does_not_pretend_to_carry_these_members() -> None:
     """The flat /check-boundary wire never sends fragment_tags / parts; the
     SDK must not grow fields for them there (a field the wire never fills is a

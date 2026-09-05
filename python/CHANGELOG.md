@@ -7,8 +7,9 @@
   `AuthorityDecisionView` (with `BoundaryPartialView` for its `parts`). It
   exposes what the AI-native wire (`tool_call` / `stream_open` bodies,
   `stream_session().decision`) already returns but the SDK handed back as an
-  untyped dict: the **server-derived** `fragment_tags`, the value-free
-  attribution trace `parts`, and the chain pointers `decision_id` /
+  untyped dict: the **server-derived** `fragment_tags`, the attribution
+  trace `parts` (per-boundary field names and labels plus the free-text
+  `reason_label`), and the chain pointers `decision_id` /
   `receipt_event_id` / `ledgered`, plus `outcome`, `verb`, `boundary`,
   `reason_code` / `reason_label`, `allowed_fields` / `withheld_fields`,
   `policy_generation` / `policy_digest`, `replayed`.
@@ -19,8 +20,10 @@
   refused (the receipt verifier's gate: ASCII label charset, length cap — a
   shape rule, not a semantic classifier; tags are server-derived labels and
   a label-shaped string is surfaced as-is); every member the frozen wire
-  declares is required; a decision that claims `ledgered` must carry
-  non-blank `decision_id` / `receipt_event_id`; `policy_generation` must be
+  declares is required; the chain witness is two-way — a decision that
+  claims `ledgered` must carry non-blank `decision_id` / `receipt_event_id`,
+  and an unledgered decision is accepted only in its hard-fault form (BLOCKED,
+  blank ids, no `fragment_tags`, not `replayed`); `policy_generation` must be
   a non-negative integer no larger than 2**53 - 1 so both SDKs carry it
   exactly (a whole-number float such as `3.0` is the same JSON value as
   `3` and reads as 3 in both). The view is immutable (frozen dataclass,
