@@ -50,8 +50,9 @@ discipline and so that maintainers cut every release the same way.
    stored at that ref), which is why `main` and `v*` tags are governed by
    repository rulesets rather than by the workflow itself. npm uploads are
    serialised across runs (one running and one queued; a third release
-   arriving while two are in flight fails at its upload step and is re-run
-   within the one-day artifact retention), and `latest` never moves
+   arriving while two are in flight has its queued upload cancelled by
+   GitHub's one-running-one-pending rule and is re-run within the one-day
+   artifact retention), and `latest` never moves
    backwards: a stable version published while a higher one already exists
    lands under the `previous` dist-tag, and the job stops rather than guess
    when the registry's version list cannot be read. After the tag, the workflow runs its own in-repo

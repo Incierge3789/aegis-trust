@@ -228,6 +228,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "release $TAG (version bump $PREV_V → $NODE_V merged to main: $GITHUB_SHA)" "$GITHUB_SHA"
+          # A tag pushed with GITHUB_TOKEN starts no new workflow run (GitHub
+          # rule), so this run stays the only release run for this commit.
           git push origin "refs/tags/$TAG"
           echo "[resolve-release] created $TAG at $GITHUB_SHA"
           echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
