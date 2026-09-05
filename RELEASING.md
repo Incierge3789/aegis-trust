@@ -29,7 +29,9 @@ discipline and so that maintainers cut every release the same way.
    preview run and never uploads). The contract of a push to `main` is
    fail-closed: **green** means either released, or the pin is unchanged and
    its tag exists; **a release** happens only when the pin changed in that
-   push and no tag exists for it; **anything else is red** with the way out
+   push and no tag exists for it (a pushed `v*` tag releases only if it
+   equals `v<version>` of the six sources at the tagged commit); **anything
+   else is red** with the way out
    printed — a changed pin whose tag already exists at another commit, an
    untagged pin the push did not change (an earlier bump that never shipped,
    or a deleted tag), or a push whose range cannot be read (force-push). An

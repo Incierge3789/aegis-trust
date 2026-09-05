@@ -144,20 +144,7 @@ jobs:
           set -euo pipefail
           SHAPE='^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'
           none() { echo "[resolve-release] $1"; echo "release_tag=" >> "$GITHUB_OUTPUT"; exit 0; }
-          case "$GITHUB_REF" in
-            refs/tags/v*)
-              # Only a PUSHED tag releases; a workflow_dispatch that selects a
-              # tag ref is a preview like any other dispatch (never uploads).
-              [ "$GITHUB_EVENT_NAME" = "push" ] || none "event $GITHUB_EVENT_NAME on $GITHUB_REF — preview only"
-              TAG="${GITHUB_REF#refs/tags/}"
-              printf '%s' "$TAG" | grep -Eq "$SHAPE" || { echo "pushed tag '$TAG' is not a release version" >&2; exit 2; }
-              echo "[resolve-release] tag push $TAG"
-              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
-              exit 0 ;;
-            refs/heads/main) [ "$GITHUB_EVENT_NAME" = "push" ] || none "event $GITHUB_EVENT_NAME on main — preview only" ;;
-            *) none "event $GITHUB_EVENT_NAME on $GITHUB_REF — preview only" ;;
-          esac
-          # --- main push: release only when the version pin CHANGED in the pushed range ---
+          # --- the version pin, from all six sources (they must agree) ---
           NODE_V="$(node -p "require('./node/package.json').version")"
           PY_V="$(python3 -c "import tomllib; print(tomllib.load(open('python/pyproject.toml','rb'))['project']['version'])")"
           for src in "node/VERSION:$(tr -d '[:space:]' < node/VERSION)" \
@@ -167,6 +154,25 @@ jobs:
                      "python/pyproject.toml:$PY_V"; do
             [ "${src#*:}" = "$NODE_V" ] || { echo "version sources disagree: node/package.json=$NODE_V $src — not releasing" >&2; exit 2; }
           done
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              # Only a PUSHED tag releases; a workflow_dispatch that selects a
+              # tag ref is a preview like any other dispatch (never uploads).
+              [ "$GITHUB_EVENT_NAME" = "push" ] || none "event $GITHUB_EVENT_NAME on $GITHUB_REF — preview only"
+              TAG="${GITHUB_REF#refs/tags/}"
+              printf '%s' "$TAG" | grep -Eq "$SHAPE" || { echo "pushed tag '$TAG' is not a release version" >&2; exit 2; }
+              # The tag must name the version the tagged commit carries:
+              # otherwise 1.9.0 artifacts would be attached to a v2.0.0
+              # Release and reach PyPI under the wrong tag before npm's
+              # filename check refused them.
+              [ "$TAG" = "v$NODE_V" ] || { echo "pushed tag '$TAG' does not match the version pin at the tagged commit (v$NODE_V) — not releasing" >&2; exit 2; }
+              echo "[resolve-release] tag push $TAG"
+              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+            refs/heads/main) [ "$GITHUB_EVENT_NAME" = "push" ] || none "event $GITHUB_EVENT_NAME on main — preview only" ;;
+            *) none "event $GITHUB_EVENT_NAME on $GITHUB_REF — preview only" ;;
+          esac
+          # --- main push: release only when the version pin CHANGED in the pushed range ---
           TAG="v$NODE_V"
           printf '%s' "$TAG" | grep -Eq "$SHAPE" || { echo "version pin '$NODE_V' is not a release version — not releasing" >&2; exit 2; }
           BEFORE="${{ github.event.before }}"
