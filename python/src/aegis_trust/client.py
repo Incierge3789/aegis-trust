@@ -314,16 +314,18 @@ AUTHORITY_OUTCOMES: tuple[str, ...] = (
 @dataclass(frozen=True)
 class BoundaryPartialView:
     """One boundary's verdict inside :attr:`AuthorityDecisionView.parts` —
-    the value-free attribution trace (which boundary said what). Field
-    *names* and labels only, never values."""
+    the attribution trace (which boundary said what). Field *names* and
+    server-derived labels only. Immutable: sequences are tuples, and every
+    member is required (no defaults — a partial cannot be fabricated with
+    members silently left empty)."""
 
     boundary: str
     outcome: str
     reason_code: str
     reason_label: str
-    allowed_fields: list[str] = field(default_factory=list)
-    withheld_fields: list[str] = field(default_factory=list)
-    fragment_tags: list[str] = field(default_factory=list)
+    allowed_fields: tuple[str, ...]
+    withheld_fields: tuple[str, ...]
+    fragment_tags: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -335,11 +337,15 @@ class AuthorityDecisionView:
 
     ``fragment_tags`` are SERVER-DERIVED: the authority classifies the data
     reference and accumulates tags per session; a caller cannot under-declare
-    them. ``parts`` is the value-free attribution trace (every boundary
-    partial that composed into ``outcome``). ``ledgered`` is the chain
-    witness — an unledgered decision carries no evidence claim, so read
-    ``fragment_tags`` as released only when ``ledgered`` is True.
-    ``decision_id`` doubles as the integrity-checkable ledger id.
+    them. ``parts`` is the attribution trace (every boundary partial that
+    composed into ``outcome``). ``ledgered`` is the chain witness — an
+    unledgered decision carries no evidence claim, so read ``fragment_tags``
+    as released only when ``ledgered`` is True. ``decision_id`` doubles as
+    the integrity-checkable ledger id.
+
+    Immutable: sequences are tuples and the dataclass is frozen; every
+    frozen-wire member is required (no defaults), so a view cannot be
+    fabricated with members silently left empty.
 
     This is NOT the flat ``/check-boundary`` view: :class:`BoundaryDecisionView`
     carries neither ``fragment_tags`` nor ``parts`` (its ``evidence_available``
@@ -353,10 +359,10 @@ class AuthorityDecisionView:
     reason_label: str
     verb: str
     boundary: str
-    allowed_fields: list[str] = field(default_factory=list)
-    withheld_fields: list[str] = field(default_factory=list)
-    fragment_tags: list[str] = field(default_factory=list)
-    parts: list[BoundaryPartialView] = field(default_factory=list)
+    allowed_fields: tuple[str, ...]
+    withheld_fields: tuple[str, ...]
+    fragment_tags: tuple[str, ...]
+    parts: tuple[BoundaryPartialView, ...]
     policy_generation: int | None = None
     policy_digest: str | None = None
     replayed: bool = False
@@ -376,10 +382,16 @@ def _decision_shape_error(detail: str) -> AegisValidationError:
     )
 
 
-def _str_list_or_none(raw: Any) -> list[str] | None:
+#: Largest ``policy_generation`` both SDKs can carry exactly (JavaScript's
+#: ``Number.MAX_SAFE_INTEGER``). A larger wire value would be rounded by one
+#: SDK and kept exact by the other, so both refuse it.
+_MAX_SAFE_INTEGER = 2**53 - 1
+
+
+def _str_tuple_or_none(raw: Any) -> tuple[str, ...] | None:
     if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
         return None
-    return list(raw)
+    return tuple(raw)
 
 
 def _required_str(obj: dict[str, Any], key: str, where: str) -> str:
@@ -405,14 +417,17 @@ def _required_outcome(obj: dict[str, Any], where: str) -> str:
     return v
 
 
-def _required_str_list(obj: dict[str, Any], key: str, where: str) -> list[str]:
-    v = _str_list_or_none(obj.get(key))
+def _required_str_list(obj: dict[str, Any], key: str, where: str) -> tuple[str, ...]:
+    v = _str_tuple_or_none(obj.get(key))
     if v is None:
         raise _decision_shape_error(f"{where}'{key}' missing or not a list of strings")
     return v
 
 
-def _required_labels(obj: dict[str, Any], key: str, where: str) -> list[str]:
+def _required_labels(obj: dict[str, Any], key: str, where: str) -> tuple[str, ...]:
+    # Shape rule only (ASCII label charset, length cap — the receipt verifier's
+    # gate): it refuses a tag that is not label-shaped, it does not classify
+    # what a label-shaped string means. Tags are server-derived labels.
     tags = _required_str_list(obj, key, where)
     for t in tags:
         if not is_value_free_label(t):
@@ -420,6 +435,25 @@ def _required_labels(obj: dict[str, Any], key: str, where: str) -> list[str]:
                 f"{where}'{key}' member is not a value-free label"
             )
     return tags
+
+
+def _parse_policy_generation(pg: Any) -> int:
+    """A non-negative integer no larger than ``_MAX_SAFE_INTEGER``. JSON has
+    one number type: a whole-number float on the wire (``3.0``) is the same
+    wire value as ``3`` and is read as the integer 3 in both SDKs; anything
+    fractional, non-finite, negative, boolean, or beyond the safe range is
+    refused."""
+    if isinstance(pg, bool):
+        raise _decision_shape_error("'policy_generation' not a non-negative integer")
+    if isinstance(pg, float):
+        if pg != pg or pg in (float("inf"), float("-inf")) or not pg.is_integer():
+            raise _decision_shape_error(
+                "'policy_generation' not a non-negative integer"
+            )
+        pg = int(pg)
+    if not isinstance(pg, int) or pg < 0 or pg > _MAX_SAFE_INTEGER:
+        raise _decision_shape_error("'policy_generation' not a non-negative integer")
+    return pg
 
 
 def _parse_part(raw: Any, index: int) -> BoundaryPartialView:
@@ -446,12 +480,17 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     ``outcome`` (one of :data:`AUTHORITY_OUTCOMES`), ``ledgered`` (bool),
     ``decision_id``, ``receipt_event_id``, ``reason_code``, ``reason_label``,
     ``verb``, ``boundary`` (str), ``allowed_fields`` / ``withheld_fields``
-    (list[str]), ``fragment_tags`` (list of value-free labels — a tag that
-    carries a value is refused, never surfaced), and ``parts`` (list of
-    boundary partials, each validated the same way). Optional, typed when
-    present (added to the wire after the freeze, or omitted by design):
-    ``policy_generation`` (non-negative int, never a bool), ``policy_digest``,
-    ``replayed`` (bool; the wire omits it when false). A decision with
+    (list[str]), ``fragment_tags`` (list of labels that pass the value-free label
+    SHAPE rule — ASCII label charset, length cap, the receipt verifier's
+    gate; a tag outside that shape is refused. The rule does not classify
+    meaning: tags are server-derived labels, and a label-shaped string is
+    surfaced as-is), and ``parts`` (list of boundary partials, each validated
+    the same way). Optional, typed when present (added to the wire after the
+    freeze, or omitted by design): ``policy_generation`` (non-negative
+    integer no larger than 2**53 - 1 so both SDKs carry it exactly; a
+    whole-number float such as ``3.0`` is the same JSON value as ``3`` and
+    reads as 3 in both; never a bool), ``policy_digest``, ``replayed`` (bool;
+    the wire omits it when false). A decision with
     ``ledgered=True`` must carry non-blank ``decision_id`` /
     ``receipt_event_id`` (the witness claim is only as good as the ids that
     make it checkable). Unknown members are ignored (the contract is
@@ -477,12 +516,7 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     policy_digest = _optional_str(decision, "policy_digest", where)
     policy_generation: int | None = None
     if "policy_generation" in decision:
-        pg = decision["policy_generation"]
-        if isinstance(pg, bool) or not isinstance(pg, int) or pg < 0:
-            raise _decision_shape_error(
-                "'policy_generation' not a non-negative integer"
-            )
-        policy_generation = pg
+        policy_generation = _parse_policy_generation(decision["policy_generation"])
     replayed = False
     if "replayed" in decision:
         rp = decision["replayed"]
@@ -505,7 +539,7 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     parts_raw = decision.get("parts")
     if not isinstance(parts_raw, list):
         raise _decision_shape_error("'parts' missing or not a list")
-    parts = [_parse_part(p, i) for i, p in enumerate(parts_raw)]
+    parts = tuple(_parse_part(p, i) for i, p in enumerate(parts_raw))
     return AuthorityDecisionView(
         outcome=outcome,
         ledgered=ledgered,

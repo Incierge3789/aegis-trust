@@ -1,5 +1,5 @@
 {
-  "$comment": "AI-native `decision` object reader corpus, v0 -- the typed, fail-closed view of the shared decision object the AI-native wire returns (POST /tool-call, POST /stream/open; contract AI_NATIVE_V1_CONTRACT.md, additive-only).\n\nWHAT THIS CORPUS PINS. Both SDKs expose the SERVER-DERIVED `fragment_tags[]`, the value-free attribution trace `parts[]`, and the chain pointers `decision_id` / `receipt_event_id` / `ledgered` through one reader with one refusal code. The reader never defaults a field the wire did not send: an absent `fragment_tags` is a malformed decision, not an empty tag set, because a defaulted [] would claim 'no tags released' for a plane that never said so (the same class of silent no-op the request side is being held back to avoid).\n\nTHE MUTANTS THIS CORPUS EXISTS TO KILL. (1) A reader that defaults absent members and turns a malformed object into a clean-looking view. (2) A tag or a partial's tag that smuggles a value onto the surface (INV-6). (3) A cross-language type gap -- a boolean accepted as an integer in one SDK and refused in the other. (4) Passing the whole response body where the `decision` member was expected and getting an empty view instead of an error.\n\nEach invalid vector pins the refusal code AND a message fragment so both SDKs name the same member in the same words.",
+  "$comment": "AI-native `decision` object reader corpus, v0 -- the typed, fail-closed view of the shared decision object the AI-native wire returns (POST /tool-call, POST /stream/open; contract AI_NATIVE_V1_CONTRACT.md, additive-only).\n\nWHAT THIS CORPUS PINS. Both SDKs expose the SERVER-DERIVED `fragment_tags[]`, the value-free attribution trace `parts[]`, and the chain pointers `decision_id` / `receipt_event_id` / `ledgered` through one reader with one refusal code. The reader never defaults a field the wire did not send: an absent `fragment_tags` is a malformed decision, not an empty tag set, because a defaulted [] would claim 'no tags released' for a plane that never said so (the same class of silent no-op the request side is being held back to avoid).\n\nTHE MUTANTS THIS CORPUS EXISTS TO KILL. (1) A reader that defaults absent members and turns a malformed object into a clean-looking view. (2) A tag or a partial's tag outside the value-free label SHAPE reaching the surface (INV-6; the gate is the receipt verifier's shape rule — ASCII label charset, length cap — not a semantic classifier: tags are server-derived labels and a label-shaped string is surfaced as-is). (3) A cross-language number gap -- a boolean accepted as an integer in one SDK and refused in the other, a whole-number float (3.0) refused by one and accepted by the other, or a value beyond 2^53-1 rounded by one and kept exact by the other. (4) Passing the whole response body where the `decision` member was expected and getting an empty view instead of an error.\n\nEach invalid vector pins the refusal code AND a message fragment so both SDKs name the same member in the same words.",
   "version": "v0",
   "recorded_against": {
     "wire_contract": "AI-native v1 shared `decision` object (frozen 2026-07-03, additive-only)",
@@ -322,6 +322,130 @@
         "reason_label": "Only the fields required for this purpose were released."
       },
       "why": "Only members added after the wire freeze (policy_generation / policy_digest) or omitted by design (replayed) may be absent; they default to an honest absent value, never a fabricated one."
+    },
+    {
+      "id": "policy_generation_whole_float_reads_as_integer",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3.0,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect": {
+        "policy_generation": 3
+      },
+      "why": "JSON has one number type: 3.0 on the wire is the same value as 3. Both SDKs read it as the integer 3 (a language that parses it as a float must not refuse what the other cannot even distinguish)."
+    },
+    {
+      "id": "policy_generation_hundred_float_reads_as_integer",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 100.0,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect": {
+        "policy_generation": 100
+      },
+      "why": "Same rule for a larger whole-number float (exponent forms serialise to this shape)."
     }
   ],
   "invalid": [
@@ -940,7 +1064,7 @@
         "ledgered": true
       },
       "expect_detail": "'reason_label' missing or not a string",
-      "why": "Optional, but typed when present.",
+      "why": "A frozen-wire member is required and typed; a present-but-mistyped value is malformed.",
       "expect_error": "aegis.aiNative.decisionShape"
     },
     {
@@ -1294,7 +1418,7 @@
         "ledgered": true
       },
       "expect_detail": "'fragment_tags' member is not a value-free label",
-      "why": "A tag that smuggles a value is refused, never surfaced (INV-6; same gate as the receipt verifier).",
+      "why": "A tag outside the value-free label SHAPE (here: spaces) is refused, never surfaced — the receipt verifier's gate. The rule is a shape rule, not a semantic classifier.",
       "expect_error": "aegis.aiNative.decisionShape"
     },
     {
@@ -1628,7 +1752,7 @@
         "ledgered": true
       },
       "expect_detail": "'parts[1]' 'fragment_tags' member is not a value-free label",
-      "why": "The value-free gate applies inside the trace too — a value cannot hide one level down.",
+      "why": "The same shape gate applies inside the trace — a non-label-shaped tag cannot hide one level down.",
       "expect_error": "aegis.aiNative.decisionShape"
     },
     {
@@ -1928,7 +2052,7 @@
         "ledgered": true
       },
       "expect_detail": "'policy_digest' not a string",
-      "why": "Optional, but typed when present.",
+      "why": "Optional (post-freeze), but typed when present.",
       "expect_error": "aegis.aiNative.decisionShape"
     },
     {
@@ -2053,7 +2177,7 @@
         "ledgered": true
       },
       "expect_detail": "'verb' missing or not a string",
-      "why": "Optional, but typed when present.",
+      "why": "A frozen-wire member is required and typed; a present-but-mistyped value is malformed.",
       "expect_error": "aegis.aiNative.decisionShape"
     },
     {
@@ -2417,6 +2541,128 @@
       "expect_error": "aegis.aiNative.decisionShape",
       "expect_detail": "'parts[0]' 'reason_label' missing or not a string",
       "why": "Every partial carries its reason_label on the wire; the trace is validated as strictly as the top level."
+    },
+    {
+      "id": "policy_generation_beyond_safe_integer",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 18446744073709551615,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'policy_generation' not a non-negative integer",
+      "why": "Above 2^53-1 one SDK would round the value and the other keep it exact, so an 'exact policy pin' would differ across SDKs; both refuse it."
+    },
+    {
+      "id": "policy_generation_negative_float",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": -1.0,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'policy_generation' not a non-negative integer",
+      "why": "Whole-number floats are read as integers, so the sign rule applies to them too."
     }
   ]
 }

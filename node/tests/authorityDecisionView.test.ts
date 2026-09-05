@@ -87,6 +87,33 @@ describe("parseAuthorityDecision in the client", () => {
     expect([...view.allowed_fields]).toEqual(["name", "company"]);
   });
 
+  it("is deep-frozen (readonly is only a compile-time promise)", () => {
+    const view = parseAuthorityDecision(fullDecision());
+    expect(Object.isFrozen(view)).toBe(true);
+    expect(Object.isFrozen(view.fragment_tags)).toBe(true);
+    expect(Object.isFrozen(view.parts)).toBe(true);
+    expect(Object.isFrozen(view.parts[1])).toBe(true);
+    expect(Object.isFrozen(view.parts[1].fragment_tags)).toBe(true);
+    expect(() => (view.fragment_tags as string[]).push("injected:later")).toThrow();
+  });
+
+  it("validates outcomes against a private copy, so the export cannot widen the vocabulary", () => {
+    expect(Object.isFrozen(AUTHORITY_OUTCOMES)).toBe(true);
+    expect(() => (AUTHORITY_OUTCOMES as string[]).push("UNKNOWN")).toThrow();
+    const decision = { ...fullDecision(), outcome: "UNKNOWN" };
+    expect(() => parseAuthorityDecision(decision)).toThrow(/'outcome' missing or unknown/);
+  });
+
+  it("policy_generation: 3.0 is 3, unsafe integers are refused", () => {
+    const base = fullDecision();
+    expect(parseAuthorityDecision({ ...base, policy_generation: 3.0 }).policy_generation).toBe(3);
+    for (const bad of [2 ** 53, Number.NaN, Number.POSITIVE_INFINITY, 3.5, -1, true]) {
+      expect(() => parseAuthorityDecision({ ...base, policy_generation: bad })).toThrow(
+        /policy_generation/,
+      );
+    }
+  });
+
   it("does not read outcome / ledgered from the prototype chain", () => {
     const decision = fullDecision();
     delete decision.ledgered;

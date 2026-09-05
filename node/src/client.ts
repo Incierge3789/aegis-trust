@@ -241,17 +241,26 @@ export interface BoundaryDecisionView {
 // for a plane that never said so). Python twin: client.py
 // parse_authority_decision; shared corpus conformance/authority_decision_view.v0.json.
 
-/** The outcome vocabulary the authority can return (wire, SCREAMING_SNAKE_CASE). */
-export const AUTHORITY_OUTCOMES: ReadonlyArray<CoreBoundaryOutcome> = [
+/** The outcome vocabulary the authority can return (wire, SCREAMING_SNAKE_CASE).
+ *  Frozen at runtime — `ReadonlyArray` is only a compile-time promise, and the
+ *  reader validates against a private copy, so no caller can widen the
+ *  vocabulary by mutating this export. */
+export const AUTHORITY_OUTCOMES: ReadonlyArray<CoreBoundaryOutcome> = Object.freeze([
   "PROTECTED",
   "ACCESS_REDUCED",
   "CHECK_REQUIRED",
   "APPROVAL_REQUIRED",
   "BLOCKED",
-];
+] as const);
+const AUTHORITY_OUTCOME_SET: ReadonlySet<string> = new Set<string>(AUTHORITY_OUTCOMES);
 
-/** One boundary's verdict inside `AuthorityDecisionView.parts` — the value-free
- *  attribution trace (which boundary said what). Field NAMES and labels only. */
+/** Largest `policy_generation` both SDKs can carry exactly (`Number.MAX_SAFE_INTEGER`).
+ *  A larger wire value would be rounded here and kept exact in Python, so both refuse it. */
+const MAX_SAFE_POLICY_GENERATION = Number.MAX_SAFE_INTEGER;
+
+/** One boundary's verdict inside `AuthorityDecisionView.parts` — the attribution
+ *  trace (which boundary said what). Field NAMES and server-derived labels only.
+ *  Deep-frozen by the reader. */
 export interface BoundaryPartialView {
   readonly boundary: string;
   readonly outcome: CoreBoundaryOutcome;
@@ -270,11 +279,14 @@ export interface BoundaryPartialView {
  *
  * `fragment_tags` are SERVER-DERIVED: the authority classifies the data
  * reference and accumulates tags per session; a caller cannot under-declare
- * them. `parts` is the value-free attribution trace (every boundary partial
- * that composed into `outcome`). `ledgered` is the chain witness — an
- * unledgered decision carries no evidence claim, so read `fragment_tags` as
- * released only when `ledgered` is true. `decision_id` doubles as the
+ * them. `parts` is the attribution trace (every boundary partial that
+ * composed into `outcome`). `ledgered` is the chain witness — an unledgered
+ * decision carries no evidence claim, so read `fragment_tags` as released
+ * only when `ledgered` is true. `decision_id` doubles as the
  * integrity-checkable ledger id.
+ *
+ * Immutable: the reader deep-freezes the view, its arrays and its partials
+ * (`readonly` is only a compile-time promise).
  *
  * This is NOT the flat `/check-boundary` view: {@link BoundaryDecisionView}
  * carries neither `fragment_tags` nor `parts` (its `evidence_available` is the
@@ -332,21 +344,32 @@ function optionalStr(o: Record<string, unknown>, key: string, where: string): st
 
 function requiredOutcome(o: Record<string, unknown>, where: string): CoreBoundaryOutcome {
   const v = hasOwn(o, "outcome") ? o.outcome : undefined;
-  if (typeof v !== "string" || !AUTHORITY_OUTCOMES.includes(v as CoreBoundaryOutcome)) {
+  if (typeof v !== "string" || !AUTHORITY_OUTCOME_SET.has(v)) {
     throw decisionShapeError(`${where}'outcome' missing or unknown`);
   }
   return v as CoreBoundaryOutcome;
 }
 
-function requiredStrList(o: Record<string, unknown>, key: string, where: string): string[] {
+function requiredStrList(
+  o: Record<string, unknown>,
+  key: string,
+  where: string,
+): ReadonlyArray<string> {
   const v = hasOwn(o, key) ? o[key] : undefined;
   if (!isStringList(v)) {
     throw decisionShapeError(`${where}'${key}' missing or not a list of strings`);
   }
-  return [...v];
+  return Object.freeze([...v]);
 }
 
-function requiredLabels(o: Record<string, unknown>, key: string, where: string): string[] {
+function requiredLabels(
+  o: Record<string, unknown>,
+  key: string,
+  where: string,
+): ReadonlyArray<string> {
+  // Shape rule only (ASCII label charset, length cap — the receipt verifier's
+  // gate): it refuses a tag that is not label-shaped, it does not classify
+  // what a label-shaped string means. Tags are server-derived labels.
   const tags = requiredStrList(o, key, where);
   for (const t of tags) {
     if (!isValueFreeLabel(t)) {
@@ -356,13 +379,30 @@ function requiredLabels(o: Record<string, unknown>, key: string, where: string):
   return tags;
 }
 
+/** A non-negative integer no larger than `Number.MAX_SAFE_INTEGER`. JSON has one
+ *  number type: `3.0` on the wire is the same value as `3` and reads as 3 in
+ *  both SDKs; anything fractional, non-finite, negative, or beyond the safe
+ *  range is refused (a larger value would already have been rounded by
+ *  `JSON.parse`, so the "exact policy pin" would be silently wrong). */
+function parsePolicyGeneration(pg: unknown): number {
+  if (
+    typeof pg !== "number"
+    || !Number.isSafeInteger(pg)
+    || pg < 0
+    || pg > MAX_SAFE_POLICY_GENERATION
+  ) {
+    throw decisionShapeError("'policy_generation' not a non-negative integer");
+  }
+  return pg;
+}
+
 function parsePart(raw: unknown, index: number): BoundaryPartialView {
   const where = `'parts[${index}]' `;
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw decisionShapeError(`${where}is not an object`);
   }
   const o = raw as Record<string, unknown>;
-  return {
+  return Object.freeze({
     boundary: requiredStr(o, "boundary", where),
     outcome: requiredOutcome(o, where),
     reason_code: requiredStr(o, "reason_code", where),
@@ -370,7 +410,7 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
     allowed_fields: requiredStrList(o, "allowed_fields", where),
     withheld_fields: requiredStrList(o, "withheld_fields", where),
     fragment_tags: requiredLabels(o, "fragment_tags", where),
-  };
+  });
 }
 
 /**
@@ -382,11 +422,16 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * `outcome` (one of {@link AUTHORITY_OUTCOMES}), `ledgered` (boolean),
  * `decision_id`, `receipt_event_id`, `reason_code`, `reason_label`, `verb`,
  * `boundary` (string), `allowed_fields` / `withheld_fields` (string[]),
- * `fragment_tags` (a list of value-free labels — a tag that carries a value is
- * refused, never surfaced), and `parts` (boundary partials, each validated the
- * same way). Optional, typed when present (added to the wire after the freeze,
- * or omitted by design): `policy_generation` (non-negative integer),
- * `policy_digest`, `replayed` (boolean; the wire omits it when false). A decision with `ledgered: true`
+ * `fragment_tags` (a list of labels that pass the value-free label SHAPE rule
+ * — ASCII label charset, length cap, the receipt verifier's gate; a tag
+ * outside that shape is refused. The rule does not classify meaning: tags are
+ * server-derived labels, and a label-shaped string is surfaced as-is), and
+ * `parts` (boundary partials, each validated the same way). Optional, typed
+ * when present (added to the wire after the freeze, or omitted by design):
+ * `policy_generation` (non-negative integer no larger than
+ * `Number.MAX_SAFE_INTEGER` so both SDKs carry it exactly; `3.0` is the same
+ * JSON value as `3`), `policy_digest`, `replayed` (boolean; the wire omits it
+ * when false). The returned view is deep-frozen. A decision with `ledgered: true`
  * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
  * is only as good as the ids that make it checkable). Unknown members are
  * ignored (the contract is additive-only). The returned view holds copies — mutating the
@@ -414,11 +459,7 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   const policy_digest = optionalStr(o, "policy_digest", where);
   let policy_generation: number | null = null;
   if (hasOwn(o, "policy_generation")) {
-    const pg = o.policy_generation;
-    if (typeof pg !== "number" || !Number.isInteger(pg) || pg < 0) {
-      throw decisionShapeError("'policy_generation' not a non-negative integer");
-    }
-    policy_generation = pg;
+    policy_generation = parsePolicyGeneration(o.policy_generation);
   }
   let replayed = false;
   if (hasOwn(o, "replayed")) {
@@ -442,8 +483,8 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   const fragment_tags = requiredLabels(o, "fragment_tags", where);
   const partsRaw = hasOwn(o, "parts") ? o.parts : undefined;
   if (!Array.isArray(partsRaw)) throw decisionShapeError("'parts' missing or not a list");
-  const parts = partsRaw.map((p, i) => parsePart(p, i));
-  return {
+  const parts = Object.freeze(partsRaw.map((p, i) => parsePart(p, i)));
+  return Object.freeze({
     outcome,
     ledgered,
     decision_id,
@@ -459,7 +500,7 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
     policy_generation,
     policy_digest,
     replayed,
-  };
+  });
 }
 
 // Enforcement-neutral attribution witness claim (usage metering).

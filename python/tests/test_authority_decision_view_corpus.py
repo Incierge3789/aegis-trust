@@ -40,7 +40,9 @@ def _project(view: AuthorityDecisionView, expect: dict[str, Any]) -> dict[str, A
         elif key == "parts_1_fragment_tags":
             out[key] = list(view.parts[1].fragment_tags)
         else:
-            out[key] = getattr(view, key)
+            value = getattr(view, key)
+            # The view holds tuples (immutable); the corpus writes JSON lists.
+            out[key] = list(value) if isinstance(value, tuple) else value
     return out
 
 

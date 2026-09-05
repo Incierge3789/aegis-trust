@@ -57,7 +57,7 @@ def test_reads_the_decision_member_of_a_tool_call_body() -> None:
         "query_business_data", "customer_data", "acme"
     )
     view = parse_authority_decision(body["decision"])
-    assert view.fragment_tags == ["pii:contact", "sensitive:Finance"]
+    assert view.fragment_tags == ("pii:contact", "sensitive:Finance")
     assert [p.boundary for p in view.parts] == ["purpose", "data"]
     assert view.decision_id == "hashchain:0000042"
     assert view.ledgered is True
@@ -81,7 +81,7 @@ def test_reads_the_decision_member_of_a_stream_open_body() -> None:
     body = _client_with_transport(handler).stream_open({"purpose": "customer_data"})
     view = parse_authority_decision(body["decision"])
     assert view.receipt_event_id == "hashchain:0000043"
-    assert view.parts[1].withheld_fields == ["email"]
+    assert view.parts[1].withheld_fields == ("email",)
 
 
 def test_view_is_decoupled_from_the_input_object() -> None:
@@ -90,17 +90,49 @@ def test_view_is_decoupled_from_the_input_object() -> None:
     decision["fragment_tags"].append("injected:later")
     decision["parts"][1]["fragment_tags"].clear()
     decision["allowed_fields"].append("email")
-    assert view.fragment_tags == ["pii:contact", "sensitive:Finance"]
-    assert view.parts[1].fragment_tags == ["pii:contact", "sensitive:Finance"]
-    assert view.allowed_fields == ["name", "company"]
+    assert view.fragment_tags == ("pii:contact", "sensitive:Finance")
+    assert view.parts[1].fragment_tags == ("pii:contact", "sensitive:Finance")
+    assert view.allowed_fields == ("name", "company")
 
 
-def test_view_is_frozen() -> None:
+def test_view_is_frozen_all_the_way_down() -> None:
+    """frozen=True alone is shallow (a list member could still be appended
+    to); the sequences are tuples so the view cannot be altered in place."""
     view = parse_authority_decision(_full_decision())
     with pytest.raises(dataclasses.FrozenInstanceError):
         view.ledgered = False  # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
         view.parts[0].boundary = "x"  # type: ignore[misc]
+    assert isinstance(view.fragment_tags, tuple)
+    assert isinstance(view.parts, tuple)
+    assert isinstance(view.parts[1].fragment_tags, tuple)
+    assert not hasattr(view.fragment_tags, "append")
+
+
+def test_required_members_have_no_defaults() -> None:
+    """A view cannot be fabricated by leaving required members out (only the
+    post-freeze / by-design-optional members carry a default)."""
+    optional = {
+        f.name
+        for f in dataclasses.fields(AuthorityDecisionView)
+        if f.default is not dataclasses.MISSING
+        or f.default_factory is not dataclasses.MISSING  # type: ignore[misc]
+    }
+    assert optional == {"policy_generation", "policy_digest", "replayed"}
+    with pytest.raises(TypeError):
+        AuthorityDecisionView(outcome="PROTECTED", ledgered=True)  # type: ignore[call-arg]
+
+
+def test_policy_generation_number_parity() -> None:
+    """JSON has one number type: 3.0 is 3; beyond 2**53-1 both SDKs refuse."""
+    base = _full_decision()
+    assert (
+        parse_authority_decision({**base, "policy_generation": 3.0}).policy_generation
+        == 3
+    )
+    for bad in (2**53, float("nan"), float("inf"), 3.5, -1.0, True):
+        with pytest.raises(ValueError, match="policy_generation"):
+            parse_authority_decision({**base, "policy_generation": bad})
 
 
 def test_outcome_vocabulary_matches_the_flat_view_and_the_gate() -> None:
