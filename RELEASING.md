@@ -8,8 +8,9 @@ discipline and so that maintainers cut every release the same way.
 ## Release flow
 
 1. **Version bump + parity.** The release version must be identical across
-   `node/package.json`, `node/VERSION`, `node/src/index.ts`,
-   `python/pyproject.toml`, and the git tag. Maintainers run
+   the six in-repo sources — `node/package.json`, `node/VERSION`,
+   `node/src/index.ts`, `python/pyproject.toml`, `python/VERSION`,
+   `python/src/aegis_trust/__init__.py` — and the git tag. Maintainers run
    `npm --prefix node run parity` locally; the scheduled `version-parity`
    workflow cross-checks the same set against the live npm and PyPI registries
    daily and notifies maintainers on drift.
@@ -65,8 +66,9 @@ discipline and so that maintainers cut every release the same way.
 
 ## What blocks a release
 
-- Version parity mismatch across the five version sources or the live
-  registries.
+- Version parity mismatch across the six in-repo version sources, the tag,
+  or the live registries (the release workflow refuses to tag a bump whose
+  sources disagree).
 - The maintainer-side readiness verifier reporting an open release-class gap
   (internal, see step 2).
 - The CI-side `productization-gate` job or any release workflow safety

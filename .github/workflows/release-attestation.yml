@@ -2,7 +2,8 @@
 #
 # Purpose: supply-chain attestation for releases — CycloneDX SBOMs, Sigstore
 # cosign keyless signatures, and SDK-artifact signing attached to the GitHub
-# Release, plus npm Trusted Publisher OIDC publish on tag push.
+# Release, plus npm / PyPI Trusted Publisher OIDC publish on a release run (a
+# pushed v* tag, or a version-bump merge to main that resolve-release tags).
 #
 # === SAFETY INVARIANTS (must hold) ===
 #
@@ -17,9 +18,10 @@
 #   3. Secrets (NPM_TOKEN / PYPI_TOKEN) は本 workflow は **使わない**。 npm publish は
 #      **Block C で npm Trusted Publisher OIDC** 経由 (token なし、 id-token: write OIDC、
 #      npm ≥11.5.1 で literal supported)。 PyPI publish も **PyPI Trusted Publisher
-#      OIDC** 経由 (token なし、 publish-pypi-trusted-publisher job、 tag push 時)。
+#      OIDC** 経由 (token なし、 publish-pypi-trusted-publisher job、 release run 時 =
+#      tag push または version bump merge)。
 #      outputs = SBOM + attestation + release artifact attach + npm/PyPI
-#      tag-push-only publish。
+#      release-run-only publish (resolve-release の release_tag が空なら upload 無し)。
 #   4. 全 third-party action は 40-char commit SHA pin。 tag pin 禁止 (mutation attack)。
 #   5. Runner = a designated self-hosted release runner (mandatory; Block B =
 #      release-class, supply-chain trust core). ubuntu-latest = GitHub-hosted is
@@ -41,8 +43,8 @@
 #   - Block A (SBOM + cosign sign-blob keyless + Release attach): ✅ wired (sprint_009)
 #   - Block B Phase 2 (SDK 本体 artifact pack + cosign sign + Release attach): ✅ wired (sprint_010)
 #   - Block C (npm Trusted Publisher OIDC publish + provenance + dist-tag): ✅ wired
-#     (T-011-11, line 363+, `if: tag push only` gated, requires npm ≥11.5.1)
-#   - PyPI Trusted Publisher OIDC publish: ✅ wired (publish-pypi-trusted-publisher job, tag-push-only); PEP 740 attestations ✅ enabled (repo public 2026-06-13)
+#     (T-011-11, `if: needs.resolve-release.outputs.release_tag != ''` gated, requires npm ≥11.5.1)
+#   - PyPI Trusted Publisher OIDC publish: ✅ wired (publish-pypi-trusted-publisher job, release-run-only: tag push or bump merge); PEP 740 attestations ✅ enabled (repo public 2026-06-13)
 #   - Reproducible build verification: deferred (audit/integrity 系)
 #
 # References:
@@ -82,7 +84,8 @@ on:
   # reusable-workflow call would present the caller's identity instead.
   # A main push without a bump exits at `resolve-release` (no self-hosted job
   # runs); a pushed v* tag releases as before; workflow_dispatch stays a
-  # preview run (build + sign, never upload).
+  # preview run (build + sign, never upload) and is honoured only from main or
+  # a v* tag — an arbitrary branch never reaches the self-hosted runner.
   push:
     branches:
       - main
@@ -95,7 +98,14 @@ permissions:
   attestations: write   # GitHub native attestation API
 
 concurrency:
-  group: release-attestation-${{ github.ref_name }}
+  # Keyed by COMMIT, not by ref: GitHub keeps one running + one pending run per
+  # group and a newer pending run replaces an older pending one even with
+  # cancel-in-progress: false. A group per ref would let an ordinary main push
+  # cancel a queued version-bump run, whose release could then never be
+  # re-detected (the next run's `before` already carries the bump). Per commit,
+  # only a tag push of the very same commit shares a group with the main-push
+  # run of that commit — the one pair that must not run twice at once.
+  group: release-attestation-${{ github.sha }}
   cancel-in-progress: false   # release は途中中断 NG
 
 jobs:
@@ -173,7 +183,7 @@ jobs:
   productization-gate:
     name: Productization Gate (9-verifier dogfood, fail-closed)
     needs: [resolve-release]
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
@@ -226,7 +236,7 @@ jobs:
     name: SBOM (Node — CycloneDX)
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     needs: [resolve-release, productization-gate]
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
@@ -270,7 +280,7 @@ jobs:
     name: SBOM (Python — CycloneDX)
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     needs: [resolve-release, productization-gate]
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
@@ -327,7 +337,7 @@ jobs:
   collect-and-sign:
     name: Cosign sign SBOMs + Release attach
     needs: [resolve-release, sbom-node, sbom-python]
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
@@ -383,7 +393,7 @@ jobs:
           path: sbom/*
           retention-days: 90
 
-      - name: Upload SBOMs + signatures to Release (tag push only)
+      - name: Upload SBOMs + signatures to Release (release runs only)
         if: needs.resolve-release.outputs.release_tag != ''
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
@@ -407,7 +417,7 @@ jobs:
   #   - npm pack で aegis-trust-<version>.tgz を build
   #   - python -m build で aegis_trust-<version>-py3-none-any.whl + .tar.gz を build
   #   - cosign sign-blob keyless で 3 artifact (tgz + whl + sdist) を署名
-  #   - upload signed bundle + release attach (tag push 時)
+  #   - upload signed bundle + release attach (release run 時: tag push / bump merge)
   #
   # Not yet (sprint_011+):
   #   - npm publish --provenance flag (publish workflow 統合、 Stage A 再開後)
@@ -417,7 +427,7 @@ jobs:
   pack-and-sign-sdk:
     name: Pack + Cosign sign SDK artifacts (npm tarball + PyPI wheel/sdist)
     needs: [resolve-release, sbom-node, sbom-python]
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
@@ -527,7 +537,7 @@ jobs:
           path: sdk-artifacts/*
           retention-days: 90
 
-      - name: Upload SDK artifacts + signatures to Release (tag push only)
+      - name: Upload SDK artifacts + signatures to Release (release runs only)
         if: needs.resolve-release.outputs.release_tag != ''
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
@@ -581,7 +591,8 @@ jobs:
           if-no-files-found: error
 
   # === Block C publish job (github-hosted) ============================================
-  # Runs ONLY on tag push. Receives the cosign-signed .tgz from pack-and-sign-sdk
+  # Runs ONLY on a release run (pushed v* tag, or a version-bump merge to main
+  # that resolve-release tagged). Receives the cosign-signed .tgz from pack-and-sign-sdk
   # via download-artifact, then publishes to npm with Trusted Publisher OIDC +
   # --provenance. github-hosted runner is mandatory here because npm registry
   # 422-rejects --provenance from self-hosted runners (see comment in
@@ -676,7 +687,8 @@ jobs:
           fi
 
   # === PyPI Trusted Publisher publish job (github-hosted) =============================
-  # Runs ONLY on tag push. Receives the built wheel + sdist from pack-and-sign-sdk
+  # Runs ONLY on a release run (pushed v* tag, or a version-bump merge to main
+  # that resolve-release tagged). Receives the built wheel + sdist from pack-and-sign-sdk
   # via download-artifact, then publishes to PyPI with Trusted Publisher OIDC
   # (token-free — no API token, no ~/.pypirc). github-hosted runner is required for
   # the OIDC token exchange. PyPI Trusted Publishing works on private source repos
@@ -720,7 +732,7 @@ jobs:
           attestations: true        # PEP 740 attestations: re-enabled now the repo is public (visibility=PUBLIC, 2026-06-13), mirroring npm --provenance
 
   # === Site registry-sync notify job (github-hosted) =================================
-  # Runs ONLY on tag push, ONLY after BOTH publish jobs succeed (needs: = all must
+  # Runs ONLY on a release run, ONLY after BOTH publish jobs succeed (needs: = all must
   # pass). On a partial publish (one registry up, the other failed) this job is
   # SKIPPED — the site is never told to sync a half-published release.
   #
