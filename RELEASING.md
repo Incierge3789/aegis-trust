@@ -24,7 +24,11 @@ discipline and so that maintainers cut every release the same way.
    `main` runs `release-on-main.yml`, which creates the `v<version>` tag at
    the merged commit and calls the release workflow with it; a pushed `v*`
    tag starts the same workflow directly (a manual `workflow_dispatch` is a
-   preview run and never uploads). Either way the tag push (or call) starts the
+   preview run and never uploads). A merge that leaves the version pin
+   unchanged never releases, and an existing tag is never moved; if the
+   called release fails after the tag exists, re-run that run's failed jobs
+   within a day or delete the tag and merge a new bump. Either way the tag
+   push (or call) starts the
    `release-attestation` workflow; `pull_request_target` is never used in
    release workflows. After the tag, the workflow runs its own in-repo
    quality gate job (`productization-gate`) in CI — a second, CI-side layer

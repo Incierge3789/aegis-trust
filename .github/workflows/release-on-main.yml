@@ -7,8 +7,9 @@
 # shell commands and, when a tagged commit carried a metadata defect, two more.
 #
 # Now: the release decision is the merge of a version-bump pull request. On
-# every push to main this workflow reads the version pins; if `v<version>` does
-# not exist yet it creates the tag at the merged commit and CALLS
+# every push to main this workflow reads the version pins; ONLY if the pin
+# changed in the pushed range (before → HEAD) and `v<version>` does not exist
+# yet, it creates the tag at the merged commit and CALLS
 # release-attestation.yml with that tag (workflow_call), so gate → SBOM → sign
 # → pack → npm/PyPI Trusted Publisher upload run in this same run. The
 # version pin must have CHANGED in the pushed range (a bump merge); a merge
@@ -18,8 +19,13 @@
 # run per version. A push whose version tag already exists is a no-op.
 #
 # Fail-closed: node and python pins must agree; an existing tag is never moved;
-# nothing here uses a personal token or a registry secret (Trusted Publisher
-# OIDC is inherited from release-attestation.yml).
+# an unreadable previous pin (first push, force push) never releases; nothing
+# here uses a personal token or a registry secret (Trusted Publisher OIDC is
+# inherited from release-attestation.yml).
+#
+# Recovery: if the called release fails AFTER the tag was created, re-run the
+# failed jobs of that run (hand-off artifacts live one day) — or delete the tag
+# and merge a new bump. This workflow will not re-release an existing tag.
 name: release-on-main
 
 on:
@@ -58,6 +64,12 @@ jobs:
             exit 2
           fi
           TAG="v$NODE_V"
+          # The tag is derived from the version pin, never from an input; still,
+          # pin the shape so a malformed pin can never reach git or the gate.
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "version pin '$NODE_V' is not a release version — not releasing" >&2
+            exit 2
+          fi
           # Release only when THIS push changed the version pin (a version-bump
           # merge). A docs merge after someone deleted a tag must not re-release,
           # and the first push after enabling this workflow must not either.
