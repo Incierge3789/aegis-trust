@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Added — typed, fail-closed reader for the AI-native `decision` object
+- `aegis_trust.client.parse_authority_decision(decision)` returns an
+  `AuthorityDecisionView` (with `BoundaryPartialView` for its `parts`). It
+  exposes what the AI-native wire (`tool_call` / `stream_open` bodies,
+  `stream_session().decision`) already returns but the SDK handed back as an
+  untyped dict: the **server-derived** `fragment_tags`, the value-free
+  attribution trace `parts`, and the chain pointers `decision_id` /
+  `receipt_event_id` / `ledgered`, plus `outcome`, `verb`, `boundary`,
+  `reason_code` / `reason_label`, `allowed_fields` / `withheld_fields`,
+  `policy_generation` / `policy_digest`, `replayed`.
+- Fail-closed: a malformed object raises `AegisValidationError`
+  (`aegis.aiNative.decisionShape`) instead of parsing into a defaulted view —
+  an absent `fragment_tags` is refused, never read as "no tags released"; a
+  tag (top-level or inside a partial) that carries a value is refused, never
+  surfaced (same value-free label gate as the receipt verifier); every
+  member the frozen wire declares is required, and a decision that claims
+  `ledgered` must carry non-blank `decision_id` / `receipt_event_id`. Unknown
+  members are ignored (additive-only contract). Shared cross-language corpus:
+  `conformance/authority_decision_view.v0.json` (npm runs the same vectors).
+- Not added to the flat `check_boundary` view on purpose: `BoundaryDecisionView`
+  is unchanged because the flat wire never sends `fragment_tags` / `parts`
+  (it already carries the ledgered bit as `evidence_available` and the
+  decision id under `evidence`). A field the wire never fills would be a
+  claim without a source.
+
+### Deferred — request-side `session_id` / `fragment_tags` on `check_boundary` (not in this version)
+- Not added. The decision plane's flat wire accepts neither field today and
+  drops unknown request keys silently, and `fragment_tags` are server-derived
+  (a caller can only ever add to them, never under-declare). An SDK argument
+  that is sent but not received would be a parity claim this SDK cannot
+  back. Both fields land together with the plane version whose flat wire
+  accepts them, as one pinned SDK/plane pair, and that entry will name the
+  pair.
+
 ## [0.10.1] - 2026-09-01
 
 ### Fixed — release-gate hygiene (no API change)

@@ -29,6 +29,7 @@ from aegis_trust.errors import (
     AegisValidationError,
     aegis_docs_url,
 )
+from aegis_trust.receipt_verify import is_value_free_label
 from aegis_trust.types import (
     AuditChainStatus,
     CapabilityGrant,
@@ -286,6 +287,242 @@ class BoundaryDecisionView:
     reason_label: str = ""
     evidence_available: bool = False
     evidence: CoreDecisionEvidence | None = None
+
+
+# ── AI-native `decision` object: typed, fail-closed reader ───────────
+# The AI-native wire (POST /tool-call, POST /stream/open) returns a shared
+# `decision` object (contract: AI_NATIVE_V1_CONTRACT.md, additive-only) that
+# carries more than the flat /check-boundary view does: the SERVER-DERIVED
+# `fragment_tags[]`, the value-free attribution trace `parts[]`, and the
+# chain pointers `decision_id` / `receipt_event_id` / `ledgered`. Until now the
+# SDK handed that object back as an untyped dict, so a caller could not read
+# those fields without re-deriving the wire shape. This reader exposes them
+# and refuses a malformed object instead of defaulting a field the wire did
+# not send (a defaulted `fragment_tags: []` would claim "no tags released"
+# for a plane that never said so).
+
+#: The outcome vocabulary the authority can return (wire, SCREAMING_SNAKE_CASE).
+AUTHORITY_OUTCOMES: tuple[str, ...] = (
+    "PROTECTED",
+    "ACCESS_REDUCED",
+    "CHECK_REQUIRED",
+    "APPROVAL_REQUIRED",
+    "BLOCKED",
+)
+
+
+@dataclass(frozen=True)
+class BoundaryPartialView:
+    """One boundary's verdict inside :attr:`AuthorityDecisionView.parts` —
+    the value-free attribution trace (which boundary said what). Field
+    *names* and labels only, never values."""
+
+    boundary: str
+    outcome: str
+    reason_code: str
+    reason_label: str
+    allowed_fields: list[str] = field(default_factory=list)
+    withheld_fields: list[str] = field(default_factory=list)
+    fragment_tags: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AuthorityDecisionView:
+    """Typed view of the ``decision`` object the AI-native wire returns
+    (``tool_call`` / ``stream_open`` bodies, ``stream_session().decision``).
+    Built ONLY by :func:`parse_authority_decision`, which refuses a malformed
+    object rather than defaulting a field the wire did not send.
+
+    ``fragment_tags`` are SERVER-DERIVED: the authority classifies the data
+    reference and accumulates tags per session; a caller cannot under-declare
+    them. ``parts`` is the value-free attribution trace (every boundary
+    partial that composed into ``outcome``). ``ledgered`` is the chain
+    witness — an unledgered decision carries no evidence claim, so read
+    ``fragment_tags`` as released only when ``ledgered`` is True.
+    ``decision_id`` doubles as the integrity-checkable ledger id.
+
+    This is NOT the flat ``/check-boundary`` view: :class:`BoundaryDecisionView`
+    carries neither ``fragment_tags`` nor ``parts`` (its ``evidence_available``
+    is the ``ledgered`` bit and ``evidence.decision_id`` the decision id)."""
+
+    outcome: str
+    ledgered: bool
+    decision_id: str
+    receipt_event_id: str
+    reason_code: str
+    reason_label: str
+    verb: str
+    boundary: str
+    allowed_fields: list[str] = field(default_factory=list)
+    withheld_fields: list[str] = field(default_factory=list)
+    fragment_tags: list[str] = field(default_factory=list)
+    parts: list[BoundaryPartialView] = field(default_factory=list)
+    policy_generation: int | None = None
+    policy_digest: str | None = None
+    replayed: bool = False
+
+
+def _decision_shape_error(detail: str) -> AegisValidationError:
+    return AegisValidationError(
+        f"authority decision: {detail}",
+        code="aegis.aiNative.decisionShape",
+        remediation=(
+            "The 'decision' object does not have the AI-native wire shape. "
+            "Pass the 'decision' member of a tool_call / stream_open response "
+            "(not the whole body) and check the boundary version against "
+            "AI_NATIVE_V1_CONTRACT.md (additive-only)."
+        ),
+        docs_url=aegis_docs_url("aegis.aiNative.decisionShape"),
+    )
+
+
+def _str_list_or_none(raw: Any) -> list[str] | None:
+    if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
+        return None
+    return list(raw)
+
+
+def _required_str(obj: dict[str, Any], key: str, where: str) -> str:
+    v = obj.get(key)
+    if not isinstance(v, str):
+        raise _decision_shape_error(f"{where}'{key}' missing or not a string")
+    return v
+
+
+def _optional_str(obj: dict[str, Any], key: str, where: str) -> str | None:
+    if key not in obj:
+        return None
+    v = obj[key]
+    if not isinstance(v, str):
+        raise _decision_shape_error(f"{where}'{key}' not a string")
+    return v
+
+
+def _required_outcome(obj: dict[str, Any], where: str) -> str:
+    v = obj.get("outcome")
+    if not isinstance(v, str) or v not in AUTHORITY_OUTCOMES:
+        raise _decision_shape_error(f"{where}'outcome' missing or unknown")
+    return v
+
+
+def _required_str_list(obj: dict[str, Any], key: str, where: str) -> list[str]:
+    v = _str_list_or_none(obj.get(key))
+    if v is None:
+        raise _decision_shape_error(f"{where}'{key}' missing or not a list of strings")
+    return v
+
+
+def _required_labels(obj: dict[str, Any], key: str, where: str) -> list[str]:
+    tags = _required_str_list(obj, key, where)
+    for t in tags:
+        if not is_value_free_label(t):
+            raise _decision_shape_error(
+                f"{where}'{key}' member is not a value-free label"
+            )
+    return tags
+
+
+def _parse_part(raw: Any, index: int) -> BoundaryPartialView:
+    where = f"'parts[{index}]' "
+    if not isinstance(raw, dict):
+        raise _decision_shape_error(f"{where}is not an object")
+    return BoundaryPartialView(
+        boundary=_required_str(raw, "boundary", where),
+        outcome=_required_outcome(raw, where),
+        reason_code=_required_str(raw, "reason_code", where),
+        reason_label=_required_str(raw, "reason_label", where),
+        allowed_fields=_required_str_list(raw, "allowed_fields", where),
+        withheld_fields=_required_str_list(raw, "withheld_fields", where),
+        fragment_tags=_required_labels(raw, "fragment_tags", where),
+    )
+
+
+def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
+    """Parse the AI-native ``decision`` object into an
+    :class:`AuthorityDecisionView`, fail-closed.
+
+    Required (present and correctly typed, else :class:`AegisValidationError`
+    ``aegis.aiNative.decisionShape``) — every member the frozen wire declares:
+    ``outcome`` (one of :data:`AUTHORITY_OUTCOMES`), ``ledgered`` (bool),
+    ``decision_id``, ``receipt_event_id``, ``reason_code``, ``reason_label``,
+    ``verb``, ``boundary`` (str), ``allowed_fields`` / ``withheld_fields``
+    (list[str]), ``fragment_tags`` (list of value-free labels — a tag that
+    carries a value is refused, never surfaced), and ``parts`` (list of
+    boundary partials, each validated the same way). Optional, typed when
+    present (added to the wire after the freeze, or omitted by design):
+    ``policy_generation`` (non-negative int, never a bool), ``policy_digest``,
+    ``replayed`` (bool; the wire omits it when false). A decision with
+    ``ledgered=True`` must carry non-blank ``decision_id`` /
+    ``receipt_event_id`` (the witness claim is only as good as the ids that
+    make it checkable). Unknown members are ignored (the contract is
+    additive-only). The returned view holds copies —
+    mutating the input afterwards does not change it.
+
+    Pass the ``decision`` MEMBER (``body["decision"]``), not the whole
+    response body.
+    """
+    if not isinstance(decision, dict):
+        raise _decision_shape_error("not an object")
+    where = ""
+    outcome = _required_outcome(decision, where)
+    ledgered = decision.get("ledgered")
+    if not isinstance(ledgered, bool):
+        raise _decision_shape_error("'ledgered' missing or not a boolean")
+    decision_id = _required_str(decision, "decision_id", where)
+    receipt_event_id = _required_str(decision, "receipt_event_id", where)
+    reason_code = _required_str(decision, "reason_code", where)
+    reason_label = _required_str(decision, "reason_label", where)
+    verb = _required_str(decision, "verb", where)
+    boundary = _required_str(decision, "boundary", where)
+    policy_digest = _optional_str(decision, "policy_digest", where)
+    policy_generation: int | None = None
+    if "policy_generation" in decision:
+        pg = decision["policy_generation"]
+        if isinstance(pg, bool) or not isinstance(pg, int) or pg < 0:
+            raise _decision_shape_error(
+                "'policy_generation' not a non-negative integer"
+            )
+        policy_generation = pg
+    replayed = False
+    if "replayed" in decision:
+        rp = decision["replayed"]
+        if not isinstance(rp, bool):
+            raise _decision_shape_error("'replayed' not a boolean")
+        replayed = rp
+    # A decision that claims the chain witnessed it must carry the ids that
+    # make the claim checkable; a blank id on a ledgered decision is the
+    # receipt precedent (whitespace-only ids fail closed there too).
+    if ledgered:
+        if not decision_id.strip():
+            raise _decision_shape_error("'decision_id' empty on a ledgered decision")
+        if not receipt_event_id.strip():
+            raise _decision_shape_error(
+                "'receipt_event_id' empty on a ledgered decision"
+            )
+    allowed_fields = _required_str_list(decision, "allowed_fields", where)
+    withheld_fields = _required_str_list(decision, "withheld_fields", where)
+    fragment_tags = _required_labels(decision, "fragment_tags", where)
+    parts_raw = decision.get("parts")
+    if not isinstance(parts_raw, list):
+        raise _decision_shape_error("'parts' missing or not a list")
+    parts = [_parse_part(p, i) for i, p in enumerate(parts_raw)]
+    return AuthorityDecisionView(
+        outcome=outcome,
+        ledgered=ledgered,
+        decision_id=decision_id,
+        receipt_event_id=receipt_event_id,
+        reason_code=reason_code,
+        reason_label=reason_label,
+        verb=verb,
+        boundary=boundary,
+        allowed_fields=allowed_fields,
+        withheld_fields=withheld_fields,
+        fragment_tags=fragment_tags,
+        parts=parts,
+        policy_generation=policy_generation,
+        policy_digest=policy_digest,
+        replayed=replayed,
+    )
 
 
 class AegisClient:

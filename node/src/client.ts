@@ -28,6 +28,7 @@ import {
   AegisValidationError,
 } from "./errors.js";
 import { currentCapabilityFor, delegationDenied } from "./delegationContext.js";
+import { isValueFreeLabel } from "./receiptVerify.js";
 import {
   AEGIS_API_VERSION,
   AEGIS_API_VERSION_HEADER,
@@ -225,6 +226,240 @@ export interface BoundaryDecisionView {
   readonly reason_label: string;
   readonly evidence_available: boolean;
   readonly evidence: CoreDecisionEvidence | null;
+}
+
+// ── AI-native `decision` object: typed, fail-closed reader ───────────
+// The AI-native wire (POST /tool-call, POST /stream/open) returns a shared
+// `decision` object (contract: AI_NATIVE_V1_CONTRACT.md, additive-only) that
+// carries more than the flat /check-boundary view does: the SERVER-DERIVED
+// `fragment_tags[]`, the value-free attribution trace `parts[]`, and the chain
+// pointers `decision_id` / `receipt_event_id` / `ledgered`. Until now the SDK
+// handed that object back as `Record<string, unknown>`, so a caller could not
+// read those fields without re-deriving the wire shape. This reader exposes
+// them and refuses a malformed object instead of defaulting a field the wire
+// did not send (a defaulted `fragment_tags: []` would claim "no tags released"
+// for a plane that never said so). Python twin: client.py
+// parse_authority_decision; shared corpus conformance/authority_decision_view.v0.json.
+
+/** The outcome vocabulary the authority can return (wire, SCREAMING_SNAKE_CASE). */
+export const AUTHORITY_OUTCOMES: ReadonlyArray<CoreBoundaryOutcome> = [
+  "PROTECTED",
+  "ACCESS_REDUCED",
+  "CHECK_REQUIRED",
+  "APPROVAL_REQUIRED",
+  "BLOCKED",
+];
+
+/** One boundary's verdict inside `AuthorityDecisionView.parts` — the value-free
+ *  attribution trace (which boundary said what). Field NAMES and labels only. */
+export interface BoundaryPartialView {
+  readonly boundary: string;
+  readonly outcome: CoreBoundaryOutcome;
+  readonly reason_code: string;
+  readonly reason_label: string;
+  readonly allowed_fields: ReadonlyArray<string>;
+  readonly withheld_fields: ReadonlyArray<string>;
+  readonly fragment_tags: ReadonlyArray<string>;
+}
+
+/**
+ * Typed view of the `decision` object the AI-native wire returns (`toolCall` /
+ * `streamOpen` bodies, a managed stream session's decision). Built ONLY by
+ * {@link parseAuthorityDecision}, which refuses a malformed object rather than
+ * defaulting a field the wire did not send.
+ *
+ * `fragment_tags` are SERVER-DERIVED: the authority classifies the data
+ * reference and accumulates tags per session; a caller cannot under-declare
+ * them. `parts` is the value-free attribution trace (every boundary partial
+ * that composed into `outcome`). `ledgered` is the chain witness — an
+ * unledgered decision carries no evidence claim, so read `fragment_tags` as
+ * released only when `ledgered` is true. `decision_id` doubles as the
+ * integrity-checkable ledger id.
+ *
+ * This is NOT the flat `/check-boundary` view: {@link BoundaryDecisionView}
+ * carries neither `fragment_tags` nor `parts` (its `evidence_available` is the
+ * `ledgered` bit and `evidence.decision_id` the decision id).
+ */
+export interface AuthorityDecisionView {
+  readonly outcome: CoreBoundaryOutcome;
+  readonly ledgered: boolean;
+  readonly decision_id: string;
+  readonly receipt_event_id: string;
+  readonly reason_code: string;
+  readonly reason_label: string;
+  readonly verb: string;
+  readonly boundary: string;
+  readonly allowed_fields: ReadonlyArray<string>;
+  readonly withheld_fields: ReadonlyArray<string>;
+  readonly fragment_tags: ReadonlyArray<string>;
+  readonly parts: ReadonlyArray<BoundaryPartialView>;
+  readonly policy_generation: number | null;
+  readonly policy_digest: string | null;
+  readonly replayed: boolean;
+}
+
+function decisionShapeError(detail: string): AegisValidationError {
+  return new AegisValidationError({
+    code: "aegis.aiNative.decisionShape",
+    remediation:
+      "The 'decision' object does not have the AI-native wire shape. Pass the "
+      + "'decision' member of a toolCall / streamOpen response (not the whole "
+      + "body) and check the boundary version against AI_NATIVE_V1_CONTRACT.md "
+      + "(additive-only).",
+    docs_url: aegisDocsUrl("aegis.aiNative.decisionShape"),
+    message: `authority decision: ${detail}`,
+  });
+}
+
+const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+
+function isStringList(raw: unknown): raw is string[] {
+  return Array.isArray(raw) && raw.every((x) => typeof x === "string");
+}
+
+function requiredStr(o: Record<string, unknown>, key: string, where: string): string {
+  const v = hasOwn(o, key) ? o[key] : undefined;
+  if (typeof v !== "string") throw decisionShapeError(`${where}'${key}' missing or not a string`);
+  return v;
+}
+
+function optionalStr(o: Record<string, unknown>, key: string, where: string): string | null {
+  if (!hasOwn(o, key)) return null;
+  const v = o[key];
+  if (typeof v !== "string") throw decisionShapeError(`${where}'${key}' not a string`);
+  return v;
+}
+
+function requiredOutcome(o: Record<string, unknown>, where: string): CoreBoundaryOutcome {
+  const v = hasOwn(o, "outcome") ? o.outcome : undefined;
+  if (typeof v !== "string" || !AUTHORITY_OUTCOMES.includes(v as CoreBoundaryOutcome)) {
+    throw decisionShapeError(`${where}'outcome' missing or unknown`);
+  }
+  return v as CoreBoundaryOutcome;
+}
+
+function requiredStrList(o: Record<string, unknown>, key: string, where: string): string[] {
+  const v = hasOwn(o, key) ? o[key] : undefined;
+  if (!isStringList(v)) {
+    throw decisionShapeError(`${where}'${key}' missing or not a list of strings`);
+  }
+  return [...v];
+}
+
+function requiredLabels(o: Record<string, unknown>, key: string, where: string): string[] {
+  const tags = requiredStrList(o, key, where);
+  for (const t of tags) {
+    if (!isValueFreeLabel(t)) {
+      throw decisionShapeError(`${where}'${key}' member is not a value-free label`);
+    }
+  }
+  return tags;
+}
+
+function parsePart(raw: unknown, index: number): BoundaryPartialView {
+  const where = `'parts[${index}]' `;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw decisionShapeError(`${where}is not an object`);
+  }
+  const o = raw as Record<string, unknown>;
+  return {
+    boundary: requiredStr(o, "boundary", where),
+    outcome: requiredOutcome(o, where),
+    reason_code: requiredStr(o, "reason_code", where),
+    reason_label: requiredStr(o, "reason_label", where),
+    allowed_fields: requiredStrList(o, "allowed_fields", where),
+    withheld_fields: requiredStrList(o, "withheld_fields", where),
+    fragment_tags: requiredLabels(o, "fragment_tags", where),
+  };
+}
+
+/**
+ * Parse the AI-native `decision` object into an {@link AuthorityDecisionView},
+ * fail-closed.
+ *
+ * Required (present and correctly typed, else `AegisValidationError`
+ * `aegis.aiNative.decisionShape`) — every member the frozen wire declares:
+ * `outcome` (one of {@link AUTHORITY_OUTCOMES}), `ledgered` (boolean),
+ * `decision_id`, `receipt_event_id`, `reason_code`, `reason_label`, `verb`,
+ * `boundary` (string), `allowed_fields` / `withheld_fields` (string[]),
+ * `fragment_tags` (a list of value-free labels — a tag that carries a value is
+ * refused, never surfaced), and `parts` (boundary partials, each validated the
+ * same way). Optional, typed when present (added to the wire after the freeze,
+ * or omitted by design): `policy_generation` (non-negative integer),
+ * `policy_digest`, `replayed` (boolean; the wire omits it when false). A decision with `ledgered: true`
+ * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
+ * is only as good as the ids that make it checkable). Unknown members are
+ * ignored (the contract is additive-only). The returned view holds copies — mutating the
+ * input afterwards does not change it.
+ *
+ * Pass the `decision` MEMBER (`body.decision`), not the whole response body.
+ */
+export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView {
+  if (decision === null || typeof decision !== "object" || Array.isArray(decision)) {
+    throw decisionShapeError("not an object");
+  }
+  const o = decision as Record<string, unknown>;
+  const where = "";
+  const outcome = requiredOutcome(o, where);
+  const ledgered = hasOwn(o, "ledgered") ? o.ledgered : undefined;
+  if (typeof ledgered !== "boolean") {
+    throw decisionShapeError("'ledgered' missing or not a boolean");
+  }
+  const decision_id = requiredStr(o, "decision_id", where);
+  const receipt_event_id = requiredStr(o, "receipt_event_id", where);
+  const reason_code = requiredStr(o, "reason_code", where);
+  const reason_label = requiredStr(o, "reason_label", where);
+  const verb = requiredStr(o, "verb", where);
+  const boundary = requiredStr(o, "boundary", where);
+  const policy_digest = optionalStr(o, "policy_digest", where);
+  let policy_generation: number | null = null;
+  if (hasOwn(o, "policy_generation")) {
+    const pg = o.policy_generation;
+    if (typeof pg !== "number" || !Number.isInteger(pg) || pg < 0) {
+      throw decisionShapeError("'policy_generation' not a non-negative integer");
+    }
+    policy_generation = pg;
+  }
+  let replayed = false;
+  if (hasOwn(o, "replayed")) {
+    const rp = o.replayed;
+    if (typeof rp !== "boolean") throw decisionShapeError("'replayed' not a boolean");
+    replayed = rp;
+  }
+  // A decision that claims the chain witnessed it must carry the ids that
+  // make the claim checkable; a blank id on a ledgered decision is the receipt
+  // precedent (whitespace-only ids fail closed there too).
+  if (ledgered) {
+    if (decision_id.trim() === "") {
+      throw decisionShapeError("'decision_id' empty on a ledgered decision");
+    }
+    if (receipt_event_id.trim() === "") {
+      throw decisionShapeError("'receipt_event_id' empty on a ledgered decision");
+    }
+  }
+  const allowed_fields = requiredStrList(o, "allowed_fields", where);
+  const withheld_fields = requiredStrList(o, "withheld_fields", where);
+  const fragment_tags = requiredLabels(o, "fragment_tags", where);
+  const partsRaw = hasOwn(o, "parts") ? o.parts : undefined;
+  if (!Array.isArray(partsRaw)) throw decisionShapeError("'parts' missing or not a list");
+  const parts = partsRaw.map((p, i) => parsePart(p, i));
+  return {
+    outcome,
+    ledgered,
+    decision_id,
+    receipt_event_id,
+    reason_code,
+    reason_label,
+    verb,
+    boundary,
+    allowed_fields,
+    withheld_fields,
+    fragment_tags,
+    parts,
+    policy_generation,
+    policy_digest,
+    replayed,
+  };
 }
 
 // Enforcement-neutral attribution witness claim (usage metering).
