@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-09-05
+
+### Fixed — package metadata points at the repository's current home (no code change)
+- The project URLs in the package metadata (`Homepage`, `Repository`,
+  `Issues`, `Changelog`) still named the repository's previous GitHub owner
+  after the move to `nemotek-inc`. The npm registry verifies the sibling
+  package's `repository.url` against the build provenance and refused the
+  0.10.1 upload on that mismatch (HTTP 422), so npm never carried 0.10.1
+  while PyPI did. 0.10.2 is 0.10.1 with the URLs corrected — the Python and
+  Node packages are identical to 0.10.1 in code and behaviour.
+
 ## [0.10.1] - 2026-09-01
 
 ### Fixed — release-gate hygiene (no API change)

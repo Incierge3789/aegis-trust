@@ -1,6 +1,6 @@
 {
   "name": "aegis-trust",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "AI agent data access control — control what agents can see. TypeScript port of aegis-trust PyPI (literal name parity).",
   "license": "MIT",
   "type": "module",
@@ -71,12 +71,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Incierge3789/aegis-trust.git",
+    "url": "https://github.com/nemotek-inc/aegis-trust.git",
     "directory": "node"
   },
-  "homepage": "https://github.com/Incierge3789/aegis-trust#readme",
+  "homepage": "https://github.com/nemotek-inc/aegis-trust#readme",
   "bugs": {
-    "url": "https://github.com/Incierge3789/aegis-trust/issues"
+    "url": "https://github.com/nemotek-inc/aegis-trust/issues"
   },
   "author": "Incierge <contact@aegisagentcontrol.com>"
 }
