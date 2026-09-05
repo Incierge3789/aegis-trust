@@ -412,7 +412,9 @@ function parsePolicyGeneration(pg: unknown): number {
   if (typeof pg !== "number" || !Number.isSafeInteger(pg) || pg < 0) {
     throw decisionShapeError("'policy_generation' not a non-negative integer");
   }
-  return pg;
+  // `-0` is a JavaScript artefact (Python reads the same bytes as 0); normalise
+  // so the two SDKs surface the identical value.
+  return pg === 0 ? 0 : pg;
 }
 
 function parsePart(raw: unknown, index: number): BoundaryPartialView {
@@ -455,7 +457,7 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * the ids that make it checkable; blank = nothing but ASCII whitespace, the
  * same rule in both SDKs), and `ledgered: false` is only the
  * hard-fault form — `outcome` BLOCKED, blank ids, no composed `fragment_tags`,
- * no `allowed_fields`, not `replayed` (the trace `parts` is preserved verbatim
+ * no `allowed_fields` / `withheld_fields`, not `replayed` (the trace `parts` is preserved verbatim
  * as the diagnostic of what was refused, tags and all — a partial's
  * `allowed_fields` / `fragment_tags` describe what that boundary computed, they
  * are never a grant); an executable outcome or a chain pointer on an unledgered
@@ -463,8 +465,10 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * trace: the composed `outcome` is at least as restrictive as every partial's
  * (the authority composes most-restrictive-wins) and the composed
  * `fragment_tags` contain every tag a partial carries (the authority composes
- * the union). Unknown members are ignored (the contract is additive-only).
- * The returned view is deep-frozen. A decision with `ledgered: true`
+ * the union), and the composed `allowed_fields` equal the winning partial's
+ * own allow set (the authority copies it verbatim, so a differing composed set
+ * is a grant the trace does not support). Unknown members are ignored (the
+ * contract is additive-only). The returned view is deep-frozen. A decision with `ledgered: true`
  * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
  * is only as good as the ids that make it checkable). Unknown members are
  * ignored (the contract is additive-only). The returned view holds copies — mutating the
@@ -538,6 +542,9 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   if (!ledgered && allowed_fields.length > 0) {
     throw decisionShapeError("'allowed_fields' present on an unledgered decision");
   }
+  if (!ledgered && withheld_fields.length > 0) {
+    throw decisionShapeError("'withheld_fields' present on an unledgered decision");
+  }
   const partsRaw = hasOwn(o, "parts") ? o.parts : undefined;
   if (!Array.isArray(partsRaw)) throw decisionShapeError("'parts' missing or not a list");
   // Index loop, not `map()`: `map` skips holes in a sparse array and would
@@ -562,14 +569,42 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
     // the top level would fail open.
     const composedRank = OUTCOME_SEVERITY.get(outcome) ?? -1;
     const composedTags = new Set(fragment_tags);
+    let winner = -1;
+    let winnerRank = -1;
     for (let i = 0; i < parts.length; i++) {
-      if ((OUTCOME_SEVERITY.get(parts[i].outcome) ?? -1) > composedRank) {
+      const rank = OUTCOME_SEVERITY.get(parts[i].outcome) ?? -1;
+      if (rank > composedRank) {
         throw decisionShapeError(`'outcome' less restrictive than 'parts[${i}]' 'outcome'`);
       }
       for (const t of parts[i].fragment_tags) {
         if (!composedTags.has(t)) {
           throw decisionShapeError(`'fragment_tags' missing tags carried by 'parts[${i}]'`);
         }
+      }
+      // first-max: only a STRICTLY greater severity replaces the winner
+      if (rank > winnerRank) {
+        winner = i;
+        winnerRank = rank;
+      }
+    }
+    // The composed allow set IS the winner partial's own allow set (the
+    // authority copies it verbatim, no widening step exists). A composed allow
+    // set that differs from the winner's is a widened (or narrowed) grant the
+    // trace does not support.
+    if (winner >= 0) {
+      const a = new Set(allowed_fields);
+      const w = new Set(parts[winner].allowed_fields);
+      let same = a.size === w.size;
+      if (same) {
+        for (const f of a) {
+          if (!w.has(f)) {
+            same = false;
+            break;
+          }
+        }
+      }
+      if (!same) {
+        throw decisionShapeError(`'allowed_fields' differs from the winning 'parts[${winner}]'`);
       }
     }
   }

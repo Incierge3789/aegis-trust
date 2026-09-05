@@ -173,8 +173,9 @@ def test_list_with_a_stateful_iterator_cannot_smuggle_past_validation() -> None:
             self._n += 1
             return iter(["safe"]) if self._n == 1 else iter([42])
 
-    view = parse_authority_decision({**_full_decision(), "allowed_fields": Shifty()})
-    assert view.allowed_fields == ("safe",)
+    # withheld_fields: not tied to the winner partial by the composition rule
+    view = parse_authority_decision({**_full_decision(), "withheld_fields": Shifty()})
+    assert view.withheld_fields == ("safe",)
 
 
 def test_flat_check_boundary_view_does_not_pretend_to_carry_these_members() -> None:

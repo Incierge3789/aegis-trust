@@ -466,7 +466,8 @@ def _parse_policy_generation(pg: Any) -> int:
     one number type: a whole-number float on the wire (``3.0``) is the same
     wire value as ``3`` and is read as the integer 3 in both SDKs; anything
     fractional, non-finite, negative, boolean, or beyond the safe range is
-    refused."""
+    refused. (Rounding of over-precise literals happens inside the JSON
+    decoder, before the reader, and identically in both SDKs.)"""
     if isinstance(pg, bool):
         raise _decision_shape_error("'policy_generation' not a non-negative integer")
     if isinstance(pg, float):
@@ -520,7 +521,7 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     checkable; blank = nothing but ASCII whitespace, the same rule in both
     SDKs), and ``ledgered=False`` is only the hard-fault form —
     ``outcome`` BLOCKED, blank ids, no composed ``fragment_tags``, no
-    ``allowed_fields``, not ``replayed`` (the trace ``parts`` is preserved
+    ``allowed_fields`` / ``withheld_fields``, not ``replayed`` (the trace ``parts`` is preserved
     verbatim as the diagnostic of what was refused, tags and all — a
     partial's ``allowed_fields`` / ``fragment_tags`` describe what that
     boundary computed, they are never a grant);
@@ -529,8 +530,11 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     composed ``outcome`` is at least as restrictive as every partial's (the
     authority composes most-restrictive-wins) and the composed
     ``fragment_tags`` contain every tag a partial carries (the authority
-    composes the union). Unknown members are ignored (the contract is
-    additive-only). The returned view holds copies —
+    composes the union), and the composed ``allowed_fields`` equal the
+    winning partial's own allow set (the authority copies it verbatim, so a
+    differing composed set is a grant the trace does not support). Unknown
+    members are ignored (the contract is additive-only). The returned view
+    holds copies —
     mutating the input afterwards does not change it.
 
     Pass the ``decision`` MEMBER (``body["decision"]``), not the whole
@@ -600,6 +604,10 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
         raise _decision_shape_error(
             "'allowed_fields' present on an unledgered decision"
         )
+    if not ledgered and withheld_fields:
+        raise _decision_shape_error(
+            "'withheld_fields' present on an unledgered decision"
+        )
     parts_raw = decision.get("parts")
     if not isinstance(parts_raw, list):
         raise _decision_shape_error("'parts' missing or not a list")
@@ -619,8 +627,10 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
         # a caller gating on the top level would fail open.
         composed_rank = _OUTCOME_SEVERITY[outcome]
         composed_tags = set(fragment_tags)
+        winner: int | None = None
         for i, part in enumerate(parts):
-            if _OUTCOME_SEVERITY[part.outcome] > composed_rank:
+            rank = _OUTCOME_SEVERITY[part.outcome]
+            if rank > composed_rank:
                 raise _decision_shape_error(
                     f"'outcome' less restrictive than 'parts[{i}]' 'outcome'"
                 )
@@ -628,6 +638,19 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
                 raise _decision_shape_error(
                     f"'fragment_tags' missing tags carried by 'parts[{i}]'"
                 )
+            # first-max: only a STRICTLY greater severity replaces the winner
+            if winner is None or rank > _OUTCOME_SEVERITY[parts[winner].outcome]:
+                winner = i
+        # The composed allow set IS the winner partial's own allow set (the
+        # authority copies it verbatim, no widening step exists). A composed
+        # allow set that differs from the winner's is a widened (or narrowed)
+        # grant the trace does not support.
+        if winner is not None and set(allowed_fields) != set(
+            parts[winner].allowed_fields
+        ):
+            raise _decision_shape_error(
+                f"'allowed_fields' differs from the winning 'parts[{winner}]'"
+            )
     return AuthorityDecisionView(
         outcome=outcome,
         ledgered=ledgered,

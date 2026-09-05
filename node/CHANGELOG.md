@@ -23,16 +23,20 @@
   declares is required; the chain witness is two-way — a decision that
   claims `ledgered` must carry non-blank `decision_id` / `receipt_event_id`,
   and an unledgered decision is accepted only in its hard-fault form (BLOCKED,
-  blank ids, no composed `fragment_tags`, no `allowed_fields`, not `replayed`;
+  blank ids, no composed `fragment_tags`, no `allowed_fields` / `withheld_fields`,
+  not `replayed`;
   the trace `parts` is preserved verbatim as the diagnostic of what was
   refused — a partial's `allowed_fields` / `fragment_tags` are what that
   boundary computed, never a grant; blank = nothing but ASCII whitespace, the
   same rule in both SDKs); a ledgered decision is also checked against its
   own trace (the composed `outcome` is at least as restrictive as every
   partial's and the composed `fragment_tags` contain every tag a partial
-  carries, which is how the authority composes them); `policy_generation` must be
-  a non-negative safe integer (`Number.MAX_SAFE_INTEGER`) so both SDKs
-  carry it exactly (`3.0` is the same JSON value as `3`). The view, its
+  carries, and the composed `allowed_fields` equal the winning partial's own
+  allow set — which is how the authority composes them); `policy_generation`
+  must be a non-negative safe integer (`Number.MAX_SAFE_INTEGER`, the range
+  both SDKs represent exactly; `3.0` is the same JSON value as `3`; `-0` is
+  normalised to `0`; rounding of over-precise literals happens in the JSON
+  decoder, before the reader, identically in both). The view, its
   arrays and its partials are deep-frozen, and `AUTHORITY_OUTCOMES` is
   frozen and validated against a private copy; members are
   read as own properties, never from the prototype chain. Unknown members are

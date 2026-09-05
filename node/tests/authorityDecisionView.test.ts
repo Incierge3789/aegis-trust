@@ -150,8 +150,9 @@ describe("parseAuthorityDecision in the client", () => {
     shifty[Symbol.iterator] = function* () {
       yield 42;
     };
-    const view = parseAuthorityDecision({ ...base, allowed_fields: shifty });
-    expect([...view.allowed_fields]).toEqual(["safe"]);
+    // withheld_fields: not tied to the winner partial by the composition rule
+    const view = parseAuthorityDecision({ ...base, withheld_fields: shifty });
+    expect([...view.withheld_fields]).toEqual(["safe"]);
   });
 
   it("does not read outcome / ledgered from the prototype chain", () => {

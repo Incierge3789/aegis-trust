@@ -750,7 +750,7 @@
           "session:prior"
         ]
       },
-      "why": "The relation is one-directional (composed is a superset of every partial's tags): an extra composed tag is a stricter view, not a contradiction, so an additive change on the producer side cannot break the reader."
+      "why": "The relation is one-directional on purpose (composed is a superset of every partial's tags): an extra composed tag over-reports what was released — a stricter, not a widened, view — so an additive change on the producer side cannot break the reader. Exact equality with the union was considered and not adopted for that reason."
     },
     {
       "id": "ledgered_outcome_may_exceed_the_parts_maximum",
@@ -813,6 +813,68 @@
         "outcome": "APPROVAL_REQUIRED"
       },
       "why": "Later gate steps may only raise severity above the partials' maximum; a stricter top level is legitimate."
+    },
+    {
+      "id": "policy_generation_negative_zero_reads_as_zero",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": -0.0,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect": {
+        "policy_generation": 0
+      },
+      "why": "JSON -0.0 is 0 in Python and -0 in JavaScript; the Node reader normalises so both surface the identical value."
     }
   ],
   "invalid": [
@@ -3571,6 +3633,92 @@
       "expect_error": "aegis.aiNative.decisionShape",
       "expect_detail": "'fragment_tags' missing tags carried by 'parts[1]'",
       "why": "The composed tags are the union of the partials' tags; a top level that drops a tag a partial released would under-report what was released."
+    },
+    {
+      "id": "ledgered_allowed_fields_widened_beyond_the_winner",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company",
+          "ssn"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'allowed_fields' differs from the winning 'parts[1]'",
+      "why": "The composed allow set is the winning (first-max) partial's own set, copied verbatim by the authority; an extra field at the top level is a grant the trace does not support (independent codex pass on 8de6ee0)."
+    },
+    {
+      "id": "unledgered_with_withheld_fields",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'withheld_fields' present on an unledgered decision",
+      "why": "The hard-fault form zeroes every composed member, withheld_fields included; the trace keeps its own."
     }
   ]
 }

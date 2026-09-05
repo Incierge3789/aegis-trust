@@ -23,17 +23,20 @@
   declares is required; the chain witness is two-way — a decision that
   claims `ledgered` must carry non-blank `decision_id` / `receipt_event_id`,
   and an unledgered decision is accepted only in its hard-fault form (BLOCKED,
-  blank ids, no composed `fragment_tags`, no `allowed_fields`, not `replayed`;
+  blank ids, no composed `fragment_tags`, no `allowed_fields` / `withheld_fields`,
+  not `replayed`;
   the trace `parts` is preserved verbatim as the diagnostic of what was
   refused — a partial's `allowed_fields` / `fragment_tags` are what that
   boundary computed, never a grant; blank = nothing but ASCII whitespace, the
   same rule in both SDKs); a ledgered decision is also checked against its
   own trace (the composed `outcome` is at least as restrictive as every
   partial's and the composed `fragment_tags` contain every tag a partial
-  carries, which is how the authority composes them); `policy_generation` must be
-  a non-negative integer no larger than 2**53 - 1 so both SDKs carry it
-  exactly (a whole-number float such as `3.0` is the same JSON value as
-  `3` and reads as 3 in both). The view is immutable (frozen dataclass,
+  carries, and the composed `allowed_fields` equal the winning partial's own
+  allow set — which is how the authority composes them); `policy_generation`
+  must be a non-negative integer no larger than 2**53 - 1 (the range both
+  SDKs represent exactly; a whole-number float such as `3.0` is the same JSON
+  value as `3` and reads as 3 in both; rounding of over-precise literals
+  happens in the JSON decoder, before the reader, identically in both). The view is immutable (frozen dataclass,
   tuple sequences, no defaults for required members). Unknown
   members are ignored (additive-only contract). Shared cross-language corpus:
   `conformance/authority_decision_view.v0.json` (npm runs the same vectors).
