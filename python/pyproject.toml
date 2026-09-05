@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aegis-trust"
-version = "0.10.1"
+version = "0.10.2"
 description = "AI agent data access control — control what agents can see"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -56,11 +56,11 @@ aegis = "aegis_trust.cli:cli_entry"
 aegis-mcp-proxy = "aegis_trust.mcp_proxy:main"
 
 [project.urls]
-Homepage = "https://github.com/Incierge3789/aegis-trust"
-Repository = "https://github.com/Incierge3789/aegis-trust"
-Documentation = "https://github.com/Incierge3789/aegis-trust#readme"
-Issues = "https://github.com/Incierge3789/aegis-trust/issues"
-Changelog = "https://github.com/Incierge3789/aegis-trust/blob/main/python/CHANGELOG.md"
+Homepage = "https://github.com/nemotek-inc/aegis-trust"
+Repository = "https://github.com/nemotek-inc/aegis-trust"
+Documentation = "https://github.com/nemotek-inc/aegis-trust#readme"
+Issues = "https://github.com/nemotek-inc/aegis-trust/issues"
+Changelog = "https://github.com/nemotek-inc/aegis-trust/blob/main/python/CHANGELOG.md"
 
 # Commercial inquiries: contact@aegisagentcontrol.com
 # Patent licensing: contact@aegisagentcontrol.com
