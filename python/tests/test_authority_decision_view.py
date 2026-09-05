@@ -159,6 +159,24 @@ def test_rebinding_the_public_vocabulary_cannot_widen_it(monkeypatch) -> None:
         parse_authority_decision({**_full_decision(), "outcome": "UNKNOWN"})
 
 
+def test_list_with_a_stateful_iterator_cannot_smuggle_past_validation() -> None:
+    """The snapshot that is validated is the snapshot that is returned: a list
+    subclass that yields a clean traversal first and a dirty one second must
+    not end up in the view (cross-review round 6, codex)."""
+
+    class Shifty(list):  # type: ignore[type-arg]
+        def __init__(self) -> None:
+            super().__init__(["safe"])
+            self._n = 0
+
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            self._n += 1
+            return iter(["safe"]) if self._n == 1 else iter([42])
+
+    view = parse_authority_decision({**_full_decision(), "allowed_fields": Shifty()})
+    assert view.allowed_fields == ("safe",)
+
+
 def test_flat_check_boundary_view_does_not_pretend_to_carry_these_members() -> None:
     """The flat /check-boundary wire never sends fragment_tags / parts; the
     SDK must not grow fields for them there (a field the wire never fills is a

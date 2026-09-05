@@ -144,6 +144,16 @@ describe("parseAuthorityDecision in the client", () => {
     }
   });
 
+  it("copies arrays by own index, never through a custom iterator", () => {
+    const base = fullDecision();
+    const shifty = ["safe"] as unknown as Record<symbol, unknown> & string[];
+    shifty[Symbol.iterator] = function* () {
+      yield 42;
+    };
+    const view = parseAuthorityDecision({ ...base, allowed_fields: shifty });
+    expect([...view.allowed_fields]).toEqual(["safe"]);
+  });
+
   it("does not read outcome / ledgered from the prototype chain", () => {
     const decision = fullDecision();
     delete decision.ledgered;

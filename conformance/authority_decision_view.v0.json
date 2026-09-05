@@ -3299,6 +3299,28 @@
       "expect_error": "aegis.aiNative.decisionShape",
       "expect_detail": "'decision_id' present on an unledgered decision",
       "why": "On the hard-fault form the same shared blank rule makes a NEL-only id 'present', so it is refused in both SDKs."
+    },
+    {
+      "id": "unledgered_id_of_unicode_bom_is_present",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "\ufeff",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'receipt_event_id' present on an unledgered decision",
+      "why": "Mirror of the NEL case on the hard-fault form: U+FEFF is not ASCII whitespace, so a BOM-only receipt pointer is 'present' and refused in both SDKs."
     }
   ]
 }

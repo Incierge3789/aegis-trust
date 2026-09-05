@@ -328,18 +328,22 @@ const hasOwn = (o: object, k: string | number): boolean =>
  *  whitespace (U+FEFF vs U+0085), so neither is used. */
 const isBlank = (s: string): boolean => /^[ \t\n\r\v\f]*$/.test(s);
 
-function isStringList(raw: unknown): raw is string[] {
-  // Index loop, not `every()`: `every` skips holes in a sparse array, so
-  // `new Array(1)` would pass and materialise `undefined` on spread (and the
-  // label regex would then test the string "undefined"). Every index must be
-  // a string.
-  // Own index only: with a polluted `Array.prototype`, a hole would read the
-  // inherited value and a foreign string could surface as a field or a tag.
-  if (!Array.isArray(raw)) return false;
+/** Copy a wire array by OWN INDEX and return the copy only if every element is
+ *  a string; `null` otherwise. One traversal: the copy that is validated is the
+ *  copy that is returned. `every()` would skip holes in a sparse array, a
+ *  polluted `Array.prototype` would fill a hole with an inherited value, and a
+ *  spread (`[...raw]`) would consult a custom or polluted iterator that can
+ *  yield values the index check never saw. */
+function stringListSnapshot(raw: unknown): ReadonlyArray<string> | null {
+  if (!Array.isArray(raw)) return null;
+  const out: string[] = [];
   for (let i = 0; i < raw.length; i++) {
-    if (!hasOwn(raw, i) || typeof raw[i] !== "string") return false;
+    if (!hasOwn(raw, i)) return null;
+    const v: unknown = raw[i];
+    if (typeof v !== "string") return null;
+    out.push(v);
   }
-  return true;
+  return Object.freeze(out);
 }
 
 function requiredStr(o: Record<string, unknown>, key: string, where: string): string {
@@ -368,11 +372,11 @@ function requiredStrList(
   key: string,
   where: string,
 ): ReadonlyArray<string> {
-  const v = hasOwn(o, key) ? o[key] : undefined;
-  if (!isStringList(v)) {
+  const snapshot = stringListSnapshot(hasOwn(o, key) ? o[key] : undefined);
+  if (snapshot === null) {
     throw decisionShapeError(`${where}'${key}' missing or not a list of strings`);
   }
-  return Object.freeze([...v]);
+  return snapshot;
 }
 
 function requiredLabels(

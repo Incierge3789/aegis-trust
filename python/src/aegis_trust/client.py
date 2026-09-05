@@ -403,9 +403,16 @@ def _is_blank(s: str) -> bool:
 
 
 def _str_tuple_or_none(raw: Any) -> tuple[str, ...] | None:
-    if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
+    # One traversal: the snapshot that is validated is the snapshot that is
+    # returned. Validating ``raw`` and then materialising it again would let a
+    # list subclass with a stateful iterator (or a concurrent mutation) hand
+    # back elements the check never saw.
+    if not isinstance(raw, list):
         return None
-    return tuple(raw)
+    snapshot = tuple(raw)
+    if not all(isinstance(x, str) for x in snapshot):
+        return None
+    return snapshot
 
 
 def _required_str(obj: dict[str, Any], key: str, where: str) -> str:
