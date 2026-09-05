@@ -120,8 +120,10 @@ concurrency:
 jobs:
   resolve-release:
     # GitHub-hosted, no secrets: decides whether THIS run releases, and which
-    # tag. Never moves an existing tag; releases a version pin on main that
-    # has no tag yet; a changed pin colliding with a tag elsewhere is red.
+    # tag. Green = released, or an unchanged pin whose tag exists. Release =
+    # the pin CHANGED in a readable range and has no tag. Anything else (a
+    # collision, an untagged pin this push did not change, an unreadable
+    # range) is red with the way out printed — never a quiet skip.
     name: Resolve the release tag (bump merge → create tag; tag push → pass through)
     # Defence in depth: a dispatch from any other ref runs nothing at all.
     if: github.event_name == 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
@@ -185,30 +187,41 @@ jobs:
           fi
           if [ -n "$EXISTING" ]; then
             # The pin's tag already exists at ANOTHER commit. A tag is never
-            # moved. If this push CHANGED the pin, that is an error, not a
-            # quiet skip (a green run here would look like a release that
-            # never happened); otherwise it is the ordinary state after a
-            # release and there is nothing to do.
-            if [ -n "$PREV_V" ] && [ "$PREV_V" != "$NODE_V" ]; then
-              echo "version bump $PREV_V → $NODE_V merged at $GITHUB_SHA, but $TAG already exists at $EXISTING — not this commit." >&2
-              echo "A tag is never moved. Merge a new version, or delete the stale tag and re-run this workflow run." >&2
-              exit 2
+            # moved. Unchanged pin = the ordinary state after a release
+            # (green, nothing to do). A CHANGED pin is an error, not a quiet
+            # skip, and so is a push whose range cannot be read: a green run
+            # must never hide a bump that did not ship.
+            if [ -n "$PREV_V" ] && [ "$PREV_V" = "$NODE_V" ]; then
+              none "$TAG already exists at $EXISTING and the pin did not change in this push ($NODE_V) — nothing to release"
             fi
-            none "$TAG already exists at $EXISTING and the pin did not change in this push ($NODE_V) — nothing to release"
+            if [ -n "$PREV_V" ]; then
+              echo "version bump $PREV_V → $NODE_V merged at $GITHUB_SHA, but $TAG already exists at $EXISTING — not this commit." >&2
+            else
+              echo "cannot read this push's range (before=$BEFORE), and $TAG already exists at $EXISTING — not this commit — so this push cannot be classified." >&2
+            fi
+            echo "A tag is never moved. If $NODE_V was meant to ship from main: merge a new version, or delete the stale tag and re-run this workflow run." >&2
+            exit 2
           fi
-          # No tag for the pin anywhere: main carries an UNRELEASED version.
-          # Release it at this commit. The missing tag is the signal, not the
-          # diff, so a push whose range cannot be read (force-push, first
-          # push) still releases, and a deliberately deleted tag means
-          # "re-release at the next push to main".
-          if [ -n "$PREV_V" ] && [ "$PREV_V" != "$NODE_V" ]; then
-            echo "[resolve-release] version bump $PREV_V → $NODE_V merged at $GITHUB_SHA"
-          else
-            echo "[resolve-release] main carries $NODE_V with no $TAG on origin (previous pin: ${PREV_V:-unreadable}) — releasing it at $GITHUB_SHA"
+          # No tag for the pin anywhere. Release ONLY a bump that this push
+          # made (readable range, pin changed). An untagged pin that this
+          # push did not change, or a range that cannot be read, is an
+          # inconsistency main must not carry silently: red, with the way
+          # out spelled out. (A deleted tag therefore turns main red until a
+          # new version is merged or the tag is pushed again.)
+          if [ -z "$PREV_V" ]; then
+            echo "cannot read this push's range (before=$BEFORE), and main carries $NODE_V with no $TAG on origin — cannot tell whether this push is the bump." >&2
+            echo "If $NODE_V should ship: merge a new version bump (a readable range releases), or push $TAG at the intended commit." >&2
+            exit 2
           fi
+          if [ "$PREV_V" = "$NODE_V" ]; then
+            echo "main carries $NODE_V with no $TAG on origin, and this push did not change the pin — an earlier bump never shipped (or its tag was deleted)." >&2
+            echo "Merge a new version bump, or push $TAG at the intended commit. Nothing is released on a push that is not the bump." >&2
+            exit 2
+          fi
+          echo "[resolve-release] version bump $PREV_V → $NODE_V merged at $GITHUB_SHA"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "release $TAG (version $NODE_V on main at $GITHUB_SHA; previous pin: ${PREV_V:-unreadable})" "$GITHUB_SHA"
+          git tag -a "$TAG" -m "release $TAG (version bump $PREV_V → $NODE_V merged to main: $GITHUB_SHA)" "$GITHUB_SHA"
           git push origin "refs/tags/$TAG"
           echo "[resolve-release] created $TAG at $GITHUB_SHA"
           echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -725,6 +738,7 @@ jobs:
           echo "DIST_TAG=$DIST_TAG" >> "$GITHUB_ENV"
           if npm view "aegis-trust@$VERSION" version >/dev/null 2>&1; then
             echo "[npm] aegis-trust@$VERSION is already on the registry — skipping the upload (resume of an earlier run)"
+            echo "NPM_UPLOAD_SKIPPED=1" >> "$GITHUB_ENV"
             exit 0
           fi
           echo "[npm] publishing $TGZ with --tag $DIST_TAG --access public --provenance (OIDC, public repo)"
@@ -745,6 +759,14 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then
             echo "[npm] pre-release $VERSION → latest tag intentionally not promoted"
           else
+            if [ "${NPM_UPLOAD_SKIPPED:-}" = "1" ]; then
+              # Resume: the version was uploaded by an earlier run and a newer
+              # version may own `latest` by now — assert presence, not the tag.
+              ON_REG="$(npm view "aegis-trust@$VERSION" version 2>/dev/null || true)"
+              [ "$ON_REG" = "$VERSION" ] || { echo "[npm] $VERSION is not on the registry after a skipped upload" >&2; exit 1; }
+              echo "[npm] resume: $VERSION already on the registry — dist-tag not asserted"
+              exit 0
+            fi
             TAG_USED="${DIST_TAG:-latest}"
             POINTS="$(npm view aegis-trust "dist-tags.$TAG_USED" 2>/dev/null || true)"
             if [ "$POINTS" != "$VERSION" ]; then

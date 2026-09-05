@@ -26,25 +26,30 @@ discipline and so that maintainers cut every release the same way.
    GitHub-hosted) creates the `v<version>` tag at the merged commit when all
    six version sources agree and the pin changed in that push; a pushed `v*`
    tag starts the same workflow directly (a manual `workflow_dispatch` is a
-   preview run and never uploads). A merge that leaves the version pin
-   unchanged never releases, and an existing tag is never moved: a bump whose
-   tag already exists at another commit fails the run (red, not a quiet
-   skip). A version pin on `main` that has no tag yet is released at the
-   next push to `main` whatever that push contains — the missing tag is the
-   signal — so deleting a tag means "re-release at the next push". Recovery is a re-run of the bump merge's own workflow run (its
-   pushed range is preserved) — in the collision case only after the stale
-   tag is deleted or a new version is merged: if the release failed after the tag
-   exists, the first job resumes and both registry uploads skip a version
-   that is already published; if the first job itself failed before the tag
-   existed, the re-run creates it. Either way
-   the release runs in the `release-attestation` workflow itself — it has no
-   `workflow_call` entry, so the registries' Trusted Publisher bindings see
-   that filename as the publishing identity; `pull_request_target` is never
-   used in release workflows. The self-hosted release runner's trust boundary
-   is repository write access (any ref that starts the workflow runs the
-   workflow version stored at that ref), which is why `main` and `v*` tags
-   are governed by repository rulesets rather than by the workflow itself.
-   npm uploads are serialised across runs, and `latest` never moves
+   preview run and never uploads). The contract of a push to `main` is
+   fail-closed: **green** means either released, or the pin is unchanged and
+   its tag exists; **a release** happens only when the pin changed in that
+   push and no tag exists for it; **anything else is red** with the way out
+   printed — a changed pin whose tag already exists at another commit, an
+   untagged pin the push did not change (an earlier bump that never shipped,
+   or a deleted tag), or a push whose range cannot be read (force-push). An
+   existing tag is never moved. Recovery is a re-run of the bump merge's own
+   workflow run (its pushed range is preserved) — after a red
+   classification, first merge a new version bump or push / delete the tag
+   as the run's message says: if the release failed after the tag exists,
+   the first job resumes and both registry uploads skip a version that is
+   already published; if the first job itself failed before the tag
+   existed, the re-run creates it. Either way the release runs in the
+   `release-attestation` workflow itself — it has no `workflow_call` entry,
+   so the registries' Trusted Publisher bindings see that filename as the
+   publishing identity; `pull_request_target` is never used in release
+   workflows. The self-hosted release runner's trust boundary is repository
+   write access (any ref that starts the workflow runs the workflow version
+   stored at that ref), which is why `main` and `v*` tags are governed by
+   repository rulesets rather than by the workflow itself. npm uploads are
+   serialised across runs (one running and one queued; a third release
+   arriving while two are in flight fails at its upload step and is re-run
+   within the one-day artifact retention), and `latest` never moves
    backwards: a stable version published while a higher one already exists
    lands under the `previous` dist-tag, and the job stops rather than guess
    when the registry's version list cannot be read. After the tag, the workflow runs its own in-repo
