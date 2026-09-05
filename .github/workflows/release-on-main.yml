@@ -10,7 +10,9 @@
 # every push to main this workflow reads the version pins; if `v<version>` does
 # not exist yet it creates the tag at the merged commit and CALLS
 # release-attestation.yml with that tag (workflow_call), so gate → SBOM → sign
-# → pack → npm/PyPI Trusted Publisher upload run in this same run. A tag
+# → pack → npm/PyPI Trusted Publisher upload run in this same run. The
+# version pin must have CHANGED in the pushed range (a bump merge); a merge
+# that leaves the pin untouched never releases, even if the tag is missing. A tag
 # created with GITHUB_TOKEN deliberately does not trigger the tag-push path
 # (GitHub never cascades GITHUB_TOKEN events), so there is exactly one release
 # run per version. A push whose version tag already exists is a no-op.
@@ -56,11 +58,30 @@ jobs:
             exit 2
           fi
           TAG="v$NODE_V"
+          # Release only when THIS push changed the version pin (a version-bump
+          # merge). A docs merge after someone deleted a tag must not re-release,
+          # and the first push after enabling this workflow must not either.
+          BEFORE="${{ github.event.before }}"
+          PREV_V=""
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            PREV_V="$(git show "$BEFORE:node/package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || true)"
+          fi
+          if [ "$PREV_V" = "$NODE_V" ]; then
+            echo "[release-on-main] version pin unchanged ($NODE_V) by this push — nothing to release"
+            echo "release_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$PREV_V" ]; then
+            echo "[release-on-main] cannot read the previous version pin (before=$BEFORE) — not releasing on an unknown delta"
+            echo "release_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "[release-on-main] $TAG already exists — nothing to release for $GITHUB_SHA"
             echo "release_tag=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "[release-on-main] version bump $PREV_V → $NODE_V merged; releasing $TAG"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "release $TAG (version bump merged to main: $GITHUB_SHA)" "$GITHUB_SHA"
