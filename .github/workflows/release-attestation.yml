@@ -2,11 +2,15 @@
 #
 # Purpose: supply-chain attestation for releases — CycloneDX SBOMs, Sigstore
 # cosign keyless signatures, and SDK-artifact signing attached to the GitHub
-# Release, plus npm Trusted Publisher OIDC publish on tag push.
+# Release, plus npm / PyPI Trusted Publisher OIDC publish on a release run (a
+# pushed v* tag, or a version-bump merge to main that resolve-release tags).
 #
 # === SAFETY INVARIANTS (must hold) ===
 #
-#   1. Trigger は workflow_dispatch (manual) または tag push (`v*`) のみ。
+#   1. Trigger は workflow_dispatch (manual, preview only) / tag push (`v*`) /
+#      main への push (version bump merge のときだけ resolve-release job が tag を切る) の 3 つ。
+#      workflow_call は **持たない** (registry の Trusted Publisher は top-level workflow
+#      filename を検証するため、caller 経由では identity が変わる)。
 #      pull_request_target を **使わない** (token theft 攻撃面)。
 #   2. permissions に `id-token: write` を持つ — Sigstore keyless signing (cosign)
 #      と GitHub native build provenance (actions/attest-build-provenance) のため。
@@ -14,9 +18,10 @@
 #   3. Secrets (NPM_TOKEN / PYPI_TOKEN) は本 workflow は **使わない**。 npm publish は
 #      **Block C で npm Trusted Publisher OIDC** 経由 (token なし、 id-token: write OIDC、
 #      npm ≥11.5.1 で literal supported)。 PyPI publish も **PyPI Trusted Publisher
-#      OIDC** 経由 (token なし、 publish-pypi-trusted-publisher job、 tag push 時)。
+#      OIDC** 経由 (token なし、 publish-pypi-trusted-publisher job、 release run 時 =
+#      tag push または version bump merge)。
 #      outputs = SBOM + attestation + release artifact attach + npm/PyPI
-#      tag-push-only publish。
+#      release-run-only publish (resolve-release の release_tag が空なら upload 無し)。
 #   4. 全 third-party action は 40-char commit SHA pin。 tag pin 禁止 (mutation attack)。
 #   5. Runner = a designated self-hosted release runner (mandatory; Block B =
 #      release-class, supply-chain trust core). ubuntu-latest = GitHub-hosted is
@@ -26,6 +31,13 @@
 #      concrete runner identity is not committed to source. Only ci.yml Block A
 #      (read-only) is exempt and may use ubuntu-latest.
 #
+#   6. Runner trust boundary = repository WRITE access. Any ref that can start
+#      this workflow (a push to main, a v* tag, a dispatch) runs the workflow
+#      VERSION stored at that ref, so a write-capable actor can always bring
+#      their own workflow to the self-hosted runner. The dispatch ref guard on
+#      the self-hosted jobs prevents mistakes, not adversaries; the control is
+#      repository rulesets on `main` (pull-request only) and on `v*` tags
+#      (restricted creation) — owner-side settings this file cannot enforce.
 # === OUTPUT (sprint_009 closure 要件) ===
 #
 #   - node SBOM (CycloneDX JSON) attached to release
@@ -38,8 +50,8 @@
 #   - Block A (SBOM + cosign sign-blob keyless + Release attach): ✅ wired (sprint_009)
 #   - Block B Phase 2 (SDK 本体 artifact pack + cosign sign + Release attach): ✅ wired (sprint_010)
 #   - Block C (npm Trusted Publisher OIDC publish + provenance + dist-tag): ✅ wired
-#     (T-011-11, line 363+, `if: tag push only` gated, requires npm ≥11.5.1)
-#   - PyPI Trusted Publisher OIDC publish: ✅ wired (publish-pypi-trusted-publisher job, tag-push-only); PEP 740 attestations ✅ enabled (repo public 2026-06-13)
+#     (T-011-11, `if: needs.resolve-release.outputs.release_tag != ''` gated, requires npm ≥11.5.1)
+#   - PyPI Trusted Publisher OIDC publish: ✅ wired (publish-pypi-trusted-publisher job, release-run-only: tag push or bump merge); PEP 740 attestations ✅ enabled (repo public 2026-06-13)
 #   - Reproducible build verification: deferred (audit/integrity 系)
 #
 # References:
@@ -67,10 +79,23 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to attest (omit to attest current commit as preview)'
+        description: 'Label for the preview run only (the checked-out ref is the one selected for the dispatch; nothing is uploaded)'
         required: false
         type: string
+  # Setup-once release automation (2026-09-05): a push to main whose version
+  # pin CHANGED (a version-bump merge) makes the `resolve-release` job create
+  # `v<version>` at the merged commit and this same run carries the release
+  # through gate → SBOM → sign → pack → registry uploads. The trigger, the tag
+  # creation and the uploads all live in THIS file on purpose: the registries'
+  # Trusted Publisher bindings validate the top-level workflow filename, and a
+  # reusable-workflow call would present the caller's identity instead.
+  # A main push without a bump exits at `resolve-release` (no self-hosted job
+  # runs); a pushed v* tag releases as before; workflow_dispatch stays a
+  # preview run (build + sign, never upload) and is honoured only from main or
+  # a v* tag — an arbitrary branch never reaches the self-hosted runner.
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -80,17 +105,145 @@ permissions:
   attestations: write   # GitHub native attestation API
 
 concurrency:
-  group: release-attestation-${{ github.ref }}
+  # Push runs are keyed by COMMIT, not by ref: GitHub keeps one running + one
+  # pending run per group and a newer pending run replaces an older pending
+  # one even with cancel-in-progress: false. A group per ref would let an
+  # ordinary main push cancel a queued version-bump run, whose release could
+  # then never be re-detected (the next run's `before` already carries the
+  # bump). Per commit, only a tag push of the very same commit shares a group
+  # with the main-push run of that commit — the one pair that must not run
+  # twice at once. A workflow_dispatch preview gets a group of its own
+  # (run_id) so no preview can ever displace a pending release.
+  group: release-attestation-${{ github.event_name == 'push' && github.sha || github.run_id }}
   cancel-in-progress: false   # release は途中中断 NG
 
 jobs:
+  resolve-release:
+    # GitHub-hosted, no secrets: decides whether THIS run releases, and which
+    # tag. Green = released, or an unchanged pin whose tag exists. Release =
+    # the pin CHANGED in a readable range and has no tag. Anything else (a
+    # collision, an untagged pin this push did not change, an unreadable
+    # range) is red with the way out printed — never a quiet skip.
+    name: Resolve the release tag (bump merge → create tag; tag push → pass through)
+    # Defence in depth: a dispatch from any other ref runs nothing at all.
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the version tag on a bump merge
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Resolve
+        id: resolve
+        run: |
+          set -euo pipefail
+          SHAPE='^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'
+          none() { echo "[resolve-release] $1"; echo "release_tag=" >> "$GITHUB_OUTPUT"; exit 0; }
+          # --- the version pin, from all six sources (they must agree) ---
+          NODE_V="$(node -p "require('./node/package.json').version")"
+          PY_V="$(python3 -c "import tomllib; print(tomllib.load(open('python/pyproject.toml','rb'))['project']['version'])")"
+          for src in "node/VERSION:$(tr -d '[:space:]' < node/VERSION)" \
+                     "python/VERSION:$(tr -d '[:space:]' < python/VERSION)" \
+                     "node/src/index.ts:$(sed -nE 's/^export const VERSION = "([^"]+)";?$/\1/p' node/src/index.ts | head -1)" \
+                     "python/src/aegis_trust/__init__.py:$(sed -nE 's/^__version__ = "([^"]+)"$/\1/p' python/src/aegis_trust/__init__.py | head -1)" \
+                     "python/pyproject.toml:$PY_V"; do
+            [ "${src#*:}" = "$NODE_V" ] || { echo "version sources disagree: node/package.json=$NODE_V $src — not releasing" >&2; exit 2; }
+          done
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              # Only a PUSHED tag releases; a workflow_dispatch that selects a
+              # tag ref is a preview like any other dispatch (never uploads).
+              [ "$GITHUB_EVENT_NAME" = "push" ] || none "event $GITHUB_EVENT_NAME on $GITHUB_REF — preview only"
+              TAG="${GITHUB_REF#refs/tags/}"
+              printf '%s' "$TAG" | grep -Eq "$SHAPE" || { echo "pushed tag '$TAG' is not a release version" >&2; exit 2; }
+              # The tag must name the version the tagged commit carries:
+              # otherwise 1.9.0 artifacts would be attached to a v2.0.0
+              # Release and reach PyPI under the wrong tag before npm's
+              # filename check refused them.
+              [ "$TAG" = "v$NODE_V" ] || { echo "pushed tag '$TAG' does not match the version pin at the tagged commit (v$NODE_V) — not releasing" >&2; exit 2; }
+              echo "[resolve-release] tag push $TAG"
+              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+            refs/heads/main) [ "$GITHUB_EVENT_NAME" = "push" ] || none "event $GITHUB_EVENT_NAME on main — preview only" ;;
+            *) none "event $GITHUB_EVENT_NAME on $GITHUB_REF — preview only" ;;
+          esac
+          # --- main push: release only when the version pin CHANGED in the pushed range ---
+          TAG="v$NODE_V"
+          printf '%s' "$TAG" | grep -Eq "$SHAPE" || { echo "version pin '$NODE_V' is not a release version — not releasing" >&2; exit 2; }
+          BEFORE="${{ github.event.before }}"
+          PREV_V=""
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            PREV_V="$(git show "$BEFORE:node/package.json" 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || true)"
+          fi
+          # Peeled ref first (annotated tag → the commit it points at); a
+          # lightweight tag has no peeled entry, so fall back to the tag ref.
+          EXISTING="$(git ls-remote --tags origin "refs/tags/$TAG^{}" | cut -f1)"
+          [ -n "$EXISTING" ] || EXISTING="$(git ls-remote --tags origin "refs/tags/$TAG" | cut -f1)"
+          if [ -n "$EXISTING" ] && [ "$EXISTING" = "$GITHUB_SHA" ]; then
+            # Resume: an earlier run of this same commit created the tag and
+            # was cancelled or failed downstream. Uploads are idempotent
+            # (npm: skip when the version exists; PyPI: skip-existing).
+            echo "[resolve-release] $TAG already points at $GITHUB_SHA — resuming the release"
+            echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ -n "$EXISTING" ]; then
+            # The pin's tag already exists at ANOTHER commit. A tag is never
+            # moved. Unchanged pin = the ordinary state after a release
+            # (green, nothing to do). A CHANGED pin is an error, not a quiet
+            # skip, and so is a push whose range cannot be read: a green run
+            # must never hide a bump that did not ship.
+            if [ -n "$PREV_V" ] && [ "$PREV_V" = "$NODE_V" ]; then
+              none "$TAG already exists at $EXISTING and the pin did not change in this push ($NODE_V) — nothing to release"
+            fi
+            if [ -n "$PREV_V" ]; then
+              echo "version bump $PREV_V → $NODE_V merged at $GITHUB_SHA, but $TAG already exists at $EXISTING — not this commit." >&2
+            else
+              echo "cannot read this push's range (before=$BEFORE), and $TAG already exists at $EXISTING — not this commit — so this push cannot be classified." >&2
+            fi
+            echo "A tag is never moved. If $NODE_V was meant to ship from main: merge a new version, or delete the stale tag and re-run this workflow run." >&2
+            exit 2
+          fi
+          # No tag for the pin anywhere. Release ONLY a bump that this push
+          # made (readable range, pin changed). An untagged pin that this
+          # push did not change, or a range that cannot be read, is an
+          # inconsistency main must not carry silently: red, with the way
+          # out spelled out. (A deleted tag therefore turns main red until a
+          # new version is merged or the tag is pushed again.)
+          if [ -z "$PREV_V" ]; then
+            echo "cannot read this push's range (before=$BEFORE), and main carries $NODE_V with no $TAG on origin — cannot tell whether this push is the bump." >&2
+            echo "If $NODE_V should ship: merge a new version bump (a readable range releases), or push $TAG at the intended commit." >&2
+            exit 2
+          fi
+          if [ "$PREV_V" = "$NODE_V" ]; then
+            echo "main carries $NODE_V with no $TAG on origin, and this push did not change the pin — an earlier bump never shipped (or its tag was deleted)." >&2
+            echo "Merge a new version bump, or push $TAG at the intended commit. Nothing is released on a push that is not the bump." >&2
+            exit 2
+          fi
+          echo "[resolve-release] version bump $PREV_V → $NODE_V merged at $GITHUB_SHA"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "release $TAG (version bump $PREV_V → $NODE_V merged to main: $GITHUB_SHA)" "$GITHUB_SHA"
+          # A tag pushed with GITHUB_TOKEN starts no new workflow run (GitHub
+          # rule), so this run stays the only release run for this commit.
+          git push origin "refs/tags/$TAG"
+          echo "[resolve-release] created $TAG at $GITHUB_SHA"
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+
   productization-gate:
     name: Productization Gate (9-verifier dogfood, fail-closed)
+    needs: [resolve-release]
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Verify quality gate present on the release runner
@@ -124,7 +277,13 @@ jobs:
           AEGIS_QUALITY_GATE_PATH: ${{ vars.AEGIS_QUALITY_GATE_PATH }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
+          TAG="${{ needs.resolve-release.outputs.release_tag }}"
+          if [ -n "$TAG" ] && ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "release_tag '$TAG' is not a release version" >&2; exit 2
+          fi
+          # Gate label only. A branch ref does not start with refs/tags/, so
+          # strip only when it is a tag ref; otherwise use the dispatch label.
+          if [ -z "$TAG" ]; then case "$GITHUB_REF" in refs/tags/*) TAG="${GITHUB_REF#refs/tags/}" ;; esac; fi
           [ -n "$TAG" ] || TAG="${{ inputs.tag }}"
           [ -n "$TAG" ] || TAG="manual-dispatch"
           bash "${AEGIS_QUALITY_GATE_PATH:?repository variable AEGIS_QUALITY_GATE_PATH is not set}" "$TAG" "$GITHUB_WORKSPACE"
@@ -132,13 +291,15 @@ jobs:
   sbom-node:
     name: SBOM (Node — CycloneDX)
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
-    needs: [productization-gate]
+    needs: [resolve-release, productization-gate]
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node
@@ -174,13 +335,15 @@ jobs:
   sbom-python:
     name: SBOM (Python — CycloneDX)
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
-    needs: [productization-gate]
+    needs: [resolve-release, productization-gate]
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node (for cdxgen)
@@ -229,11 +392,14 @@ jobs:
 
   collect-and-sign:
     name: Cosign sign SBOMs + Release attach
-    needs: [sbom-node, sbom-python]
+    needs: [resolve-release, sbom-node, sbom-python]
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
 
       - name: Download SBOMs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -283,10 +449,11 @@ jobs:
           path: sbom/*
           retention-days: 90
 
-      - name: Upload SBOMs + signatures to Release (tag push only)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      - name: Upload SBOMs + signatures to Release (release runs only)
+        if: needs.resolve-release.outputs.release_tag != ''
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
+          tag_name: ${{ needs.resolve-release.outputs.release_tag }}
           files: |
             sbom/*.cdx.json
             sbom/*.sig
@@ -306,21 +473,23 @@ jobs:
   #   - npm pack で aegis-trust-<version>.tgz を build
   #   - python -m build で aegis_trust-<version>-py3-none-any.whl + .tar.gz を build
   #   - cosign sign-blob keyless で 3 artifact (tgz + whl + sdist) を署名
-  #   - upload signed bundle + release attach (tag push 時)
+  #   - upload signed bundle + release attach (release run 時: tag push / bump merge)
   #
-  # Not yet (sprint_011+):
-  #   - npm publish --provenance flag (publish workflow 統合、 Stage A 再開後)
-  #   - PyPI trusted publisher attestation (PyPI 側設定 + workflow 拡張)
+  # Done since: npm publish --provenance (Block C, publish-npm-trusted-publisher)
+  #   and PyPI PEP 740 attestations (publish-pypi-trusted-publisher).
+  # Not yet:
   #   - Reproducible build verification
   #
   pack-and-sign-sdk:
     name: Pack + Cosign sign SDK artifacts (npm tarball + PyPI wheel/sdist)
-    needs: [sbom-node, sbom-python]
+    needs: [resolve-release, sbom-node, sbom-python]
+    if: (github.event_name == 'push' && needs.resolve-release.outputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node
@@ -424,10 +593,11 @@ jobs:
           path: sdk-artifacts/*
           retention-days: 90
 
-      - name: Upload SDK artifacts + signatures to Release (tag push only)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      - name: Upload SDK artifacts + signatures to Release (release runs only)
+        if: needs.resolve-release.outputs.release_tag != ''
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
+          tag_name: ${{ needs.resolve-release.outputs.release_tag }}
           files: |
             sdk-artifacts/*.tgz
             sdk-artifacts/*.whl
@@ -457,7 +627,7 @@ jobs:
       #     publish step is byte-identical to the one cosign signed on
       #     self-hosted.
       - name: Upload .tgz for github-hosted publish job (Block C handoff)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: needs.resolve-release.outputs.release_tag != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: npm-tarball-for-publish
@@ -466,7 +636,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload python wheel + sdist for github-hosted PyPI publish (Trusted Publisher handoff)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: needs.resolve-release.outputs.release_tag != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: pypi-dist-for-publish
@@ -477,7 +647,8 @@ jobs:
           if-no-files-found: error
 
   # === Block C publish job (github-hosted) ============================================
-  # Runs ONLY on tag push. Receives the cosign-signed .tgz from pack-and-sign-sdk
+  # Runs ONLY on a release run (pushed v* tag, or a version-bump merge to main
+  # that resolve-release tagged). Receives the cosign-signed .tgz from pack-and-sign-sdk
   # via download-artifact, then publishes to npm with Trusted Publisher OIDC +
   # --provenance. github-hosted runner is mandatory here because npm registry
   # 422-rejects --provenance from self-hosted runners (see comment in
@@ -490,12 +661,23 @@ jobs:
   # github-hosted, no signing keys on github-hosted.
   publish-npm-trusted-publisher:
     name: npm publish (Trusted Publisher OIDC, github-hosted, --provenance)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [pack-and-sign-sdk]
+    concurrency:
+      # Serialise npm uploads ACROSS runs: the dist-tag decision below reads
+      # the registry, and two overlapping release runs must not both read
+      # before either writes. The running upload is never cancelled; when a
+      # third release arrives, GitHub cancels the PENDING (second) one — that
+      # run's job ends as cancelled and its re-run resumes (uploads are
+      # idempotent; its PyPI upload may already have succeeded).
+      group: aegis-trust-npm-upload
+      cancel-in-progress: false
+    if: needs.resolve-release.outputs.release_tag != ''
+    needs: [resolve-release, pack-and-sign-sdk]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write   # OIDC for npm Trusted Publisher (token exchange only)
+    env:
+      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
     steps:
       - name: Download cosign-signed .tgz from build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -530,19 +712,45 @@ jobs:
         working-directory: tarball
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           if [[ "$VERSION" == *-* ]]; then
             DIST_TAG="rc"
             echo "[npm] pre-release version $VERSION → publishing with --tag rc"
           else
             DIST_TAG="latest"
             echo "[npm] stable version $VERSION → publishing with --tag latest"
+            # Two release runs for different commits may overlap (they never
+            # share a concurrency group). `latest` must never move backwards:
+            # a stable version that is not the highest one on the registry is
+            # published under `previous` instead. If the registry cannot be
+            # read, the job stops (never guesses) and a re-run resumes it.
+            VERSIONS_JSON="$(npm view aegis-trust versions --json)" || {
+              echo "[npm] cannot read the registry's version list — refusing to guess the dist-tag (re-run when the registry answers)" >&2; exit 2; }
+            NEWEST="$(printf '%s' "$VERSIONS_JSON" | node -e '
+              const mine = process.argv[1];
+              const vs = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              const stable = (Array.isArray(vs) ? vs : [vs]).concat([mine]).filter(v => /^\d+\.\d+\.\d+$/.test(v));
+              const key = v => v.split(".").map(Number);
+              stable.sort((a, b) => { const x = key(a), y = key(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); });
+              process.stdout.write(stable.pop() || mine);
+            ' "$VERSION")"
+            [ -n "$NEWEST" ] || { echo "[npm] could not parse the registry's version list — refusing to guess the dist-tag" >&2; exit 2; }
+            if [ "$NEWEST" != "$VERSION" ]; then
+              DIST_TAG="previous"
+              echo "[npm] $NEWEST is already the highest stable version on the registry → publishing $VERSION with --tag previous (latest never moves backwards)"
+            fi
           fi
           TGZ="aegis-trust-${VERSION}.tgz"
           if [ ! -f "$TGZ" ]; then
             echo "ERROR: expected tarball $TGZ not found in tarball/" >&2
             ls -la
             exit 1
+          fi
+          echo "DIST_TAG=$DIST_TAG" >> "$GITHUB_ENV"
+          if npm view "aegis-trust@$VERSION" version >/dev/null 2>&1; then
+            echo "[npm] aegis-trust@$VERSION is already on the registry — skipping the upload (resume of an earlier run)"
+            echo "NPM_UPLOAD_SKIPPED=1" >> "$GITHUB_ENV"
+            exit 0
           fi
           echo "[npm] publishing $TGZ with --tag $DIST_TAG --access public --provenance (OIDC, public repo)"
           npm publish "$TGZ" --tag "$DIST_TAG" --access public --provenance
@@ -556,17 +764,31 @@ jobs:
         # The bare-install -> stable transition lands at the v1.0 GA cut.
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           echo "[npm] post-publish dist-tag state:"
           npm dist-tag ls aegis-trust
           if [[ "$VERSION" == *-* ]]; then
             echo "[npm] pre-release $VERSION → latest tag intentionally not promoted"
           else
-            echo "[npm] stable $VERSION → latest tag set by npm publish above"
+            if [ "${NPM_UPLOAD_SKIPPED:-}" = "1" ]; then
+              # Resume: the version was uploaded by an earlier run and a newer
+              # version may own `latest` by now — assert presence, not the tag.
+              ON_REG="$(npm view "aegis-trust@$VERSION" version 2>/dev/null || true)"
+              [ "$ON_REG" = "$VERSION" ] || { echo "[npm] $VERSION is not on the registry after a skipped upload" >&2; exit 1; }
+              echo "[npm] resume: $VERSION already on the registry — dist-tag not asserted"
+              exit 0
+            fi
+            TAG_USED="${DIST_TAG:-latest}"
+            POINTS="$(npm view aegis-trust "dist-tags.$TAG_USED" 2>/dev/null || true)"
+            if [ "$POINTS" != "$VERSION" ]; then
+              echo "[npm] dist-tag $TAG_USED points at ${POINTS:-nothing}, expected $VERSION" >&2; exit 1
+            fi
+            echo "[npm] stable $VERSION → dist-tag $TAG_USED verified on the registry"
           fi
 
   # === PyPI Trusted Publisher publish job (github-hosted) =============================
-  # Runs ONLY on tag push. Receives the built wheel + sdist from pack-and-sign-sdk
+  # Runs ONLY on a release run (pushed v* tag, or a version-bump merge to main
+  # that resolve-release tagged). Receives the built wheel + sdist from pack-and-sign-sdk
   # via download-artifact, then publishes to PyPI with Trusted Publisher OIDC
   # (token-free — no API token, no ~/.pypirc). github-hosted runner is required for
   # the OIDC token exchange. PyPI Trusted Publishing works on private source repos
@@ -587,12 +809,14 @@ jobs:
   # uploaded) — it does not leak anything.
   publish-pypi-trusted-publisher:
     name: PyPI publish (Trusted Publisher OIDC, github-hosted)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [pack-and-sign-sdk]
+    if: needs.resolve-release.outputs.release_tag != ''
+    needs: [resolve-release, pack-and-sign-sdk]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write   # OIDC for PyPI Trusted Publisher (token exchange only)
+    env:
+      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
     steps:
       - name: Download built wheel + sdist from build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -608,7 +832,7 @@ jobs:
           attestations: true        # PEP 740 attestations: re-enabled now the repo is public (visibility=PUBLIC, 2026-06-13), mirroring npm --provenance
 
   # === Site registry-sync notify job (github-hosted) =================================
-  # Runs ONLY on tag push, ONLY after BOTH publish jobs succeed (needs: = all must
+  # Runs ONLY on a release run, ONLY after BOTH publish jobs succeed (needs: = all must
   # pass). On a partial publish (one registry up, the other failed) this job is
   # SKIPPED — the site is never told to sync a half-published release.
   #
@@ -646,12 +870,13 @@ jobs:
   #   Until BOTH the token AND the repo variable exist, this job is a green no-op.
   notify-site-registry-sync:
     name: Notify the marketing-site repo to sync public registry versions
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [publish-npm-trusted-publisher, publish-pypi-trusted-publisher]
+    if: needs.resolve-release.outputs.release_tag != ''
+    needs: [resolve-release, publish-npm-trusted-publisher, publish-pypi-trusted-publisher]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # nothing in THIS repo is written; cross-repo auth is the secret
     env:
+      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
       # The site repo identity comes ONLY from a repository variable — never a
       # literal here — so this PUBLIC workflow does not name the private site repo.
       # The cross-repo dispatch token is injected per-step (not job-level env).
@@ -692,7 +917,7 @@ jobs:
         # legal pre-release spellings.
         run: |
           set -euo pipefail
-          NPM_VERSION="${GITHUB_REF_NAME#v}"            # e.g. 0.9.0-rc9 or 1.0.0
+          NPM_VERSION="${RELEASE_TAG#v}"            # e.g. 0.9.0-rc9 or 1.0.0
           echo "[notify] confirming ${PACKAGE} npm=${NPM_VERSION} on npm + PyPI (canonicalized)"
 
           # Canonical PyPI spellings for this version (pure bash + sed — no python
@@ -743,7 +968,7 @@ jobs:
           # Final-attempt diagnostics: which registry is unreachable vs simply not-yet-present.
           NPM_CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${PACKAGE}" || echo 000)"
           PYPI_CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/${PACKAGE}/json" || echo 000)"
-          echo "[notify] REGISTRY-CONFIRM TIMEOUT for ${GITHUB_REF_NAME}: npm_ok=$NPM_OK (http $NPM_CODE) pypi_ok=$PYPI_OK (http $PYPI_CODE)." >&2
+          echo "[notify] REGISTRY-CONFIRM TIMEOUT for ${RELEASE_TAG}: npm_ok=$NPM_OK (http $NPM_CODE) pypi_ok=$PYPI_OK (http $PYPI_CODE)." >&2
           echo "[notify] Packages may still be propagating, or a registry is degraded. Re-run THIS job to retry." >&2
           exit 1
 
@@ -753,7 +978,7 @@ jobs:
           GH_TOKEN: ${{ secrets.SITE_SYNC_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
-          REASON="aegis-trust ${GITHUB_REF_NAME} published (npm+PyPI confirmed live; run ${GITHUB_RUN_ID})"
+          REASON="aegis-trust ${RELEASE_TAG} published (npm+PyPI confirmed live; run ${GITHUB_RUN_ID})"
           echo "[notify] dispatching ${SITE_WORKFLOW} on ${SITE_REPO}"
           if gh workflow run "${SITE_WORKFLOW}" -R "${SITE_REPO}" --ref main -f reason="${REASON}"; then
             echo "[notify] site registry-sync dispatched. The site re-fetches live registries itself;"
