@@ -104,6 +104,12 @@ export {
   type CoreDecisionEvidence,
   type CheckBoundaryArgs,
   type AttributionClaim,
+  // AI-native `decision` object — typed, fail-closed reader (server-derived
+  // fragment_tags / parts / decision_id / ledgered).
+  AUTHORITY_OUTCOMES,
+  parseAuthorityDecision,
+  type AuthorityDecisionView,
+  type BoundaryPartialView,
   // AI-native v1 (frozen contract: AI_NATIVE_V1_CONTRACT.md) — wire floor.
   type ToolCallArgs,
   type ToolCallResult,

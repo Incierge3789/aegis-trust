@@ -61,6 +61,26 @@
           }
         }
       }
+    },
+    {
+      "corpus": "authority_decision_view.v0.json",
+      "exercises": "the shipped AI-native decision reader (parse_authority_decision / parseAuthorityDecision)",
+      "runners": {
+        "python": {
+          "path": "python/tests/test_authority_decision_view_corpus.py",
+          "must_import": {
+            "module": "aegis_trust.client",
+            "symbol": "parse_authority_decision"
+          }
+        },
+        "node": {
+          "path": "node/tests/authorityDecisionViewCorpus.test.ts",
+          "must_import": {
+            "module": "../src/client.js",
+            "symbol": "parseAuthorityDecision"
+          }
+        }
+      }
     }
   ],
   "forbidden_imports": {

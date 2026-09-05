@@ -29,6 +29,7 @@ from aegis_trust.errors import (
     AegisValidationError,
     aegis_docs_url,
 )
+from aegis_trust.receipt_verify import is_value_free_label
 from aegis_trust.types import (
     AuditChainStatus,
     CapabilityGrant,
@@ -286,6 +287,406 @@ class BoundaryDecisionView:
     reason_label: str = ""
     evidence_available: bool = False
     evidence: CoreDecisionEvidence | None = None
+
+
+# ── AI-native `decision` object: typed, fail-closed reader ───────────
+# The AI-native wire (POST /tool-call, POST /stream/open) returns a shared
+# `decision` object (contract: AI_NATIVE_V1_CONTRACT.md, additive-only) that
+# carries more than the flat /check-boundary view does: the SERVER-DERIVED
+# `fragment_tags[]`, the attribution trace `parts[]`, and the
+# chain pointers `decision_id` / `receipt_event_id` / `ledgered`. Until now the
+# SDK handed that object back as an untyped dict, so a caller could not read
+# those fields without re-deriving the wire shape. This reader exposes them
+# and refuses a malformed object instead of defaulting a field the wire did
+# not send (a defaulted `fragment_tags: []` would claim "no tags released"
+# for a plane that never said so).
+
+#: The outcome vocabulary the authority can return (wire, SCREAMING_SNAKE_CASE).
+AUTHORITY_OUTCOMES: tuple[str, ...] = (
+    "PROTECTED",
+    "ACCESS_REDUCED",
+    "CHECK_REQUIRED",
+    "APPROVAL_REQUIRED",
+    "BLOCKED",
+)
+# Validation reads this private copy, so rebinding the public name cannot widen
+# the vocabulary (parity with the Node reader's private frozen set).
+_AUTHORITY_OUTCOME_SET = frozenset(AUTHORITY_OUTCOMES)
+#: Severity rank of each outcome — the authority composes "most restrictive
+#: wins", so the composed outcome can never rank below any partial's.
+_OUTCOME_SEVERITY = {name: rank for rank, name in enumerate(AUTHORITY_OUTCOMES)}
+#: The operator-facing verb is a pure function of the outcome on the wire.
+_OUTCOME_VERB = {
+    "PROTECTED": "allow",
+    "ACCESS_REDUCED": "allow_reduced",
+    "CHECK_REQUIRED": "require_classification",
+    "APPROVAL_REQUIRED": "require_approval",
+    "BLOCKED": "block",
+}
+
+
+@dataclass(frozen=True)
+class BoundaryPartialView:
+    """One boundary's verdict inside :attr:`AuthorityDecisionView.parts` —
+    the attribution trace (which boundary said what). Field *names* and
+    server-derived labels only. Immutable: sequences are tuples, and every
+    member is required (no defaults — a partial cannot be fabricated with
+    members silently left empty)."""
+
+    boundary: str
+    outcome: str
+    reason_code: str
+    reason_label: str
+    allowed_fields: tuple[str, ...]
+    withheld_fields: tuple[str, ...]
+    fragment_tags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AuthorityDecisionView:
+    """Typed view of the ``decision`` object the AI-native wire returns
+    (``tool_call`` / ``stream_open`` bodies, ``stream_session().decision``).
+    Intended to be built by :func:`parse_authority_decision`, which refuses a
+    malformed object rather than defaulting a field the wire did not send; an
+    instance constructed by hand carries none of that guarantee.
+
+    ``fragment_tags`` are SERVER-DERIVED: the authority classifies the data
+    reference and accumulates tags per session; a caller cannot under-declare
+    them. ``parts`` is the attribution trace (every boundary partial that
+    composed into ``outcome``). ``ledgered`` is the chain witness — an
+    unledgered decision carries no evidence claim, so read ``fragment_tags``
+    as released only when ``ledgered`` is True. ``decision_id`` doubles as
+    the integrity-checkable ledger id.
+
+    Immutable: sequences are tuples and the dataclass is frozen; every
+    frozen-wire member is required (no defaults), so a view cannot be
+    fabricated with members silently left empty.
+
+    This is NOT the flat ``/check-boundary`` view: :class:`BoundaryDecisionView`
+    carries neither ``fragment_tags`` nor ``parts`` (its ``evidence_available``
+    is the ``ledgered`` bit and ``evidence.decision_id`` the decision id)."""
+
+    outcome: str
+    ledgered: bool
+    decision_id: str
+    receipt_event_id: str
+    reason_code: str
+    reason_label: str
+    verb: str
+    boundary: str
+    allowed_fields: tuple[str, ...]
+    withheld_fields: tuple[str, ...]
+    fragment_tags: tuple[str, ...]
+    parts: tuple[BoundaryPartialView, ...]
+    policy_generation: int | None = None
+    policy_digest: str | None = None
+    replayed: bool = False
+
+
+def _decision_shape_error(detail: str) -> AegisValidationError:
+    return AegisValidationError(
+        f"authority decision: {detail}",
+        code="aegis.aiNative.decisionShape",
+        remediation=(
+            "The 'decision' object does not have the AI-native wire shape. "
+            "Pass the 'decision' member of a tool_call / stream_open response "
+            "(not the whole body) and check the boundary version against "
+            "AI_NATIVE_V1_CONTRACT.md (additive-only)."
+        ),
+        docs_url=aegis_docs_url("aegis.aiNative.decisionShape"),
+    )
+
+
+#: Largest ``policy_generation`` both SDKs can carry exactly (JavaScript's
+#: ``Number.MAX_SAFE_INTEGER``). A larger wire value would be rounded by one
+#: SDK and kept exact by the other, so both refuse it.
+_MAX_SAFE_INTEGER = 2**53 - 1
+
+
+#: "Blank" for chain ids, defined identically in both SDKs: nothing but ASCII
+#: whitespace. Python's ``str.strip()`` and JavaScript's ``trim()`` disagree
+#: on Unicode whitespace (U+0085 vs U+FEFF), so neither is used.
+_ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
+
+
+def _is_blank(s: str) -> bool:
+    return s.strip(_ASCII_WHITESPACE) == ""
+
+
+def _str_tuple_or_none(raw: Any) -> tuple[str, ...] | None:
+    # One traversal: the snapshot that is validated is the snapshot that is
+    # returned. Validating ``raw`` and then materialising it again would let a
+    # list subclass with a stateful iterator (or a concurrent mutation) hand
+    # back elements the check never saw.
+    if not isinstance(raw, list):
+        return None
+    snapshot = tuple(raw)
+    if not all(isinstance(x, str) for x in snapshot):
+        return None
+    return snapshot
+
+
+def _required_str(obj: dict[str, Any], key: str, where: str) -> str:
+    v = obj.get(key)
+    if not isinstance(v, str):
+        raise _decision_shape_error(f"{where}'{key}' missing or not a string")
+    return v
+
+
+def _optional_str(obj: dict[str, Any], key: str, where: str) -> str | None:
+    if key not in obj:
+        return None
+    v = obj[key]
+    if not isinstance(v, str):
+        raise _decision_shape_error(f"{where}'{key}' not a string")
+    return v
+
+
+def _required_outcome(obj: dict[str, Any], where: str) -> str:
+    v = obj.get("outcome")
+    if not isinstance(v, str) or v not in _AUTHORITY_OUTCOME_SET:
+        raise _decision_shape_error(f"{where}'outcome' missing or unknown")
+    return v
+
+
+def _required_str_list(obj: dict[str, Any], key: str, where: str) -> tuple[str, ...]:
+    v = _str_tuple_or_none(obj.get(key))
+    if v is None:
+        raise _decision_shape_error(f"{where}'{key}' missing or not a list of strings")
+    return v
+
+
+def _required_labels(obj: dict[str, Any], key: str, where: str) -> tuple[str, ...]:
+    # Shape rule only (ASCII label charset, length cap — the receipt verifier's
+    # gate): it refuses a tag that is not label-shaped, it does not classify
+    # what a label-shaped string means. Tags are server-derived labels.
+    tags = _required_str_list(obj, key, where)
+    for t in tags:
+        if not is_value_free_label(t):
+            raise _decision_shape_error(
+                f"{where}'{key}' member is not a value-free label"
+            )
+    return tags
+
+
+def _parse_policy_generation(pg: Any) -> int:
+    """A non-negative integer no larger than ``_MAX_SAFE_INTEGER``. JSON has
+    one number type: a whole-number float on the wire (``3.0``) is the same
+    wire value as ``3`` and is read as the integer 3 in both SDKs; anything
+    fractional, non-finite, negative, boolean, or beyond the safe range is
+    refused. (Rounding of over-precise literals happens inside the JSON
+    decoder, before the reader, and identically in both SDKs.)"""
+    if isinstance(pg, bool):
+        raise _decision_shape_error("'policy_generation' not a non-negative integer")
+    if isinstance(pg, float):
+        if pg != pg or pg in (float("inf"), float("-inf")) or not pg.is_integer():
+            raise _decision_shape_error(
+                "'policy_generation' not a non-negative integer"
+            )
+        pg = int(pg)
+    if not isinstance(pg, int) or pg < 0 or pg > _MAX_SAFE_INTEGER:
+        raise _decision_shape_error("'policy_generation' not a non-negative integer")
+    return pg
+
+
+def _parse_part(raw: Any, index: int) -> BoundaryPartialView:
+    where = f"'parts[{index}]' "
+    if not isinstance(raw, dict):
+        raise _decision_shape_error(f"{where}is not an object")
+    return BoundaryPartialView(
+        boundary=_required_str(raw, "boundary", where),
+        outcome=_required_outcome(raw, where),
+        reason_code=_required_str(raw, "reason_code", where),
+        reason_label=_required_str(raw, "reason_label", where),
+        allowed_fields=_required_str_list(raw, "allowed_fields", where),
+        withheld_fields=_required_str_list(raw, "withheld_fields", where),
+        fragment_tags=_required_labels(raw, "fragment_tags", where),
+    )
+
+
+def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
+    """Parse the AI-native ``decision`` object into an
+    :class:`AuthorityDecisionView`, fail-closed.
+
+    Required (present and correctly typed, else :class:`AegisValidationError`
+    ``aegis.aiNative.decisionShape``) — every member the frozen wire declares:
+    ``outcome`` (one of :data:`AUTHORITY_OUTCOMES`), ``ledgered`` (bool),
+    ``decision_id``, ``receipt_event_id``, ``reason_code``, ``reason_label``,
+    ``verb``, ``boundary`` (str), ``allowed_fields`` / ``withheld_fields``
+    (list[str]), ``fragment_tags`` (list of labels that pass the value-free label
+    SHAPE rule — ASCII label charset, length cap, the receipt verifier's
+    gate; a tag outside that shape is refused. The rule does not classify
+    meaning: tags are server-derived labels, and a label-shaped string is
+    surfaced as-is), and ``parts`` (list of boundary partials, each validated
+    the same way). Optional, typed when present (added to the wire after the
+    freeze, or omitted by design): ``policy_generation`` (non-negative
+    integer no larger than 2**53 - 1 so both SDKs carry it exactly; a
+    whole-number float such as ``3.0`` is the same JSON value as ``3`` and
+    reads as 3 in both; never a bool), ``policy_digest``, ``replayed`` (bool;
+    the wire omits it when false). The chain witness is
+    two-way: ``ledgered=True`` must carry non-blank ``decision_id`` /
+    ``receipt_event_id`` (the claim is only as good as the ids that make it
+    checkable; blank = nothing but ASCII whitespace, the same rule in both
+    SDKs), and ``ledgered=False`` is only the hard-fault form —
+    ``outcome`` BLOCKED, blank ids, no composed ``fragment_tags``, no
+    ``allowed_fields`` / ``withheld_fields``, not ``replayed`` (the trace ``parts`` is preserved
+    verbatim as the diagnostic of what was refused, tags and all — a
+    partial's ``allowed_fields`` / ``fragment_tags`` describe what that
+    boundary computed, they are never a grant);
+    an executable outcome or a chain pointer on an unledgered decision is
+    refused. A ledgered decision is also checked against its own trace: the
+    composed ``outcome`` is at least as restrictive as every partial's (the
+    authority composes most-restrictive-wins) and the composed
+    ``fragment_tags`` contain every tag a partial carries (the authority
+    composes the union), and the composed ``allowed_fields`` equal the
+    winning partial's own allow set (the authority copies it verbatim, so a
+    differing composed set is a grant the trace does not support). Unknown
+    members are ignored (the contract is additive-only). ``verb`` must be the verb of
+    ``outcome``; a ledgered decision with no trace at all is accepted only as
+    the fail-closed BLOCKED form with an empty allow set. The returned view
+    holds copies —
+    mutating the input afterwards does not change it.
+
+    Pass the ``decision`` MEMBER (``body["decision"]``), not the whole
+    response body.
+    """
+    if not isinstance(decision, dict):
+        raise _decision_shape_error("not an object")
+    where = ""
+    outcome = _required_outcome(decision, where)
+    ledgered = decision.get("ledgered")
+    if not isinstance(ledgered, bool):
+        raise _decision_shape_error("'ledgered' missing or not a boolean")
+    decision_id = _required_str(decision, "decision_id", where)
+    receipt_event_id = _required_str(decision, "receipt_event_id", where)
+    reason_code = _required_str(decision, "reason_code", where)
+    reason_label = _required_str(decision, "reason_label", where)
+    verb = _required_str(decision, "verb", where)
+    if verb != _OUTCOME_VERB[outcome]:
+        raise _decision_shape_error("'verb' does not match 'outcome'")
+    boundary = _required_str(decision, "boundary", where)
+    policy_digest = _optional_str(decision, "policy_digest", where)
+    policy_generation: int | None = None
+    if "policy_generation" in decision:
+        policy_generation = _parse_policy_generation(decision["policy_generation"])
+    replayed = False
+    if "replayed" in decision:
+        rp = decision["replayed"]
+        if not isinstance(rp, bool):
+            raise _decision_shape_error("'replayed' not a boolean")
+        replayed = rp
+    # The chain witness is two-way. ledgered=True must carry the ids that make
+    # the claim checkable (blank counts as missing — receipt precedent).
+    # ledgered=False is ONLY the hard-fault form: the union ledger refused the
+    # write, so the decision is BLOCKED, carries no chain ids, releases no
+    # tags and cannot be a replay. An executable outcome or a chain pointer on
+    # an unledgered decision is a claim the chain never witnessed.
+    if ledgered:
+        if _is_blank(decision_id):
+            raise _decision_shape_error("'decision_id' empty on a ledgered decision")
+        if _is_blank(receipt_event_id):
+            raise _decision_shape_error(
+                "'receipt_event_id' empty on a ledgered decision"
+            )
+    else:
+        if outcome != "BLOCKED":
+            raise _decision_shape_error(
+                "'outcome' must be BLOCKED on an unledgered decision"
+            )
+        if not _is_blank(decision_id):
+            raise _decision_shape_error(
+                "'decision_id' present on an unledgered decision"
+            )
+        if not _is_blank(receipt_event_id):
+            raise _decision_shape_error(
+                "'receipt_event_id' present on an unledgered decision"
+            )
+        if replayed:
+            raise _decision_shape_error("'replayed' set on an unledgered decision")
+        # Blank means blank: a whitespace-only id is normalised so a caller's
+        # truthiness check cannot read it as a chain pointer.
+        decision_id = ""
+        receipt_event_id = ""
+    allowed_fields = _required_str_list(decision, "allowed_fields", where)
+    withheld_fields = _required_str_list(decision, "withheld_fields", where)
+    fragment_tags = _required_labels(decision, "fragment_tags", where)
+    if not ledgered and fragment_tags:
+        raise _decision_shape_error("'fragment_tags' present on an unledgered decision")
+    if not ledgered and allowed_fields:
+        raise _decision_shape_error(
+            "'allowed_fields' present on an unledgered decision"
+        )
+    if not ledgered and withheld_fields:
+        raise _decision_shape_error(
+            "'withheld_fields' present on an unledgered decision"
+        )
+    parts_raw = decision.get("parts")
+    if not isinstance(parts_raw, list):
+        raise _decision_shape_error("'parts' missing or not a list")
+    # The trace is NOT constrained on a hard fault: the authority keeps the
+    # partials the boundaries had already composed (with their own tags and
+    # allow sets) as the value-free diagnostic of what was refused, and clears
+    # only the composed result. Refusing tags inside the trace would reject a
+    # legitimate ledger-outage response (cross-review round 4, codex, from
+    # the authority's hard-fault constructor).
+    parts = tuple(_parse_part(p, i) for i, p in enumerate(parts_raw))
+    if ledgered:
+        # The composed decision is derived from its parts: the outcome is the
+        # most restrictive partial ("first-max", later gate steps may only
+        # raise it) and the composed tags are the union of the partials' tags.
+        # A ledgered decision whose top level is LESS restrictive than one of
+        # its parts, or that drops a tag a part released, is contradictory —
+        # a caller gating on the top level would fail open.
+        composed_rank = _OUTCOME_SEVERITY[outcome]
+        composed_tags = set(fragment_tags)
+        winner: int | None = None
+        for i, part in enumerate(parts):
+            rank = _OUTCOME_SEVERITY[part.outcome]
+            if rank > composed_rank:
+                raise _decision_shape_error(
+                    f"'outcome' less restrictive than 'parts[{i}]' 'outcome'"
+                )
+            if not composed_tags.issuperset(part.fragment_tags):
+                raise _decision_shape_error(
+                    f"'fragment_tags' missing tags carried by 'parts[{i}]'"
+                )
+            # first-max: only a STRICTLY greater severity replaces the winner
+            if winner is None or rank > _OUTCOME_SEVERITY[parts[winner].outcome]:
+                winner = i
+        # The composed allow set IS the winner partial's own allow set (the
+        # authority copies it verbatim, no widening step exists). A composed
+        # allow set that differs from the winner's is a widened (or narrowed)
+        # grant the trace does not support.
+        if winner is not None and set(allowed_fields) != set(
+            parts[winner].allowed_fields
+        ):
+            raise _decision_shape_error(
+                f"'allowed_fields' differs from the winning 'parts[{winner}]'"
+            )
+        # No trace at all: the authority's compose of an empty partial list is
+        # the fail-closed BLOCKED form with an empty allow set. A ledgered
+        # grant with nothing to attribute it to is a grant without a witness.
+        if winner is None and (outcome != "BLOCKED" or allowed_fields):
+            raise _decision_shape_error(
+                "'parts' empty on a ledgered decision that is not BLOCKED"
+            )
+    return AuthorityDecisionView(
+        outcome=outcome,
+        ledgered=ledgered,
+        decision_id=decision_id,
+        receipt_event_id=receipt_event_id,
+        reason_code=reason_code,
+        reason_label=reason_label,
+        verb=verb,
+        boundary=boundary,
+        allowed_fields=allowed_fields,
+        withheld_fields=withheld_fields,
+        fragment_tags=fragment_tags,
+        parts=parts,
+        policy_generation=policy_generation,
+        policy_digest=policy_digest,
+        replayed=replayed,
+    )
 
 
 class AegisClient:

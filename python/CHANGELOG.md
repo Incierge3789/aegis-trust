@@ -2,6 +2,61 @@
 
 ## [Unreleased]
 
+### Added — typed, fail-closed reader for the AI-native `decision` object
+- `aegis_trust.client.parse_authority_decision(decision)` returns an
+  `AuthorityDecisionView` (with `BoundaryPartialView` for its `parts`). It
+  exposes what the AI-native wire (`tool_call` / `stream_open` bodies,
+  `stream_session().decision`) already returns but the SDK handed back as an
+  untyped dict: the **server-derived** `fragment_tags`, the attribution
+  trace `parts` (per-boundary field names and labels plus the free-text
+  `reason_label`), and the chain pointers `decision_id` /
+  `receipt_event_id` / `ledgered`, plus `outcome`, `verb`, `boundary`,
+  `reason_code` / `reason_label`, `allowed_fields` / `withheld_fields`,
+  `policy_generation` / `policy_digest`, `replayed`.
+- Fail-closed for the shapes it checks (listed here and pinned one by one
+  in the shared corpus; it is not a proof of authority consistency beyond
+  them): a malformed object raises `AegisValidationError`
+  (`aegis.aiNative.decisionShape`) instead of parsing into a defaulted view —
+  an absent `fragment_tags` is refused, never read as "no tags released"; a
+  tag (top-level or inside a partial) outside the value-free label SHAPE is
+  refused (the receipt verifier's gate: ASCII label charset, length cap — a
+  shape rule, not a semantic classifier; tags are server-derived labels and
+  a label-shaped string is surfaced as-is); every member the frozen wire
+  declares is required; the chain witness is two-way — a decision that
+  claims `ledgered` must carry non-blank `decision_id` / `receipt_event_id`,
+  and an unledgered decision is accepted only in its hard-fault form (BLOCKED,
+  blank ids, no composed `fragment_tags`, no `allowed_fields` / `withheld_fields`,
+  not `replayed`;
+  the trace `parts` is preserved verbatim as the diagnostic of what was
+  refused — a partial's `allowed_fields` / `fragment_tags` are what that
+  boundary computed, never a grant; blank = nothing but ASCII whitespace, the
+  same rule in both SDKs); a ledgered decision is also checked against its
+  own trace (the composed `outcome` is at least as restrictive as every
+  partial's and the composed `fragment_tags` contain every tag a partial
+  carries, and the composed `allowed_fields` equal the winning partial's own
+  allow set — which is how the authority composes them); `policy_generation`
+  must be a non-negative integer no larger than 2**53 - 1 (the range both
+  SDKs represent exactly; a whole-number float such as `3.0` is the same JSON
+  value as `3` and reads as 3 in both; rounding of over-precise literals
+  happens in the JSON decoder, before the reader, identically in both). The view is immutable (frozen dataclass,
+  tuple sequences, no defaults for required members). Unknown
+  members are ignored (additive-only contract). Shared cross-language corpus:
+  `conformance/authority_decision_view.v0.json` (npm runs the same vectors).
+- Not added to the flat `check_boundary` view on purpose: `BoundaryDecisionView`
+  is unchanged because the flat wire never sends `fragment_tags` / `parts`
+  (it already carries the ledgered bit as `evidence_available` and the
+  decision id under `evidence`). A field the wire never fills would be a
+  claim without a source.
+
+### Deferred — request-side `session_id` / `fragment_tags` on `check_boundary` (not in this version)
+- Not added. The decision plane's flat wire accepts neither field today and
+  drops unknown request keys silently, and `fragment_tags` are server-derived
+  (a caller can only ever add to them, never under-declare). An SDK argument
+  that is sent but not received would be a parity claim this SDK cannot
+  back. Both fields land together with the plane version whose flat wire
+  accepts them, as one pinned SDK/plane pair, and that entry will name the
+  pair.
+
 ## [0.10.1] - 2026-09-01
 
 ### Fixed — release-gate hygiene (no API change)
