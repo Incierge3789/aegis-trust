@@ -23,7 +23,8 @@
   declares is required; the chain witness is two-way — a decision that
   claims `ledgered` must carry non-blank `decision_id` / `receipt_event_id`,
   and an unledgered decision is accepted only in its hard-fault form (BLOCKED,
-  blank ids, no `fragment_tags`, not `replayed`); `policy_generation` must be
+  blank ids, no `fragment_tags` at the top level or in any partial, no
+  `allowed_fields`, not `replayed`); `policy_generation` must be
   a non-negative integer no larger than 2**53 - 1 so both SDKs carry it
   exactly (a whole-number float such as `3.0` is the same JSON value as
   `3` and reads as 3 in both). The view is immutable (frozen dataclass,

@@ -446,6 +446,46 @@
         "policy_generation": 100
       },
       "why": "Same rule for a larger whole-number float (exponent forms serialise to this shape)."
+    },
+    {
+      "id": "unledgered_hard_fault_with_explanatory_trace",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [],
+        "parts": [
+          {
+            "boundary": "data",
+            "outcome": "BLOCKED",
+            "reason_code": "ledger_unavailable",
+            "reason_label": "The decision could not be witnessed.",
+            "allowed_fields": [],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": []
+          }
+        ],
+        "ledgered": false
+      },
+      "expect": {
+        "outcome": "BLOCKED",
+        "ledgered": false,
+        "parts_boundaries": [
+          "data"
+        ],
+        "fragment_tags": []
+      },
+      "why": "The trace MAY explain a hard fault (which boundary, why, what was withheld) as long as it releases no tags and the decision grants nothing."
     }
   ],
   "invalid": [
@@ -3015,6 +3055,64 @@
       "expect_error": "aegis.aiNative.decisionShape",
       "expect_detail": "'policy_digest' not a string",
       "why": "Same for the digest: present-but-null is refused, absent is allowed."
+    },
+    {
+      "id": "unledgered_with_part_fragment_tags",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [],
+        "parts": [
+          {
+            "boundary": "data",
+            "outcome": "BLOCKED",
+            "reason_code": "ledger_unavailable",
+            "reason_label": "The decision could not be witnessed.",
+            "allowed_fields": [],
+            "withheld_fields": [],
+            "fragment_tags": [
+              "pii:contact"
+            ]
+          }
+        ],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'parts[0]' 'fragment_tags' present on an unledgered decision",
+      "why": "'Releases no tags' holds inside the trace too: a partial on an unwitnessed decision cannot carry tags the composed decision may not carry (Review round 3, cursor P1)."
+    },
+    {
+      "id": "unledgered_with_allowed_fields",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [
+          "name"
+        ],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'allowed_fields' present on an unledgered decision",
+      "why": "An unwitnessed decision cannot grant: a non-empty allow set on the hard-fault form is a grant without a witness."
     }
   ]
 }

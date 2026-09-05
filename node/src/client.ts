@@ -232,7 +232,7 @@ export interface BoundaryDecisionView {
 // The AI-native wire (POST /tool-call, POST /stream/open) returns a shared
 // `decision` object (contract: AI_NATIVE_V1_CONTRACT.md, additive-only) that
 // carries more than the flat /check-boundary view does: the SERVER-DERIVED
-// `fragment_tags[]`, the value-free attribution trace `parts[]`, and the chain
+// `fragment_tags[]`, the attribution trace `parts[]`, and the chain
 // pointers `decision_id` / `receipt_event_id` / `ledgered`. Until now the SDK
 // handed that object back as `Record<string, unknown>`, so a caller could not
 // read those fields without re-deriving the wire shape. This reader exposes
@@ -436,8 +436,8 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * when false). The returned view is deep-frozen. The chain witness is two-way: `ledgered: true` must carry
  * non-blank `decision_id` / `receipt_event_id` (the claim is only as good as
  * the ids that make it checkable), and `ledgered: false` is only the
- * hard-fault form — `outcome` BLOCKED, blank ids, no `fragment_tags`, not
- * `replayed`; an executable outcome or a chain pointer on an unledgered
+ * hard-fault form — `outcome` BLOCKED, blank ids, no `fragment_tags` (top level
+ * or in any partial), no `allowed_fields`, not `replayed`; an executable outcome or a chain pointer on an unledgered
  * decision is refused. Unknown members are ignored (the contract is
  * additive-only). The returned view is deep-frozen. A decision with `ledgered: true`
  * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
@@ -506,12 +506,24 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   if (!ledgered && fragment_tags.length > 0) {
     throw decisionShapeError("'fragment_tags' present on an unledgered decision");
   }
+  if (!ledgered && allowed_fields.length > 0) {
+    throw decisionShapeError("'allowed_fields' present on an unledgered decision");
+  }
   const partsRaw = hasOwn(o, "parts") ? o.parts : undefined;
   if (!Array.isArray(partsRaw)) throw decisionShapeError("'parts' missing or not a list");
   // Index loop, not `map()`: `map` skips holes in a sparse array and would
   // hand back an unvalidated hole where a partial should be.
   const partsOut: BoundaryPartialView[] = [];
   for (let i = 0; i < partsRaw.length; i++) partsOut.push(parsePart(partsRaw[i], i));
+  if (!ledgered) {
+    // "Releases no tags" holds one level down too: a partial cannot carry
+    // tags the composed (unwitnessed) decision is not allowed to carry.
+    for (let i = 0; i < partsOut.length; i++) {
+      if (partsOut[i].fragment_tags.length > 0) {
+        throw decisionShapeError(`'parts[${i}]' 'fragment_tags' present on an unledgered decision`);
+      }
+    }
+  }
   const parts = Object.freeze(partsOut);
   return Object.freeze({
     outcome,

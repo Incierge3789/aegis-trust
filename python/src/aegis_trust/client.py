@@ -293,7 +293,7 @@ class BoundaryDecisionView:
 # The AI-native wire (POST /tool-call, POST /stream/open) returns a shared
 # `decision` object (contract: AI_NATIVE_V1_CONTRACT.md, additive-only) that
 # carries more than the flat /check-boundary view does: the SERVER-DERIVED
-# `fragment_tags[]`, the value-free attribution trace `parts[]`, and the
+# `fragment_tags[]`, the attribution trace `parts[]`, and the
 # chain pointers `decision_id` / `receipt_event_id` / `ledgered`. Until now the
 # SDK handed that object back as an untyped dict, so a caller could not read
 # those fields without re-deriving the wire shape. This reader exposes them
@@ -498,7 +498,8 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     two-way: ``ledgered=True`` must carry non-blank ``decision_id`` /
     ``receipt_event_id`` (the claim is only as good as the ids that make it
     checkable), and ``ledgered=False`` is only the hard-fault form —
-    ``outcome`` BLOCKED, blank ids, no ``fragment_tags``, not ``replayed``;
+    ``outcome`` BLOCKED, blank ids, no ``fragment_tags`` (top level or in any
+    partial), no ``allowed_fields``, not ``replayed``;
     an executable outcome or a chain pointer on an unledgered decision is
     refused. Unknown members are ignored (the contract is additive-only). The returned view holds copies —
     mutating the input afterwards does not change it.
@@ -562,10 +563,22 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     fragment_tags = _required_labels(decision, "fragment_tags", where)
     if not ledgered and fragment_tags:
         raise _decision_shape_error("'fragment_tags' present on an unledgered decision")
+    if not ledgered and allowed_fields:
+        raise _decision_shape_error(
+            "'allowed_fields' present on an unledgered decision"
+        )
     parts_raw = decision.get("parts")
     if not isinstance(parts_raw, list):
         raise _decision_shape_error("'parts' missing or not a list")
     parts = tuple(_parse_part(p, i) for i, p in enumerate(parts_raw))
+    if not ledgered:
+        # "Releases no tags" holds one level down too: a partial cannot carry
+        # tags the composed (unwitnessed) decision is not allowed to carry.
+        for i, part in enumerate(parts):
+            if part.fragment_tags:
+                raise _decision_shape_error(
+                    f"'parts[{i}]' 'fragment_tags' present on an unledgered decision"
+                )
     return AuthorityDecisionView(
         outcome=outcome,
         ledgered=ledgered,
