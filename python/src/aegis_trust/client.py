@@ -392,6 +392,16 @@ def _decision_shape_error(detail: str) -> AegisValidationError:
 _MAX_SAFE_INTEGER = 2**53 - 1
 
 
+#: "Blank" for chain ids, defined identically in both SDKs: nothing but ASCII
+#: whitespace. Python's ``str.strip()`` and JavaScript's ``trim()`` disagree
+#: on Unicode whitespace (U+0085 vs U+FEFF), so neither is used.
+_ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
+
+
+def _is_blank(s: str) -> bool:
+    return s.strip(_ASCII_WHITESPACE) == ""
+
+
 def _str_tuple_or_none(raw: Any) -> tuple[str, ...] | None:
     if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
         return None
@@ -497,10 +507,13 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     the wire omits it when false). The chain witness is
     two-way: ``ledgered=True`` must carry non-blank ``decision_id`` /
     ``receipt_event_id`` (the claim is only as good as the ids that make it
-    checkable), and ``ledgered=False`` is only the hard-fault form —
+    checkable; blank = nothing but ASCII whitespace, the same rule in both
+    SDKs), and ``ledgered=False`` is only the hard-fault form —
     ``outcome`` BLOCKED, blank ids, no composed ``fragment_tags``, no
     ``allowed_fields``, not ``replayed`` (the trace ``parts`` is preserved
-    verbatim as the diagnostic of what was refused, tags and all);
+    verbatim as the diagnostic of what was refused, tags and all — a
+    partial's ``allowed_fields`` / ``fragment_tags`` describe what that
+    boundary computed, they are never a grant);
     an executable outcome or a chain pointer on an unledgered decision is
     refused. Unknown members are ignored (the contract is additive-only). The returned view holds copies —
     mutating the input afterwards does not change it.
@@ -538,9 +551,9 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     # tags and cannot be a replay. An executable outcome or a chain pointer on
     # an unledgered decision is a claim the chain never witnessed.
     if ledgered:
-        if not decision_id.strip():
+        if _is_blank(decision_id):
             raise _decision_shape_error("'decision_id' empty on a ledgered decision")
-        if not receipt_event_id.strip():
+        if _is_blank(receipt_event_id):
             raise _decision_shape_error(
                 "'receipt_event_id' empty on a ledgered decision"
             )
@@ -549,11 +562,11 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
             raise _decision_shape_error(
                 "'outcome' must be BLOCKED on an unledgered decision"
             )
-        if decision_id.strip():
+        if not _is_blank(decision_id):
             raise _decision_shape_error(
                 "'decision_id' present on an unledgered decision"
             )
-        if receipt_event_id.strip():
+        if not _is_blank(receipt_event_id):
             raise _decision_shape_error(
                 "'receipt_event_id' present on an unledgered decision"
             )

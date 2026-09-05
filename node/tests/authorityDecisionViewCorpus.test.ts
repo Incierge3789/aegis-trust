@@ -32,9 +32,12 @@ const corpus = JSON.parse(
 function project(view: AuthorityDecisionView, expect: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(expect)) {
+    const m = /^parts_(\d+)_(\w+)$/.exec(key);
     if (key === "parts_boundaries") out[key] = view.parts.map((p) => p.boundary);
-    else if (key === "parts_1_fragment_tags") out[key] = [...view.parts[1].fragment_tags];
-    else out[key] = (view as unknown as Record<string, unknown>)[key];
+    else if (m) {
+      const v = (view.parts[Number(m[1])] as unknown as Record<string, unknown>)[m[2]];
+      out[key] = Array.isArray(v) ? [...v] : v;
+    } else out[key] = (view as unknown as Record<string, unknown>)[key];
   }
   return out;
 }

@@ -9,6 +9,7 @@ fragment, so both SDKs name the same member in the same words.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -37,8 +38,9 @@ def _project(view: AuthorityDecisionView, expect: dict[str, Any]) -> dict[str, A
     for key in expect:
         if key == "parts_boundaries":
             out[key] = [p.boundary for p in view.parts]
-        elif key == "parts_1_fragment_tags":
-            out[key] = list(view.parts[1].fragment_tags)
+        elif (m := re.fullmatch(r"parts_(\d+)_(\w+)", key)) is not None:
+            part_value = getattr(view.parts[int(m.group(1))], m.group(2))
+            out[key] = list(part_value) if isinstance(part_value, tuple) else part_value
         else:
             value = getattr(view, key)
             # The view holds tuples (immutable); the corpus writes JSON lists.

@@ -485,7 +485,7 @@
         ],
         "fragment_tags": []
       },
-      "why": "The trace MAY explain a hard fault (which boundary, why, what was withheld) as long as it releases no tags and the decision grants nothing."
+      "why": "The trace MAY explain a hard fault (which boundary, why, what was withheld) — the composed decision releases no tags and grants nothing; the partials keep whatever they computed."
     },
     {
       "id": "unledgered_hard_fault_preserves_trace_tags",
@@ -508,7 +508,9 @@
             "outcome": "BLOCKED",
             "reason_code": "ledger_unavailable",
             "reason_label": "The decision could not be witnessed.",
-            "allowed_fields": [],
+            "allowed_fields": [
+              "name"
+            ],
             "withheld_fields": [],
             "fragment_tags": [
               "pii:contact"
@@ -523,9 +525,16 @@
         "fragment_tags": [],
         "parts_boundaries": [
           "data"
-        ]
+        ],
+        "parts_0_fragment_tags": [
+          "pii:contact"
+        ],
+        "parts_0_allowed_fields": [
+          "name"
+        ],
+        "allowed_fields": []
       },
-      "why": "On a ledger refusal the authority clears only the COMPOSED result (outcome BLOCKED, blank ids, no composed tags, no allow set) and keeps the partials the boundaries had already produced, tags and all, as the diagnostic of what was refused. A reader that refused trace tags here would throw exactly during a ledger outage (round 4, codex, read from the authority's hard-fault constructor; round 3 had it wrong)."
+      "why": "On a ledger refusal the authority clears only the COMPOSED result (outcome BLOCKED, blank ids, no composed tags, no allow set) and keeps the partials the boundaries had already produced, tags and all, as the diagnostic of what was refused. A reader that refused trace tags here would throw exactly during a ledger outage (round 4, codex, read from the authority's hard-fault constructor; round 3 had it wrong). The pins are positive: the trace's tags and allow set are surfaced verbatim (a reader that silently dropped them would also be wrong) while the composed allow set stays empty."
     },
     {
       "id": "unledgered_whitespace_ids_normalised",
@@ -551,6 +560,130 @@
         "receipt_event_id": ""
       },
       "why": "Blank means blank: whitespace-only ids on the hard-fault form are accepted (they are blank) and normalised to the empty string so a truthiness check cannot read them as chain pointers."
+    },
+    {
+      "id": "ledgered_id_of_unicode_nel_is_not_blank",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "\u0085",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect": {
+        "decision_id": "\u0085"
+      },
+      "why": "Blank is defined as nothing-but-ASCII-whitespace in BOTH SDKs. U+0085 is whitespace to Python's strip() but not to JavaScript's trim(); a shared predicate keeps the two readers from disagreeing on the same wire bytes."
+    },
+    {
+      "id": "ledgered_id_of_unicode_bom_is_not_blank",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "\ufeff",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect": {
+        "decision_id": "\ufeff"
+      },
+      "why": "The mirror case: U+FEFF is whitespace to trim() but not to strip(). Same shared rule, same answer in both."
     }
   ],
   "invalid": [
@@ -3144,6 +3277,28 @@
       "expect_error": "aegis.aiNative.decisionShape",
       "expect_detail": "'allowed_fields' present on an unledgered decision",
       "why": "An unwitnessed decision cannot grant: a non-empty allow set on the hard-fault form is a grant without a witness."
+    },
+    {
+      "id": "unledgered_id_of_unicode_nel_is_present",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "\u0085",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'decision_id' present on an unledgered decision",
+      "why": "On the hard-fault form the same shared blank rule makes a NEL-only id 'present', so it is refused in both SDKs."
     }
   ]
 }

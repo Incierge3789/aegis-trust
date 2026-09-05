@@ -320,16 +320,24 @@ function decisionShapeError(detail: string): AegisValidationError {
   });
 }
 
-const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+const hasOwn = (o: object, k: string | number): boolean =>
+  Object.prototype.hasOwnProperty.call(o, k);
+
+/** "Blank" for chain ids, defined identically in both SDKs: nothing but ASCII
+ *  whitespace. `trim()` and Python's `str.strip()` disagree on Unicode
+ *  whitespace (U+FEFF vs U+0085), so neither is used. */
+const isBlank = (s: string): boolean => /^[ \t\n\r\v\f]*$/.test(s);
 
 function isStringList(raw: unknown): raw is string[] {
   // Index loop, not `every()`: `every` skips holes in a sparse array, so
   // `new Array(1)` would pass and materialise `undefined` on spread (and the
   // label regex would then test the string "undefined"). Every index must be
   // a string.
+  // Own index only: with a polluted `Array.prototype`, a hole would read the
+  // inherited value and a foreign string could surface as a field or a tag.
   if (!Array.isArray(raw)) return false;
   for (let i = 0; i < raw.length; i++) {
-    if (typeof raw[i] !== "string") return false;
+    if (!hasOwn(raw, i) || typeof raw[i] !== "string") return false;
   }
   return true;
 }
@@ -435,10 +443,13 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * JSON value as `3`), `policy_digest`, `replayed` (boolean; the wire omits it
  * when false). The returned view is deep-frozen. The chain witness is two-way: `ledgered: true` must carry
  * non-blank `decision_id` / `receipt_event_id` (the claim is only as good as
- * the ids that make it checkable), and `ledgered: false` is only the
+ * the ids that make it checkable; blank = nothing but ASCII whitespace, the
+ * same rule in both SDKs), and `ledgered: false` is only the
  * hard-fault form — `outcome` BLOCKED, blank ids, no composed `fragment_tags`,
  * no `allowed_fields`, not `replayed` (the trace `parts` is preserved verbatim
- * as the diagnostic of what was refused, tags and all); an executable outcome or a chain pointer on an unledgered
+ * as the diagnostic of what was refused, tags and all — a partial's
+ * `allowed_fields` / `fragment_tags` describe what that boundary computed, they
+ * are never a grant); an executable outcome or a chain pointer on an unledgered
  * decision is refused. Unknown members are ignored (the contract is
  * additive-only). The returned view is deep-frozen. A decision with `ledgered: true`
  * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
@@ -483,20 +494,20 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   // and cannot be a replay. An executable outcome or a chain pointer on an
   // unledgered decision is a claim the chain never witnessed.
   if (ledgered) {
-    if (decision_id.trim() === "") {
+    if (isBlank(decision_id)) {
       throw decisionShapeError("'decision_id' empty on a ledgered decision");
     }
-    if (receipt_event_id.trim() === "") {
+    if (isBlank(receipt_event_id)) {
       throw decisionShapeError("'receipt_event_id' empty on a ledgered decision");
     }
   } else {
     if (outcome !== "BLOCKED") {
       throw decisionShapeError("'outcome' must be BLOCKED on an unledgered decision");
     }
-    if (decision_id.trim() !== "") {
+    if (!isBlank(decision_id)) {
       throw decisionShapeError("'decision_id' present on an unledgered decision");
     }
-    if (receipt_event_id.trim() !== "") {
+    if (!isBlank(receipt_event_id)) {
       throw decisionShapeError("'receipt_event_id' present on an unledgered decision");
     }
     if (replayed) throw decisionShapeError("'replayed' set on an unledgered decision");
@@ -519,7 +530,9 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   // Index loop, not `map()`: `map` skips holes in a sparse array and would
   // hand back an unvalidated hole where a partial should be.
   const partsOut: BoundaryPartialView[] = [];
-  for (let i = 0; i < partsRaw.length; i++) partsOut.push(parsePart(partsRaw[i], i));
+  for (let i = 0; i < partsRaw.length; i++) {
+    partsOut.push(parsePart(hasOwn(partsRaw, i) ? partsRaw[i] : undefined, i));
+  }
   // The trace is NOT constrained on a hard fault: the authority keeps the
   // partials the boundaries had already composed (with their own tags and
   // allow sets) as the value-free diagnostic of what was refused, and clears

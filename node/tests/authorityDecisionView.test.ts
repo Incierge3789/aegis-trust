@@ -128,6 +128,22 @@ describe("parseAuthorityDecision in the client", () => {
     );
   });
 
+  it("does not read array holes from a polluted Array.prototype", () => {
+    const base = fullDecision();
+    const proto = Array.prototype as unknown as Record<number, unknown>;
+    proto[0] = "pii:inherited";
+    try {
+      expect(() =>
+        parseAuthorityDecision({ ...base, fragment_tags: new Array(1) }),
+      ).toThrow(/'fragment_tags' missing or not a list of strings/);
+      expect(() => parseAuthorityDecision({ ...base, parts: new Array(1) })).toThrow(
+        /'parts\[0\]' is not an object/,
+      );
+    } finally {
+      delete proto[0];
+    }
+  });
+
   it("does not read outcome / ledgered from the prototype chain", () => {
     const decision = fullDecision();
     delete decision.ledgered;

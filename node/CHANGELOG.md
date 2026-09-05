@@ -25,7 +25,9 @@
   and an unledgered decision is accepted only in its hard-fault form (BLOCKED,
   blank ids, no composed `fragment_tags`, no `allowed_fields`, not `replayed`;
   the trace `parts` is preserved verbatim as the diagnostic of what was
-  refused); `policy_generation` must be
+  refused — a partial's `allowed_fields` / `fragment_tags` are what that
+  boundary computed, never a grant; blank = nothing but ASCII whitespace, the
+  same rule in both SDKs); `policy_generation` must be
   a non-negative safe integer (`Number.MAX_SAFE_INTEGER`) so both SDKs
   carry it exactly (`3.0` is the same JSON value as `3`). The view, its
   arrays and its partials are deep-frozen, and `AUTHORITY_OUTCOMES` is
