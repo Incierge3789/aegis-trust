@@ -7,7 +7,9 @@
 # === SAFETY INVARIANTS (must hold) ===
 #
 #   1. Trigger は workflow_dispatch (manual, preview only) / tag push (`v*`) /
-#      release-on-main.yml からの workflow_call (`release_tag`) の 3 つ。
+#      main への push (version bump merge のときだけ resolve-release job が tag を切る) の 3 つ。
+#      workflow_call は **持たない** (registry の Trusted Publisher は top-level workflow
+#      filename を検証するため、caller 経由では identity が変わる)。
 #      pull_request_target を **使わない** (token theft 攻撃面)。
 #   2. permissions に `id-token: write` を持つ — Sigstore keyless signing (cosign)
 #      と GitHub native build provenance (actions/attest-build-provenance) のため。
@@ -71,18 +73,19 @@ on:
         description: 'Tag to attest (omit to attest current commit as preview)'
         required: false
         type: string
-  # Called by release-on-main.yml after it has created the version tag for a
-  # version bump merged to main. The upload / attach jobs unlock only on a
-  # `push` event: a pushed v* tag, or a call from a push to main that carries
-  # `release_tag`. A manual workflow_dispatch is never a `push` event, so it
-  # stays a preview run regardless of how an unset input compares to ''.
-  workflow_call:
-    inputs:
-      release_tag:
-        description: 'Existing v* tag to build, sign, attach and upload (set by release-on-main)'
-        required: true
-        type: string
+  # Setup-once release automation (2026-09-05): a push to main whose version
+  # pin CHANGED (a version-bump merge) makes the `resolve-release` job create
+  # `v<version>` at the merged commit and this same run carries the release
+  # through gate → SBOM → sign → pack → registry uploads. The trigger, the tag
+  # creation and the uploads all live in THIS file on purpose: the registries'
+  # Trusted Publisher bindings validate the top-level workflow filename, and a
+  # reusable-workflow call would present the caller's identity instead.
+  # A main push without a bump exits at `resolve-release` (no self-hosted job
+  # runs); a pushed v* tag releases as before; workflow_dispatch stays a
+  # preview run (build + sign, never upload).
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -92,18 +95,91 @@ permissions:
   attestations: write   # GitHub native attestation API
 
 concurrency:
-  group: release-attestation-${{ inputs.release_tag || github.ref_name }}
+  group: release-attestation-${{ github.ref_name }}
   cancel-in-progress: false   # release は途中中断 NG
 
 jobs:
+  resolve-release:
+    # GitHub-hosted, no secrets: decides whether THIS run releases, and which
+    # tag. Never moves an existing tag; never releases on an unknown delta.
+    name: Resolve the release tag (bump merge → create tag; tag push → pass through)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the version tag on a bump merge
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Resolve
+        id: resolve
+        run: |
+          set -euo pipefail
+          SHAPE='^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'
+          none() { echo "[resolve-release] $1"; echo "release_tag=" >> "$GITHUB_OUTPUT"; exit 0; }
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              TAG="${GITHUB_REF#refs/tags/}"
+              printf '%s' "$TAG" | grep -Eq "$SHAPE" || { echo "pushed tag '$TAG' is not a release version" >&2; exit 2; }
+              echo "[resolve-release] tag push $TAG"
+              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+            refs/heads/main) [ "$GITHUB_EVENT_NAME" = "push" ] || none "event $GITHUB_EVENT_NAME on main — preview only" ;;
+            *) none "event $GITHUB_EVENT_NAME on $GITHUB_REF — preview only" ;;
+          esac
+          # --- main push: release only when the version pin CHANGED in the pushed range ---
+          NODE_V="$(node -p "require('./node/package.json').version")"
+          PY_V="$(python3 -c "import tomllib; print(tomllib.load(open('python/pyproject.toml','rb'))['project']['version'])")"
+          for src in "node/VERSION:$(tr -d '[:space:]' < node/VERSION)" \
+                     "python/VERSION:$(tr -d '[:space:]' < python/VERSION)" \
+                     "node/src/index.ts:$(sed -nE 's/^export const VERSION = "([^"]+)";?$/\1/p' node/src/index.ts | head -1)" \
+                     "python/src/aegis_trust/__init__.py:$(sed -nE 's/^__version__ = "([^"]+)"$/\1/p' python/src/aegis_trust/__init__.py | head -1)" \
+                     "python/pyproject.toml:$PY_V"; do
+            [ "${src#*:}" = "$NODE_V" ] || { echo "version sources disagree: node/package.json=$NODE_V $src — not releasing" >&2; exit 2; }
+          done
+          TAG="v$NODE_V"
+          printf '%s' "$TAG" | grep -Eq "$SHAPE" || { echo "version pin '$NODE_V' is not a release version — not releasing" >&2; exit 2; }
+          BEFORE="${{ github.event.before }}"
+          PREV_V=""
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            PREV_V="$(git show "$BEFORE:node/package.json" 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || true)"
+          fi
+          # Peeled ref first (annotated tag → the commit it points at); a
+          # lightweight tag has no peeled entry, so fall back to the tag ref.
+          EXISTING="$(git ls-remote --tags origin "refs/tags/$TAG^{}" | cut -f1)"
+          [ -n "$EXISTING" ] || EXISTING="$(git ls-remote --tags origin "refs/tags/$TAG" | cut -f1)"
+          if [ -n "$EXISTING" ]; then
+            if [ "$EXISTING" = "$GITHUB_SHA" ]; then
+              # Resume: an earlier run of this same commit created the tag and
+              # was cancelled or failed downstream. Uploads are idempotent
+              # (npm: skip when the version exists; PyPI: skip-existing).
+              echo "[resolve-release] $TAG already points at $GITHUB_SHA — resuming the release"
+              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            none "$TAG already exists at $EXISTING (not this commit) — never moved"
+          fi
+          [ "$PREV_V" != "$NODE_V" ] || none "version pin unchanged ($NODE_V) by this push — nothing to release"
+          [ -n "$PREV_V" ] || none "cannot read the previous version pin (before=$BEFORE) — not releasing on an unknown delta"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "release $TAG (version bump $PREV_V → $NODE_V merged to main: $GITHUB_SHA)" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          echo "[resolve-release] version bump $PREV_V → $NODE_V merged; created $TAG at $GITHUB_SHA"
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+
   productization-gate:
     name: Productization Gate (9-verifier dogfood, fail-closed)
+    needs: [resolve-release]
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Verify quality gate present on the release runner
@@ -137,7 +213,7 @@ jobs:
           AEGIS_QUALITY_GATE_PATH: ${{ vars.AEGIS_QUALITY_GATE_PATH }}
         run: |
           set -euo pipefail
-          TAG="${{ inputs.release_tag }}"
+          TAG="${{ needs.resolve-release.outputs.release_tag }}"
           if [ -n "$TAG" ] && ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
             echo "release_tag '$TAG' is not a release version" >&2; exit 2
           fi
@@ -149,14 +225,15 @@ jobs:
   sbom-node:
     name: SBOM (Node — CycloneDX)
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
-    needs: [productization-gate]
+    needs: [resolve-release, productization-gate]
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node
@@ -192,14 +269,15 @@ jobs:
   sbom-python:
     name: SBOM (Python — CycloneDX)
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
-    needs: [productization-gate]
+    needs: [resolve-release, productization-gate]
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
     outputs:
       sbom-path: ${{ steps.gen.outputs.sbom-path }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node (for cdxgen)
@@ -248,13 +326,14 @@ jobs:
 
   collect-and-sign:
     name: Cosign sign SBOMs + Release attach
-    needs: [sbom-node, sbom-python]
+    needs: [resolve-release, sbom-node, sbom-python]
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
 
       - name: Download SBOMs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -305,10 +384,10 @@ jobs:
           retention-days: 90
 
       - name: Upload SBOMs + signatures to Release (tag push only)
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
+        if: needs.resolve-release.outputs.release_tag != ''
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          tag_name: ${{ needs.resolve-release.outputs.release_tag }}
           files: |
             sbom/*.cdx.json
             sbom/*.sig
@@ -337,13 +416,14 @@ jobs:
   #
   pack-and-sign-sdk:
     name: Pack + Cosign sign SDK artifacts (npm tarball + PyPI wheel/sdist)
-    needs: [sbom-node, sbom-python]
+    needs: [resolve-release, sbom-node, sbom-python]
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || needs.resolve-release.outputs.release_tag != ''
     runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.resolve-release.outputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node
@@ -448,10 +528,10 @@ jobs:
           retention-days: 90
 
       - name: Upload SDK artifacts + signatures to Release (tag push only)
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
+        if: needs.resolve-release.outputs.release_tag != ''
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          tag_name: ${{ needs.resolve-release.outputs.release_tag }}
           files: |
             sdk-artifacts/*.tgz
             sdk-artifacts/*.whl
@@ -481,7 +561,7 @@ jobs:
       #     publish step is byte-identical to the one cosign signed on
       #     self-hosted.
       - name: Upload .tgz for github-hosted publish job (Block C handoff)
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
+        if: needs.resolve-release.outputs.release_tag != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: npm-tarball-for-publish
@@ -490,7 +570,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload python wheel + sdist for github-hosted PyPI publish (Trusted Publisher handoff)
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
+        if: needs.resolve-release.outputs.release_tag != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: pypi-dist-for-publish
@@ -514,14 +594,14 @@ jobs:
   # github-hosted, no signing keys on github-hosted.
   publish-npm-trusted-publisher:
     name: npm publish (Trusted Publisher OIDC, github-hosted, --provenance)
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
-    needs: [pack-and-sign-sdk]
+    if: needs.resolve-release.outputs.release_tag != ''
+    needs: [resolve-release, pack-and-sign-sdk]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write   # OIDC for npm Trusted Publisher (token exchange only)
     env:
-      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
     steps:
       - name: Download cosign-signed .tgz from build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -570,6 +650,10 @@ jobs:
             ls -la
             exit 1
           fi
+          if npm view "aegis-trust@$VERSION" version >/dev/null 2>&1; then
+            echo "[npm] aegis-trust@$VERSION is already on the registry — skipping the upload (resume of an earlier run)"
+            exit 0
+          fi
           echo "[npm] publishing $TGZ with --tag $DIST_TAG --access public --provenance (OIDC, public repo)"
           npm publish "$TGZ" --tag "$DIST_TAG" --access public --provenance
 
@@ -613,14 +697,14 @@ jobs:
   # uploaded) — it does not leak anything.
   publish-pypi-trusted-publisher:
     name: PyPI publish (Trusted Publisher OIDC, github-hosted)
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
-    needs: [pack-and-sign-sdk]
+    if: needs.resolve-release.outputs.release_tag != ''
+    needs: [resolve-release, pack-and-sign-sdk]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write   # OIDC for PyPI Trusted Publisher (token exchange only)
     env:
-      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
     steps:
       - name: Download built wheel + sdist from build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -674,13 +758,13 @@ jobs:
   #   Until BOTH the token AND the repo variable exist, this job is a green no-op.
   notify-site-registry-sync:
     name: Notify the marketing-site repo to sync public registry versions
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
-    needs: [publish-npm-trusted-publisher, publish-pypi-trusted-publisher]
+    if: needs.resolve-release.outputs.release_tag != ''
+    needs: [resolve-release, publish-npm-trusted-publisher, publish-pypi-trusted-publisher]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # nothing in THIS repo is written; cross-repo auth is the secret
     env:
-      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
       # The site repo identity comes ONLY from a repository variable — never a
       # literal here — so this PUBLIC workflow does not name the private site repo.
       # The cross-repo dispatch token is injected per-step (not job-level env).

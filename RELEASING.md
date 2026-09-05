@@ -21,16 +21,19 @@ discipline and so that maintainers cut every release the same way.
    externally auditable from this repository** — adopters should rely on the
    externally verifiable layers listed below rather than on this statement.
 3. **Version bump merge → tag.** Merging the version-bump pull request to
-   `main` runs `release-on-main.yml`, which creates the `v<version>` tag at
-   the merged commit and calls the release workflow with it; a pushed `v*`
+   `main` runs the release workflow, whose first job (`resolve-release`,
+   GitHub-hosted) creates the `v<version>` tag at the merged commit when all
+   six version sources agree and the pin changed in that push; a pushed `v*`
    tag starts the same workflow directly (a manual `workflow_dispatch` is a
    preview run and never uploads). A merge that leaves the version pin
    unchanged never releases, and an existing tag is never moved; if the
-   called release fails after the tag exists, re-run that run's failed jobs
-   within a day or delete the tag and merge a new bump. Either way the tag
-   push (or call) starts the
-   `release-attestation` workflow; `pull_request_target` is never used in
-   release workflows. After the tag, the workflow runs its own in-repo
+   release fails after the tag exists, re-run that workflow run (the first
+   job resumes when the tag already points at the merged commit, and both
+   registry uploads skip a version that is already published). Either way
+   the release runs in the `release-attestation` workflow itself — it has no
+   `workflow_call` entry, so the registries' Trusted Publisher bindings see
+   that filename as the publishing identity; `pull_request_target` is never
+   used in release workflows. After the tag, the workflow runs its own in-repo
    quality gate job (`productization-gate`) in CI — a second, CI-side layer
    independent of the maintainer-side step above.
 4. **Sign + publish.** With all third-party actions pinned to 40-char commit
