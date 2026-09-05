@@ -49,10 +49,11 @@ discipline and so that maintainers cut every release the same way.
    write access (any ref that starts the workflow runs the workflow version
    stored at that ref), which is why `main` and `v*` tags are governed by
    repository rulesets rather than by the workflow itself. npm uploads are
-   serialised across runs (one running and one queued; a third release
-   arriving while two are in flight has its queued upload cancelled by
-   GitHub's one-running-one-pending rule and is re-run within the one-day
-   artifact retention), and `latest` never moves
+   serialised across runs (one running and one queued: when release A is
+   uploading and B is queued, a third release C displaces B — B's queued npm
+   upload is cancelled while its PyPI upload, outside that queue, may already
+   have succeeded — so it is B's workflow run that is re-run, within the
+   one-day artifact retention), and `latest` never moves
    backwards: a stable version published while a higher one already exists
    lands under the `previous` dist-tag, and the job stops rather than guess
    when the registry's version list cannot be read. After the tag, the workflow runs its own in-repo

@@ -664,9 +664,10 @@ jobs:
     concurrency:
       # Serialise npm uploads ACROSS runs: the dist-tag decision below reads
       # the registry, and two overlapping release runs must not both read
-      # before either writes. Never cancelled; a third queued upload would
-      # replace the second pending one — that run fails here and its re-run
-      # resumes (uploads are idempotent).
+      # before either writes. The running upload is never cancelled; when a
+      # third release arrives, GitHub cancels the PENDING (second) one — that
+      # run's job ends as cancelled and its re-run resumes (uploads are
+      # idempotent; its PyPI upload may already have succeeded).
       group: aegis-trust-npm-upload
       cancel-in-progress: false
     if: needs.resolve-release.outputs.release_tag != ''
