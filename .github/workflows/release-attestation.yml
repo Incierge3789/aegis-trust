@@ -120,8 +120,11 @@ concurrency:
 jobs:
   resolve-release:
     # GitHub-hosted, no secrets: decides whether THIS run releases, and which
-    # tag. Never moves an existing tag; never releases on an unknown delta.
+    # tag. Never moves an existing tag; releases a version pin on main that
+    # has no tag yet; a changed pin colliding with a tag elsewhere is red.
     name: Resolve the release tag (bump merge → create tag; tag push → pass through)
+    # Defence in depth: a dispatch from any other ref runs nothing at all.
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create the version tag on a bump merge
@@ -180,21 +183,34 @@ jobs:
             echo "[resolve-release] $TAG already points at $GITHUB_SHA — resuming the release"
             echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          [ -n "$PREV_V" ] || none "cannot read the previous version pin (before=$BEFORE) — not releasing on an unknown delta"
-          [ "$PREV_V" != "$NODE_V" ] || none "version pin unchanged ($NODE_V) by this push — nothing to release"
           if [ -n "$EXISTING" ]; then
-            # A real bump whose tag already exists at ANOTHER commit is an
-            # error, not a quiet skip: a green run here would look like a
-            # release that never happened. A tag is never moved.
-            echo "version bump $PREV_V → $NODE_V merged at $GITHUB_SHA, but $TAG already exists at $EXISTING — not this commit." >&2
-            echo "A tag is never moved. Merge a new version, or delete the stale tag and re-run this workflow run." >&2
-            exit 2
+            # The pin's tag already exists at ANOTHER commit. A tag is never
+            # moved. If this push CHANGED the pin, that is an error, not a
+            # quiet skip (a green run here would look like a release that
+            # never happened); otherwise it is the ordinary state after a
+            # release and there is nothing to do.
+            if [ -n "$PREV_V" ] && [ "$PREV_V" != "$NODE_V" ]; then
+              echo "version bump $PREV_V → $NODE_V merged at $GITHUB_SHA, but $TAG already exists at $EXISTING — not this commit." >&2
+              echo "A tag is never moved. Merge a new version, or delete the stale tag and re-run this workflow run." >&2
+              exit 2
+            fi
+            none "$TAG already exists at $EXISTING and the pin did not change in this push ($NODE_V) — nothing to release"
+          fi
+          # No tag for the pin anywhere: main carries an UNRELEASED version.
+          # Release it at this commit. The missing tag is the signal, not the
+          # diff, so a push whose range cannot be read (force-push, first
+          # push) still releases, and a deliberately deleted tag means
+          # "re-release at the next push to main".
+          if [ -n "$PREV_V" ] && [ "$PREV_V" != "$NODE_V" ]; then
+            echo "[resolve-release] version bump $PREV_V → $NODE_V merged at $GITHUB_SHA"
+          else
+            echo "[resolve-release] main carries $NODE_V with no $TAG on origin (previous pin: ${PREV_V:-unreadable}) — releasing it at $GITHUB_SHA"
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "release $TAG (version bump $PREV_V → $NODE_V merged to main: $GITHUB_SHA)" "$GITHUB_SHA"
+          git tag -a "$TAG" -m "release $TAG (version $NODE_V on main at $GITHUB_SHA; previous pin: ${PREV_V:-unreadable})" "$GITHUB_SHA"
           git push origin "refs/tags/$TAG"
-          echo "[resolve-release] version bump $PREV_V → $NODE_V merged; created $TAG at $GITHUB_SHA"
+          echo "[resolve-release] created $TAG at $GITHUB_SHA"
           echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
 
   productization-gate:
@@ -436,9 +452,9 @@ jobs:
   #   - cosign sign-blob keyless で 3 artifact (tgz + whl + sdist) を署名
   #   - upload signed bundle + release attach (release run 時: tag push / bump merge)
   #
-  # Not yet (sprint_011+):
-  #   - npm publish --provenance flag (publish workflow 統合、 Stage A 再開後)
-  #   - PyPI trusted publisher attestation (PyPI 側設定 + workflow 拡張)
+  # Done since: npm publish --provenance (Block C, publish-npm-trusted-publisher)
+  #   and PyPI PEP 740 attestations (publish-pypi-trusted-publisher).
+  # Not yet:
   #   - Reproducible build verification
   #
   pack-and-sign-sdk:
@@ -622,6 +638,14 @@ jobs:
   # github-hosted, no signing keys on github-hosted.
   publish-npm-trusted-publisher:
     name: npm publish (Trusted Publisher OIDC, github-hosted, --provenance)
+    concurrency:
+      # Serialise npm uploads ACROSS runs: the dist-tag decision below reads
+      # the registry, and two overlapping release runs must not both read
+      # before either writes. Never cancelled; a third queued upload would
+      # replace the second pending one — that run fails here and its re-run
+      # resumes (uploads are idempotent).
+      group: aegis-trust-npm-upload
+      cancel-in-progress: false
     if: needs.resolve-release.outputs.release_tag != ''
     needs: [resolve-release, pack-and-sign-sdk]
     runs-on: ubuntu-latest
@@ -674,16 +698,19 @@ jobs:
             # Two release runs for different commits may overlap (they never
             # share a concurrency group). `latest` must never move backwards:
             # a stable version that is not the highest one on the registry is
-            # published under `previous` instead. (If the registry lookup
-            # fails, the version is treated as the newest — today's behaviour.)
-            NEWEST="$(npm view aegis-trust versions --json 2>/dev/null | node -e '
+            # published under `previous` instead. If the registry cannot be
+            # read, the job stops (never guesses) and a re-run resumes it.
+            VERSIONS_JSON="$(npm view aegis-trust versions --json)" || {
+              echo "[npm] cannot read the registry's version list — refusing to guess the dist-tag (re-run when the registry answers)" >&2; exit 2; }
+            NEWEST="$(printf '%s' "$VERSIONS_JSON" | node -e '
               const mine = process.argv[1];
-              let vs = []; try { vs = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch {}
+              const vs = JSON.parse(require("fs").readFileSync(0, "utf8"));
               const stable = (Array.isArray(vs) ? vs : [vs]).concat([mine]).filter(v => /^\d+\.\d+\.\d+$/.test(v));
               const key = v => v.split(".").map(Number);
               stable.sort((a, b) => { const x = key(a), y = key(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); });
               process.stdout.write(stable.pop() || mine);
             ' "$VERSION")"
+            [ -n "$NEWEST" ] || { echo "[npm] could not parse the registry's version list — refusing to guess the dist-tag" >&2; exit 2; }
             if [ "$NEWEST" != "$VERSION" ]; then
               DIST_TAG="previous"
               echo "[npm] $NEWEST is already the highest stable version on the registry → publishing $VERSION with --tag previous (latest never moves backwards)"
@@ -695,6 +722,7 @@ jobs:
             ls -la
             exit 1
           fi
+          echo "DIST_TAG=$DIST_TAG" >> "$GITHUB_ENV"
           if npm view "aegis-trust@$VERSION" version >/dev/null 2>&1; then
             echo "[npm] aegis-trust@$VERSION is already on the registry — skipping the upload (resume of an earlier run)"
             exit 0
@@ -717,7 +745,12 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then
             echo "[npm] pre-release $VERSION → latest tag intentionally not promoted"
           else
-            echo "[npm] stable $VERSION → latest tag set by npm publish above"
+            TAG_USED="${DIST_TAG:-latest}"
+            POINTS="$(npm view aegis-trust "dist-tags.$TAG_USED" 2>/dev/null || true)"
+            if [ "$POINTS" != "$VERSION" ]; then
+              echo "[npm] dist-tag $TAG_USED points at ${POINTS:-nothing}, expected $VERSION" >&2; exit 1
+            fi
+            echo "[npm] stable $VERSION → dist-tag $TAG_USED verified on the registry"
           fi
 
   # === PyPI Trusted Publisher publish job (github-hosted) =============================
