@@ -20,7 +20,11 @@ discipline and so that maintainers cut every release the same way.
    other criteria. This step is part of our internal process and is **not
    externally auditable from this repository** — adopters should rely on the
    externally verifiable layers listed below rather than on this statement.
-3. **Tag push.** A `v*` tag (or a manual `workflow_dispatch`) starts the
+3. **Version bump merge → tag.** Merging the version-bump pull request to
+   `main` runs `release-on-main.yml`, which creates the `v<version>` tag at
+   the merged commit and calls the release workflow with it; a pushed `v*`
+   tag starts the same workflow directly (a manual `workflow_dispatch` is a
+   preview run and never uploads). Either way the tag push (or call) starts the
    `release-attestation` workflow; `pull_request_target` is never used in
    release workflows. After the tag, the workflow runs its own in-repo
    quality gate job (`productization-gate`) in CI — a second, CI-side layer

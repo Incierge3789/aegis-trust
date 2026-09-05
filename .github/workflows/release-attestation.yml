@@ -6,7 +6,8 @@
 #
 # === SAFETY INVARIANTS (must hold) ===
 #
-#   1. Trigger は workflow_dispatch (manual) または tag push (`v*`) のみ。
+#   1. Trigger は workflow_dispatch (manual, preview only) / tag push (`v*`) /
+#      release-on-main.yml からの workflow_call (`release_tag`) の 3 つ。
 #      pull_request_target を **使わない** (token theft 攻撃面)。
 #   2. permissions に `id-token: write` を持つ — Sigstore keyless signing (cosign)
 #      と GitHub native build provenance (actions/attest-build-provenance) のため。
@@ -70,6 +71,16 @@ on:
         description: 'Tag to attest (omit to attest current commit as preview)'
         required: false
         type: string
+  # Called by release-on-main.yml after it has created the version tag for a
+  # version bump merged to main. `release_tag` is the ONLY input that unlocks
+  # the registry upload jobs on the call path (workflow_dispatch has no such
+  # input, so a manual dispatch stays a preview run exactly as before).
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Existing v* tag to build, sign, attach and upload (set by release-on-main)'
+        required: true
+        type: string
   push:
     tags:
       - 'v*'
@@ -80,7 +91,7 @@ permissions:
   attestations: write   # GitHub native attestation API
 
 concurrency:
-  group: release-attestation-${{ github.ref }}
+  group: release-attestation-${{ inputs.release_tag || github.ref }}
   cancel-in-progress: false   # release は途中中断 NG
 
 jobs:
@@ -91,6 +102,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Verify quality gate present on the release runner
@@ -124,7 +136,8 @@ jobs:
           AEGIS_QUALITY_GATE_PATH: ${{ vars.AEGIS_QUALITY_GATE_PATH }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
+          TAG="${{ inputs.release_tag }}"
+          [ -n "$TAG" ] || TAG="${GITHUB_REF#refs/tags/}"
           [ -n "$TAG" ] || TAG="${{ inputs.tag }}"
           [ -n "$TAG" ] || TAG="manual-dispatch"
           bash "${AEGIS_QUALITY_GATE_PATH:?repository variable AEGIS_QUALITY_GATE_PATH is not set}" "$TAG" "$GITHUB_WORKSPACE"
@@ -139,6 +152,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node
@@ -181,6 +195,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node (for cdxgen)
@@ -234,6 +249,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Download SBOMs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -284,9 +301,10 @@ jobs:
           retention-days: 90
 
       - name: Upload SBOMs + signatures to Release (tag push only)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.release_tag != ''
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
             sbom/*.cdx.json
             sbom/*.sig
@@ -321,6 +339,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node
@@ -425,9 +444,10 @@ jobs:
           retention-days: 90
 
       - name: Upload SDK artifacts + signatures to Release (tag push only)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.release_tag != ''
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8  # v2.0.9
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
             sdk-artifacts/*.tgz
             sdk-artifacts/*.whl
@@ -457,7 +477,7 @@ jobs:
       #     publish step is byte-identical to the one cosign signed on
       #     self-hosted.
       - name: Upload .tgz for github-hosted publish job (Block C handoff)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.release_tag != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: npm-tarball-for-publish
@@ -466,7 +486,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload python wheel + sdist for github-hosted PyPI publish (Trusted Publisher handoff)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.release_tag != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: pypi-dist-for-publish
@@ -490,12 +510,14 @@ jobs:
   # github-hosted, no signing keys on github-hosted.
   publish-npm-trusted-publisher:
     name: npm publish (Trusted Publisher OIDC, github-hosted, --provenance)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.release_tag != ''
     needs: [pack-and-sign-sdk]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write   # OIDC for npm Trusted Publisher (token exchange only)
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - name: Download cosign-signed .tgz from build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -530,7 +552,7 @@ jobs:
         working-directory: tarball
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           if [[ "$VERSION" == *-* ]]; then
             DIST_TAG="rc"
             echo "[npm] pre-release version $VERSION → publishing with --tag rc"
@@ -556,7 +578,7 @@ jobs:
         # The bare-install -> stable transition lands at the v1.0 GA cut.
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           echo "[npm] post-publish dist-tag state:"
           npm dist-tag ls aegis-trust
           if [[ "$VERSION" == *-* ]]; then
@@ -587,12 +609,14 @@ jobs:
   # uploaded) — it does not leak anything.
   publish-pypi-trusted-publisher:
     name: PyPI publish (Trusted Publisher OIDC, github-hosted)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.release_tag != ''
     needs: [pack-and-sign-sdk]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write   # OIDC for PyPI Trusted Publisher (token exchange only)
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - name: Download built wheel + sdist from build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -646,12 +670,13 @@ jobs:
   #   Until BOTH the token AND the repo variable exist, this job is a green no-op.
   notify-site-registry-sync:
     name: Notify the marketing-site repo to sync public registry versions
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.release_tag != ''
     needs: [publish-npm-trusted-publisher, publish-pypi-trusted-publisher]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # nothing in THIS repo is written; cross-repo auth is the secret
     env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
       # The site repo identity comes ONLY from a repository variable — never a
       # literal here — so this PUBLIC workflow does not name the private site repo.
       # The cross-repo dispatch token is injected per-step (not job-level env).
@@ -692,7 +717,7 @@ jobs:
         # legal pre-release spellings.
         run: |
           set -euo pipefail
-          NPM_VERSION="${GITHUB_REF_NAME#v}"            # e.g. 0.9.0-rc9 or 1.0.0
+          NPM_VERSION="${RELEASE_TAG#v}"            # e.g. 0.9.0-rc9 or 1.0.0
           echo "[notify] confirming ${PACKAGE} npm=${NPM_VERSION} on npm + PyPI (canonicalized)"
 
           # Canonical PyPI spellings for this version (pure bash + sed — no python
@@ -743,7 +768,7 @@ jobs:
           # Final-attempt diagnostics: which registry is unreachable vs simply not-yet-present.
           NPM_CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${PACKAGE}" || echo 000)"
           PYPI_CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/${PACKAGE}/json" || echo 000)"
-          echo "[notify] REGISTRY-CONFIRM TIMEOUT for ${GITHUB_REF_NAME}: npm_ok=$NPM_OK (http $NPM_CODE) pypi_ok=$PYPI_OK (http $PYPI_CODE)." >&2
+          echo "[notify] REGISTRY-CONFIRM TIMEOUT for ${RELEASE_TAG}: npm_ok=$NPM_OK (http $NPM_CODE) pypi_ok=$PYPI_OK (http $PYPI_CODE)." >&2
           echo "[notify] Packages may still be propagating, or a registry is degraded. Re-run THIS job to retry." >&2
           exit 1
 
@@ -753,7 +778,7 @@ jobs:
           GH_TOKEN: ${{ secrets.SITE_SYNC_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
-          REASON="aegis-trust ${GITHUB_REF_NAME} published (npm+PyPI confirmed live; run ${GITHUB_RUN_ID})"
+          REASON="aegis-trust ${RELEASE_TAG} published (npm+PyPI confirmed live; run ${GITHUB_RUN_ID})"
           echo "[notify] dispatching ${SITE_WORKFLOW} on ${SITE_REPO}"
           if gh workflow run "${SITE_WORKFLOW}" -R "${SITE_REPO}" --ref main -f reason="${REASON}"; then
             echo "[notify] site registry-sync dispatched. The site re-fetches live registries itself;"
