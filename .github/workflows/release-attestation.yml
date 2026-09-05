@@ -31,6 +31,13 @@
 #      concrete runner identity is not committed to source. Only ci.yml Block A
 #      (read-only) is exempt and may use ubuntu-latest.
 #
+#   6. Runner trust boundary = repository WRITE access. Any ref that can start
+#      this workflow (a push to main, a v* tag, a dispatch) runs the workflow
+#      VERSION stored at that ref, so a write-capable actor can always bring
+#      their own workflow to the self-hosted runner. The dispatch ref guard on
+#      the self-hosted jobs prevents mistakes, not adversaries; the control is
+#      repository rulesets on `main` (pull-request only) and on `v*` tags
+#      (restricted creation) — owner-side settings this file cannot enforce.
 # === OUTPUT (sprint_009 closure 要件) ===
 #
 #   - node SBOM (CycloneDX JSON) attached to release
@@ -98,14 +105,16 @@ permissions:
   attestations: write   # GitHub native attestation API
 
 concurrency:
-  # Keyed by COMMIT, not by ref: GitHub keeps one running + one pending run per
-  # group and a newer pending run replaces an older pending one even with
-  # cancel-in-progress: false. A group per ref would let an ordinary main push
-  # cancel a queued version-bump run, whose release could then never be
-  # re-detected (the next run's `before` already carries the bump). Per commit,
-  # only a tag push of the very same commit shares a group with the main-push
-  # run of that commit — the one pair that must not run twice at once.
-  group: release-attestation-${{ github.sha }}
+  # Push runs are keyed by COMMIT, not by ref: GitHub keeps one running + one
+  # pending run per group and a newer pending run replaces an older pending
+  # one even with cancel-in-progress: false. A group per ref would let an
+  # ordinary main push cancel a queued version-bump run, whose release could
+  # then never be re-detected (the next run's `before` already carries the
+  # bump). Per commit, only a tag push of the very same commit shares a group
+  # with the main-push run of that commit — the one pair that must not run
+  # twice at once. A workflow_dispatch preview gets a group of its own
+  # (run_id) so no preview can ever displace a pending release.
+  group: release-attestation-${{ github.event_name == 'push' && github.sha || github.run_id }}
   cancel-in-progress: false   # release は途中中断 NG
 
 jobs:
@@ -132,6 +141,9 @@ jobs:
           none() { echo "[resolve-release] $1"; echo "release_tag=" >> "$GITHUB_OUTPUT"; exit 0; }
           case "$GITHUB_REF" in
             refs/tags/v*)
+              # Only a PUSHED tag releases; a workflow_dispatch that selects a
+              # tag ref is a preview like any other dispatch (never uploads).
+              [ "$GITHUB_EVENT_NAME" = "push" ] || none "event $GITHUB_EVENT_NAME on $GITHUB_REF — preview only"
               TAG="${GITHUB_REF#refs/tags/}"
               printf '%s' "$TAG" | grep -Eq "$SHAPE" || { echo "pushed tag '$TAG' is not a release version" >&2; exit 2; }
               echo "[resolve-release] tag push $TAG"
@@ -659,6 +671,23 @@ jobs:
           else
             DIST_TAG="latest"
             echo "[npm] stable version $VERSION → publishing with --tag latest"
+            # Two release runs for different commits may overlap (they never
+            # share a concurrency group). `latest` must never move backwards:
+            # a stable version that is not the highest one on the registry is
+            # published under `previous` instead. (If the registry lookup
+            # fails, the version is treated as the newest — today's behaviour.)
+            NEWEST="$(npm view aegis-trust versions --json 2>/dev/null | node -e '
+              const mine = process.argv[1];
+              let vs = []; try { vs = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch {}
+              const stable = (Array.isArray(vs) ? vs : [vs]).concat([mine]).filter(v => /^\d+\.\d+\.\d+$/.test(v));
+              const key = v => v.split(".").map(Number);
+              stable.sort((a, b) => { const x = key(a), y = key(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); });
+              process.stdout.write(stable.pop() || mine);
+            ' "$VERSION")"
+            if [ "$NEWEST" != "$VERSION" ]; then
+              DIST_TAG="previous"
+              echo "[npm] $NEWEST is already the highest stable version on the registry → publishing $VERSION with --tag previous (latest never moves backwards)"
+            fi
           fi
           TGZ="aegis-trust-${VERSION}.tgz"
           if [ ! -f "$TGZ" ]; then

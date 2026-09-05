@@ -29,15 +29,21 @@ discipline and so that maintainers cut every release the same way.
    preview run and never uploads). A merge that leaves the version pin
    unchanged never releases, and an existing tag is never moved: a bump whose
    tag already exists at another commit fails the run (red, not a quiet
-   skip). Recovery is always a re-run of the bump merge's own workflow run
-   (its pushed range is preserved): if the release failed after the tag
+   skip). Recovery is a re-run of the bump merge's own workflow run (its
+   pushed range is preserved) — in the collision case only after the stale
+   tag is deleted or a new version is merged: if the release failed after the tag
    exists, the first job resumes and both registry uploads skip a version
    that is already published; if the first job itself failed before the tag
    existed, the re-run creates it. Either way
    the release runs in the `release-attestation` workflow itself — it has no
    `workflow_call` entry, so the registries' Trusted Publisher bindings see
    that filename as the publishing identity; `pull_request_target` is never
-   used in release workflows. After the tag, the workflow runs its own in-repo
+   used in release workflows. The self-hosted release runner's trust boundary
+   is repository write access (any ref that starts the workflow runs the
+   workflow version stored at that ref), which is why `main` and `v*` tags
+   are governed by repository rulesets rather than by the workflow itself.
+   On npm, `latest` never moves backwards: a stable version published while a
+   higher one already exists lands under the `previous` dist-tag. After the tag, the workflow runs its own in-repo
    quality gate job (`productization-gate`) in CI — a second, CI-side layer
    independent of the maintainer-side step above.
 4. **Sign + publish.** With all third-party actions pinned to 40-char commit
