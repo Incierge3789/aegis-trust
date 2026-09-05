@@ -498,8 +498,9 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     two-way: ``ledgered=True`` must carry non-blank ``decision_id`` /
     ``receipt_event_id`` (the claim is only as good as the ids that make it
     checkable), and ``ledgered=False`` is only the hard-fault form —
-    ``outcome`` BLOCKED, blank ids, no ``fragment_tags`` (top level or in any
-    partial), no ``allowed_fields``, not ``replayed``;
+    ``outcome`` BLOCKED, blank ids, no composed ``fragment_tags``, no
+    ``allowed_fields``, not ``replayed`` (the trace ``parts`` is preserved
+    verbatim as the diagnostic of what was refused, tags and all);
     an executable outcome or a chain pointer on an unledgered decision is
     refused. Unknown members are ignored (the contract is additive-only). The returned view holds copies —
     mutating the input afterwards does not change it.
@@ -558,6 +559,10 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
             )
         if replayed:
             raise _decision_shape_error("'replayed' set on an unledgered decision")
+        # Blank means blank: a whitespace-only id is normalised so a caller's
+        # truthiness check cannot read it as a chain pointer.
+        decision_id = ""
+        receipt_event_id = ""
     allowed_fields = _required_str_list(decision, "allowed_fields", where)
     withheld_fields = _required_str_list(decision, "withheld_fields", where)
     fragment_tags = _required_labels(decision, "fragment_tags", where)
@@ -570,15 +575,13 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     parts_raw = decision.get("parts")
     if not isinstance(parts_raw, list):
         raise _decision_shape_error("'parts' missing or not a list")
+    # The trace is NOT constrained on a hard fault: the authority keeps the
+    # partials the boundaries had already composed (with their own tags and
+    # allow sets) as the value-free diagnostic of what was refused, and clears
+    # only the composed result. Refusing tags inside the trace would reject a
+    # legitimate ledger-outage response (cross-review round 4, codex, from
+    # the authority's hard-fault constructor).
     parts = tuple(_parse_part(p, i) for i, p in enumerate(parts_raw))
-    if not ledgered:
-        # "Releases no tags" holds one level down too: a partial cannot carry
-        # tags the composed (unwitnessed) decision is not allowed to carry.
-        for i, part in enumerate(parts):
-            if part.fragment_tags:
-                raise _decision_shape_error(
-                    f"'parts[{i}]' 'fragment_tags' present on an unledgered decision"
-                )
     return AuthorityDecisionView(
         outcome=outcome,
         ledgered=ledgered,

@@ -1,5 +1,5 @@
 {
-  "$comment": "AI-native `decision` object reader corpus, v0 -- the typed, fail-closed view of the shared decision object the AI-native wire returns (POST /tool-call, POST /stream/open; contract AI_NATIVE_V1_CONTRACT.md, additive-only).\n\nWHAT THIS CORPUS PINS. Both SDKs expose the SERVER-DERIVED `fragment_tags[]`, the attribution trace `parts[]` (per-boundary field names and labels plus the response-surface free text `reason_label`), and the chain pointers `decision_id` / `receipt_event_id` / `ledgered` through one reader with one refusal code. The reader never defaults a field the wire did not send: an absent `fragment_tags` is a malformed decision, not an empty tag set, because a defaulted [] would claim 'no tags released' for a plane that never said so (the same class of silent no-op the request side is being held back to avoid).\n\nTHE MUTANTS THIS CORPUS EXISTS TO KILL. (1) A reader that defaults absent members and turns a malformed object into a clean-looking view. (2) A tag or a partial's tag outside the value-free label SHAPE reaching the surface (INV-6; the gate is the receipt verifier's shape rule — ASCII label charset, length cap — not a semantic classifier: tags are server-derived labels and a label-shaped string is surfaced as-is). (3) A cross-language number gap -- a boolean accepted as an integer in one SDK and refused in the other, a whole-number float (3.0) refused by one and accepted by the other, or a value beyond 2^53-1 rounded by one and kept exact by the other. (4) Passing the whole response body where the `decision` member was expected and getting an empty view instead of an error. (5) An unledgered decision that is not the BLOCKED hard-fault form -- an executable outcome, a chain pointer, released tags or a replay flag on a decision the chain never witnessed.\n\nEach invalid vector pins the refusal code AND a message fragment so both SDKs name the same member in the same words.",
+  "$comment": "AI-native `decision` object reader corpus, v0 -- the typed, fail-closed view of the shared decision object the AI-native wire returns (POST /tool-call, POST /stream/open; contract AI_NATIVE_V1_CONTRACT.md, additive-only).\n\nWHAT THIS CORPUS PINS. Both SDKs expose the SERVER-DERIVED `fragment_tags[]`, the attribution trace `parts[]` (per-boundary field names and labels plus the response-surface free text `reason_label`), and the chain pointers `decision_id` / `receipt_event_id` / `ledgered` through one reader with one refusal code. The reader never defaults a field the wire did not send: an absent `fragment_tags` is a malformed decision, not an empty tag set, because a defaulted [] would claim 'no tags released' for a plane that never said so (the same class of silent no-op the request side is being held back to avoid).\n\nTHE MUTANTS THIS CORPUS EXISTS TO KILL. (1) A reader that defaults absent members and turns a malformed object into a clean-looking view. (2) A tag or a partial's tag outside the value-free label SHAPE reaching the surface (INV-6; the gate is the receipt verifier's shape rule — ASCII label charset, length cap — not a semantic classifier: tags are server-derived labels and a label-shaped string is surfaced as-is). (3) A cross-language number gap -- a boolean accepted as an integer in one SDK and refused in the other, a whole-number float (3.0) refused by one and accepted by the other, or a value beyond 2^53-1 rounded by one and kept exact by the other. (4) Passing the whole response body where the `decision` member was expected and getting an empty view instead of an error. (5) An unledgered decision that is not the BLOCKED hard-fault form -- an executable outcome, a chain pointer, composed tags, an allow set or a replay flag on a decision the chain never witnessed. The trace `parts[]` is exempt: the authority preserves the pre-fault partials verbatim as the diagnostic of what was refused.\n\nEach invalid vector pins the refusal code AND a message fragment so both SDKs name the same member in the same words.",
   "version": "v0",
   "recorded_against": {
     "wire_contract": "AI-native v1 shared `decision` object (frozen 2026-07-03, additive-only)",
@@ -486,6 +486,71 @@
         "fragment_tags": []
       },
       "why": "The trace MAY explain a hard fault (which boundary, why, what was withheld) as long as it releases no tags and the decision grants nothing."
+    },
+    {
+      "id": "unledgered_hard_fault_preserves_trace_tags",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "",
+        "fragment_tags": [],
+        "parts": [
+          {
+            "boundary": "data",
+            "outcome": "BLOCKED",
+            "reason_code": "ledger_unavailable",
+            "reason_label": "The decision could not be witnessed.",
+            "allowed_fields": [],
+            "withheld_fields": [],
+            "fragment_tags": [
+              "pii:contact"
+            ]
+          }
+        ],
+        "ledgered": false
+      },
+      "expect": {
+        "outcome": "BLOCKED",
+        "ledgered": false,
+        "fragment_tags": [],
+        "parts_boundaries": [
+          "data"
+        ]
+      },
+      "why": "On a ledger refusal the authority clears only the COMPOSED result (outcome BLOCKED, blank ids, no composed tags, no allow set) and keeps the partials the boundaries had already produced, tags and all, as the diagnostic of what was refused. A reader that refused trace tags here would throw exactly during a ledger outage (round 4, codex, read from the authority's hard-fault constructor; round 3 had it wrong)."
+    },
+    {
+      "id": "unledgered_whitespace_ids_normalised",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "ledger_unavailable",
+        "reason_label": "The decision could not be witnessed.",
+        "allowed_fields": [],
+        "withheld_fields": [],
+        "decision_id": "   ",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": " ",
+        "fragment_tags": [],
+        "parts": [],
+        "ledgered": false
+      },
+      "expect": {
+        "ledgered": false,
+        "decision_id": "",
+        "receipt_event_id": ""
+      },
+      "why": "Blank means blank: whitespace-only ids on the hard-fault form are accepted (they are blank) and normalised to the empty string so a truthiness check cannot read them as chain pointers."
     }
   ],
   "invalid": [
@@ -3055,40 +3120,6 @@
       "expect_error": "aegis.aiNative.decisionShape",
       "expect_detail": "'policy_digest' not a string",
       "why": "Same for the digest: present-but-null is refused, absent is allowed."
-    },
-    {
-      "id": "unledgered_with_part_fragment_tags",
-      "decision": {
-        "outcome": "BLOCKED",
-        "verb": "block",
-        "boundary": "data",
-        "reason_code": "ledger_unavailable",
-        "reason_label": "The decision could not be witnessed.",
-        "allowed_fields": [],
-        "withheld_fields": [],
-        "decision_id": "",
-        "policy_generation": 3,
-        "policy_digest": "sha256:9f2c1d0e",
-        "receipt_event_id": "",
-        "fragment_tags": [],
-        "parts": [
-          {
-            "boundary": "data",
-            "outcome": "BLOCKED",
-            "reason_code": "ledger_unavailable",
-            "reason_label": "The decision could not be witnessed.",
-            "allowed_fields": [],
-            "withheld_fields": [],
-            "fragment_tags": [
-              "pii:contact"
-            ]
-          }
-        ],
-        "ledgered": false
-      },
-      "expect_error": "aegis.aiNative.decisionShape",
-      "expect_detail": "'parts[0]' 'fragment_tags' present on an unledgered decision",
-      "why": "'Releases no tags' holds inside the trace too: a partial on an unwitnessed decision cannot carry tags the composed decision may not carry (Review round 3, cursor P1)."
     },
     {
       "id": "unledgered_with_allowed_fields",

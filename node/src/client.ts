@@ -436,8 +436,9 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * when false). The returned view is deep-frozen. The chain witness is two-way: `ledgered: true` must carry
  * non-blank `decision_id` / `receipt_event_id` (the claim is only as good as
  * the ids that make it checkable), and `ledgered: false` is only the
- * hard-fault form — `outcome` BLOCKED, blank ids, no `fragment_tags` (top level
- * or in any partial), no `allowed_fields`, not `replayed`; an executable outcome or a chain pointer on an unledgered
+ * hard-fault form — `outcome` BLOCKED, blank ids, no composed `fragment_tags`,
+ * no `allowed_fields`, not `replayed` (the trace `parts` is preserved verbatim
+ * as the diagnostic of what was refused, tags and all); an executable outcome or a chain pointer on an unledgered
  * decision is refused. Unknown members are ignored (the contract is
  * additive-only). The returned view is deep-frozen. A decision with `ledgered: true`
  * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
@@ -458,8 +459,8 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   if (typeof ledgered !== "boolean") {
     throw decisionShapeError("'ledgered' missing or not a boolean");
   }
-  const decision_id = requiredStr(o, "decision_id", where);
-  const receipt_event_id = requiredStr(o, "receipt_event_id", where);
+  let decision_id = requiredStr(o, "decision_id", where);
+  let receipt_event_id = requiredStr(o, "receipt_event_id", where);
   const reason_code = requiredStr(o, "reason_code", where);
   const reason_label = requiredStr(o, "reason_label", where);
   const verb = requiredStr(o, "verb", where);
@@ -499,6 +500,10 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
       throw decisionShapeError("'receipt_event_id' present on an unledgered decision");
     }
     if (replayed) throw decisionShapeError("'replayed' set on an unledgered decision");
+    // Blank means blank: a whitespace-only id is normalised so a caller's
+    // truthiness check cannot read it as a chain pointer.
+    decision_id = "";
+    receipt_event_id = "";
   }
   const allowed_fields = requiredStrList(o, "allowed_fields", where);
   const withheld_fields = requiredStrList(o, "withheld_fields", where);
@@ -515,15 +520,12 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   // hand back an unvalidated hole where a partial should be.
   const partsOut: BoundaryPartialView[] = [];
   for (let i = 0; i < partsRaw.length; i++) partsOut.push(parsePart(partsRaw[i], i));
-  if (!ledgered) {
-    // "Releases no tags" holds one level down too: a partial cannot carry
-    // tags the composed (unwitnessed) decision is not allowed to carry.
-    for (let i = 0; i < partsOut.length; i++) {
-      if (partsOut[i].fragment_tags.length > 0) {
-        throw decisionShapeError(`'parts[${i}]' 'fragment_tags' present on an unledgered decision`);
-      }
-    }
-  }
+  // The trace is NOT constrained on a hard fault: the authority keeps the
+  // partials the boundaries had already composed (with their own tags and
+  // allow sets) as the value-free diagnostic of what was refused, and clears
+  // only the composed result. Refusing tags inside the trace would reject a
+  // legitimate ledger-outage response (cross-review round 4, codex, from the
+  // authority's hard-fault constructor).
   const parts = Object.freeze(partsOut);
   return Object.freeze({
     outcome,
