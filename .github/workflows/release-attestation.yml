@@ -281,7 +281,9 @@ jobs:
           if [ -n "$TAG" ] && ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
             echo "release_tag '$TAG' is not a release version" >&2; exit 2
           fi
-          [ -n "$TAG" ] || TAG="${GITHUB_REF#refs/tags/}"
+          # Gate label only. A branch ref does not start with refs/tags/, so
+          # strip only when it is a tag ref; otherwise use the dispatch label.
+          if [ -z "$TAG" ]; then case "$GITHUB_REF" in refs/tags/*) TAG="${GITHUB_REF#refs/tags/}" ;; esac; fi
           [ -n "$TAG" ] || TAG="${{ inputs.tag }}"
           [ -n "$TAG" ] || TAG="manual-dispatch"
           bash "${AEGIS_QUALITY_GATE_PATH:?repository variable AEGIS_QUALITY_GATE_PATH is not set}" "$TAG" "$GITHUB_WORKSPACE"
