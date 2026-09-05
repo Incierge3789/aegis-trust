@@ -315,6 +315,14 @@ _AUTHORITY_OUTCOME_SET = frozenset(AUTHORITY_OUTCOMES)
 #: Severity rank of each outcome — the authority composes "most restrictive
 #: wins", so the composed outcome can never rank below any partial's.
 _OUTCOME_SEVERITY = {name: rank for rank, name in enumerate(AUTHORITY_OUTCOMES)}
+#: The operator-facing verb is a pure function of the outcome on the wire.
+_OUTCOME_VERB = {
+    "PROTECTED": "allow",
+    "ACCESS_REDUCED": "allow_reduced",
+    "CHECK_REQUIRED": "require_classification",
+    "APPROVAL_REQUIRED": "require_approval",
+    "BLOCKED": "block",
+}
 
 
 @dataclass(frozen=True)
@@ -533,7 +541,9 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     composes the union), and the composed ``allowed_fields`` equal the
     winning partial's own allow set (the authority copies it verbatim, so a
     differing composed set is a grant the trace does not support). Unknown
-    members are ignored (the contract is additive-only). The returned view
+    members are ignored (the contract is additive-only). ``verb`` must be the verb of
+    ``outcome``; a ledgered decision with no trace at all is accepted only as
+    the fail-closed BLOCKED form with an empty allow set. The returned view
     holds copies —
     mutating the input afterwards does not change it.
 
@@ -552,6 +562,8 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     reason_code = _required_str(decision, "reason_code", where)
     reason_label = _required_str(decision, "reason_label", where)
     verb = _required_str(decision, "verb", where)
+    if verb != _OUTCOME_VERB[outcome]:
+        raise _decision_shape_error("'verb' does not match 'outcome'")
     boundary = _required_str(decision, "boundary", where)
     policy_digest = _optional_str(decision, "policy_digest", where)
     policy_generation: int | None = None
@@ -650,6 +662,13 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
         ):
             raise _decision_shape_error(
                 f"'allowed_fields' differs from the winning 'parts[{winner}]'"
+            )
+        # No trace at all: the authority's compose of an empty partial list is
+        # the fail-closed BLOCKED form with an empty allow set. A ledgered
+        # grant with nothing to attribute it to is a grant without a witness.
+        if winner is None and (outcome != "BLOCKED" or allowed_fields):
+            raise _decision_shape_error(
+                "'parts' empty on a ledgered decision that is not BLOCKED"
             )
     return AuthorityDecisionView(
         outcome=outcome,

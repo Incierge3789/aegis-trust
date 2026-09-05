@@ -13,7 +13,9 @@
   `reason_label`, `allowed_fields` / `withheld_fields`, `policy_generation` /
   `policy_digest`, `replayed`. `AUTHORITY_OUTCOMES` names the five-value
   outcome vocabulary.
-- Fail-closed: a malformed object throws `AegisValidationError`
+- Fail-closed for the shapes it checks (listed here and pinned one by one
+  in the shared corpus; it is not a proof of authority consistency beyond
+  them): a malformed object throws `AegisValidationError`
   (`aegis.aiNative.decisionShape`) instead of parsing into a defaulted view —
   an absent `fragment_tags` is refused, never read as "no tags released"; a
   tag (top-level or inside a partial) outside the value-free label SHAPE is

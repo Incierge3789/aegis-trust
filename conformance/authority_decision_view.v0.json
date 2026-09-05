@@ -875,6 +875,35 @@
         "policy_generation": 0
       },
       "why": "JSON -0.0 is 0 in Python and -0 in JavaScript; the Node reader normalises so both surface the identical value."
+    },
+    {
+      "id": "ledgered_blocked_with_empty_trace",
+      "decision": {
+        "outcome": "BLOCKED",
+        "verb": "block",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [],
+        "ledgered": true
+      },
+      "expect": {
+        "outcome": "BLOCKED",
+        "parts_boundaries": []
+      },
+      "why": "The only ledgered decision with no trace the authority can produce: compose of an empty partial list, BLOCKED, nothing granted."
     }
   ],
   "invalid": [
@@ -3719,6 +3748,97 @@
       "expect_error": "aegis.aiNative.decisionShape",
       "expect_detail": "'withheld_fields' present on an unledgered decision",
       "why": "The hard-fault form zeroes every composed member, withheld_fields included; the trace keeps its own."
+    },
+    {
+      "id": "ledgered_grant_without_a_trace",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow_reduced",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'parts' empty on a ledgered decision that is not BLOCKED",
+      "why": "The authority's compose of an empty partial list is the fail-closed BLOCKED form with an empty allow set; a ledgered grant with nothing to attribute it to bypassed the winner rule (second independent codex pass)."
+    },
+    {
+      "id": "verb_does_not_match_outcome",
+      "decision": {
+        "outcome": "ACCESS_REDUCED",
+        "verb": "allow",
+        "boundary": "data",
+        "reason_code": "minimum_disclosure",
+        "reason_label": "Only the fields required for this purpose were released.",
+        "allowed_fields": [
+          "name",
+          "company"
+        ],
+        "withheld_fields": [
+          "email"
+        ],
+        "decision_id": "hashchain:0000042",
+        "policy_generation": 3,
+        "policy_digest": "sha256:9f2c1d0e",
+        "receipt_event_id": "hashchain:0000043",
+        "fragment_tags": [
+          "pii:contact",
+          "sensitive:Finance"
+        ],
+        "parts": [
+          {
+            "boundary": "purpose",
+            "outcome": "PROTECTED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Purpose permits this scope.",
+            "allowed_fields": [
+              "name",
+              "company",
+              "email"
+            ],
+            "withheld_fields": [],
+            "fragment_tags": []
+          },
+          {
+            "boundary": "data",
+            "outcome": "ACCESS_REDUCED",
+            "reason_code": "minimum_disclosure",
+            "reason_label": "Contact detail withheld for this purpose.",
+            "allowed_fields": [
+              "name",
+              "company"
+            ],
+            "withheld_fields": [
+              "email"
+            ],
+            "fragment_tags": [
+              "pii:contact",
+              "sensitive:Finance"
+            ]
+          }
+        ],
+        "ledgered": true
+      },
+      "expect_error": "aegis.aiNative.decisionShape",
+      "expect_detail": "'verb' does not match 'outcome'",
+      "why": "The verb is a pure function of the outcome on the wire (allow / allow_reduced / require_classification / require_approval / block); a mismatch is a fabricated attribution."
     }
   ]
 }

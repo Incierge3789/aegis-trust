@@ -258,6 +258,14 @@ const AUTHORITY_OUTCOME_SET: ReadonlySet<string> = new Set<string>(AUTHORITY_OUT
 const OUTCOME_SEVERITY: ReadonlyMap<string, number> = new Map(
   AUTHORITY_OUTCOMES.map((name, rank) => [name, rank] as const),
 );
+/** The operator-facing verb is a pure function of the outcome on the wire. */
+const OUTCOME_VERB: ReadonlyMap<string, string> = new Map([
+  ["PROTECTED", "allow"],
+  ["ACCESS_REDUCED", "allow_reduced"],
+  ["CHECK_REQUIRED", "require_classification"],
+  ["APPROVAL_REQUIRED", "require_approval"],
+  ["BLOCKED", "block"],
+]);
 
 /** One boundary's verdict inside `AuthorityDecisionView.parts` — the attribution
  *  trace (which boundary said what). Field NAMES and server-derived labels only.
@@ -468,7 +476,9 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * the union), and the composed `allowed_fields` equal the winning partial's
  * own allow set (the authority copies it verbatim, so a differing composed set
  * is a grant the trace does not support). Unknown members are ignored (the
- * contract is additive-only). The returned view is deep-frozen. A decision with `ledgered: true`
+ * contract is additive-only). `verb` must be the verb of `outcome`; a ledgered
+ * decision with no trace at all is accepted only as the fail-closed BLOCKED
+ * form with an empty allow set. The returned view is deep-frozen. A decision with `ledgered: true`
  * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
  * is only as good as the ids that make it checkable). Unknown members are
  * ignored (the contract is additive-only). The returned view holds copies — mutating the
@@ -492,6 +502,9 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   const reason_code = requiredStr(o, "reason_code", where);
   const reason_label = requiredStr(o, "reason_label", where);
   const verb = requiredStr(o, "verb", where);
+  if (verb !== OUTCOME_VERB.get(outcome)) {
+    throw decisionShapeError("'verb' does not match 'outcome'");
+  }
   const boundary = requiredStr(o, "boundary", where);
   const policy_digest = optionalStr(o, "policy_digest", where);
   let policy_generation: number | null = null;
@@ -606,6 +619,11 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
       if (!same) {
         throw decisionShapeError(`'allowed_fields' differs from the winning 'parts[${winner}]'`);
       }
+    } else if (outcome !== "BLOCKED" || allowed_fields.length > 0) {
+      // No trace at all: the authority's compose of an empty partial list is
+      // the fail-closed BLOCKED form with an empty allow set. A ledgered grant
+      // with nothing to attribute it to is a grant without a witness.
+      throw decisionShapeError("'parts' empty on a ledgered decision that is not BLOCKED");
     }
   }
   return Object.freeze({
