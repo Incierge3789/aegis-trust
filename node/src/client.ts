@@ -253,6 +253,11 @@ export const AUTHORITY_OUTCOMES: ReadonlyArray<CoreBoundaryOutcome> = Object.fre
   "BLOCKED",
 ] as const);
 const AUTHORITY_OUTCOME_SET: ReadonlySet<string> = new Set<string>(AUTHORITY_OUTCOMES);
+/** Severity rank of each outcome — the authority composes "most restrictive
+ *  wins", so the composed outcome can never rank below any partial's. */
+const OUTCOME_SEVERITY: ReadonlyMap<string, number> = new Map(
+  AUTHORITY_OUTCOMES.map((name, rank) => [name, rank] as const),
+);
 
 /** One boundary's verdict inside `AuthorityDecisionView.parts` — the attribution
  *  trace (which boundary said what). Field NAMES and server-derived labels only.
@@ -454,8 +459,12 @@ function parsePart(raw: unknown, index: number): BoundaryPartialView {
  * as the diagnostic of what was refused, tags and all — a partial's
  * `allowed_fields` / `fragment_tags` describe what that boundary computed, they
  * are never a grant); an executable outcome or a chain pointer on an unledgered
- * decision is refused. Unknown members are ignored (the contract is
- * additive-only). The returned view is deep-frozen. A decision with `ledgered: true`
+ * decision is refused. A ledgered decision is also checked against its own
+ * trace: the composed `outcome` is at least as restrictive as every partial's
+ * (the authority composes most-restrictive-wins) and the composed
+ * `fragment_tags` contain every tag a partial carries (the authority composes
+ * the union). Unknown members are ignored (the contract is additive-only).
+ * The returned view is deep-frozen. A decision with `ledgered: true`
  * must carry non-blank `decision_id` / `receipt_event_id` (the witness claim
  * is only as good as the ids that make it checkable). Unknown members are
  * ignored (the contract is additive-only). The returned view holds copies — mutating the
@@ -544,6 +553,26 @@ export function parseAuthorityDecision(decision: unknown): AuthorityDecisionView
   // legitimate ledger-outage response (cross-review round 4, codex, from the
   // authority's hard-fault constructor).
   const parts = Object.freeze(partsOut);
+  if (ledgered) {
+    // The composed decision is derived from its parts: the outcome is the most
+    // restrictive partial ("first-max", later gate steps may only raise it)
+    // and the composed tags are the union of the partials' tags. A ledgered
+    // decision whose top level is LESS restrictive than one of its parts, or
+    // that drops a tag a part released, is contradictory — a caller gating on
+    // the top level would fail open.
+    const composedRank = OUTCOME_SEVERITY.get(outcome) ?? -1;
+    const composedTags = new Set(fragment_tags);
+    for (let i = 0; i < parts.length; i++) {
+      if ((OUTCOME_SEVERITY.get(parts[i].outcome) ?? -1) > composedRank) {
+        throw decisionShapeError(`'outcome' less restrictive than 'parts[${i}]' 'outcome'`);
+      }
+      for (const t of parts[i].fragment_tags) {
+        if (!composedTags.has(t)) {
+          throw decisionShapeError(`'fragment_tags' missing tags carried by 'parts[${i}]'`);
+        }
+      }
+    }
+  }
   return Object.freeze({
     outcome,
     ledgered,

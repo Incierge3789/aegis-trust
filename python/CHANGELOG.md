@@ -27,7 +27,10 @@
   the trace `parts` is preserved verbatim as the diagnostic of what was
   refused — a partial's `allowed_fields` / `fragment_tags` are what that
   boundary computed, never a grant; blank = nothing but ASCII whitespace, the
-  same rule in both SDKs); `policy_generation` must be
+  same rule in both SDKs); a ledgered decision is also checked against its
+  own trace (the composed `outcome` is at least as restrictive as every
+  partial's and the composed `fragment_tags` contain every tag a partial
+  carries, which is how the authority composes them); `policy_generation` must be
   a non-negative integer no larger than 2**53 - 1 so both SDKs carry it
   exactly (a whole-number float such as `3.0` is the same JSON value as
   `3` and reads as 3 in both). The view is immutable (frozen dataclass,

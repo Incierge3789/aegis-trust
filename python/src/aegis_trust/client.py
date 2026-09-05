@@ -312,6 +312,9 @@ AUTHORITY_OUTCOMES: tuple[str, ...] = (
 # Validation reads this private copy, so rebinding the public name cannot widen
 # the vocabulary (parity with the Node reader's private frozen set).
 _AUTHORITY_OUTCOME_SET = frozenset(AUTHORITY_OUTCOMES)
+#: Severity rank of each outcome — the authority composes "most restrictive
+#: wins", so the composed outcome can never rank below any partial's.
+_OUTCOME_SEVERITY = {name: rank for rank, name in enumerate(AUTHORITY_OUTCOMES)}
 
 
 @dataclass(frozen=True)
@@ -522,7 +525,12 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     partial's ``allowed_fields`` / ``fragment_tags`` describe what that
     boundary computed, they are never a grant);
     an executable outcome or a chain pointer on an unledgered decision is
-    refused. Unknown members are ignored (the contract is additive-only). The returned view holds copies —
+    refused. A ledgered decision is also checked against its own trace: the
+    composed ``outcome`` is at least as restrictive as every partial's (the
+    authority composes most-restrictive-wins) and the composed
+    ``fragment_tags`` contain every tag a partial carries (the authority
+    composes the union). Unknown members are ignored (the contract is
+    additive-only). The returned view holds copies —
     mutating the input afterwards does not change it.
 
     Pass the ``decision`` MEMBER (``body["decision"]``), not the whole
@@ -602,6 +610,24 @@ def parse_authority_decision(decision: Any) -> AuthorityDecisionView:
     # legitimate ledger-outage response (cross-review round 4, codex, from
     # the authority's hard-fault constructor).
     parts = tuple(_parse_part(p, i) for i, p in enumerate(parts_raw))
+    if ledgered:
+        # The composed decision is derived from its parts: the outcome is the
+        # most restrictive partial ("first-max", later gate steps may only
+        # raise it) and the composed tags are the union of the partials' tags.
+        # A ledgered decision whose top level is LESS restrictive than one of
+        # its parts, or that drops a tag a part released, is contradictory —
+        # a caller gating on the top level would fail open.
+        composed_rank = _OUTCOME_SEVERITY[outcome]
+        composed_tags = set(fragment_tags)
+        for i, part in enumerate(parts):
+            if _OUTCOME_SEVERITY[part.outcome] > composed_rank:
+                raise _decision_shape_error(
+                    f"'outcome' less restrictive than 'parts[{i}]' 'outcome'"
+                )
+            if not composed_tags.issuperset(part.fragment_tags):
+                raise _decision_shape_error(
+                    f"'fragment_tags' missing tags carried by 'parts[{i}]'"
+                )
     return AuthorityDecisionView(
         outcome=outcome,
         ledgered=ledgered,
